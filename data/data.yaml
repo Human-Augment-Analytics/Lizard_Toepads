@@ -1,0 +1,6 @@
+path: /home/hice1/dherbig3/lizard-toepads/dataset_new 
+train: images/train
+val: images/val
+
+nc: 3
+names: ["finger", "toe", "ruler"]
