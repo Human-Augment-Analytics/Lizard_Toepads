@@ -132,6 +132,7 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
     """Process an image with both finger and toe TPS files."""
     os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'visualizations'), exist_ok=True)
     
     if not os.path.exists(finger_tps_path):
         raise FileNotFoundError(f"Finger TPS file not found: {finger_tps_path}")
@@ -211,10 +212,9 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
         output_path = os.path.join(output_dir, 'images', os.path.basename(jpg_path))
         img_gray.save(output_path)  # Save grayscale for YOLO
 
-        # Optionally save visualization with bounding boxes
-        if add_points or True:  # Always save visualization for checking
-            vis_path = os.path.join(output_dir, f'marked_{os.path.basename(jpg_path)}')
-            img_copy.save(vis_path)
+        # Always save visualization with bounding boxes for verification
+        vis_path = os.path.join(output_dir, 'visualizations', f'marked_{os.path.basename(jpg_path)}')
+        img_copy.save(vis_path)
 
         # Write classes.txt
         write_classes_txt(output_dir)
