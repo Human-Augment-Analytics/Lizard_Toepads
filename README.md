@@ -50,7 +50,7 @@ This will generate:
 - `data/processed/images/`: Processed images ready for YOLO training
 - `data/processed/labels/`: YOLO format label files (.txt)
 - `data/processed/labels/classes.txt`: Class definitions (Finger, Toe, Ruler)
-- `data/processed/marked_*.jpg`: Visualization images with bounding boxes (for verification)
+- `data/processed/visualizations/marked_*.jpg`: Visualization images with bounding boxes (for verification)
 
 ### Step-by-Step Instructions
 
@@ -186,17 +186,20 @@ PIL.Image.DecompressionBombError: Image size (199042800 pixels) exceeds limit of
 ### Directory Structure
 ```
 project/
+├── data/
+│   └── processed/
+│       ├── images/         # YOLO-ready images
+│       ├── labels/         # YOLO format annotations
+│       └── visualizations/ # Verification images with bounding boxes
 ├── dataset/
-│   └── images/
-│       └── train/
-│       └── val/
+│   ├── images/
+│   │   ├── train/
+│   │   └── val/
 │   └── labels/
-│       └── train/
+│       ├── train/
 │       └── val/
-├── config/
-│   └── [configuration files]
-└── data/
-    └── [data files]
+└── runs/
+    └── detect/            # YOLO training outputs
 ```
 
 ### Using shared data on PACE (optional)
