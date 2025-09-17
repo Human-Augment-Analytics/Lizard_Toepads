@@ -1,8 +1,9 @@
 # PACE Documentation Contribution Template
 
 ## Document Metadata
-* **Author**: Dylan Herbig,Junling
-* **Date Created**: [2025-07-18]
+* **Authors**: Dylan Herbig, Junling Zhuang
+* **Date Created**: 2025-07-18
+* **Last Updated**: 2025-09-16 By Junling Zhuang
 * **Applicable Clusters**: Only utilized on ICE, but also applicable for Phoenix and Hive
 
 ## YOLO Model Setup
@@ -32,7 +33,7 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
 Before training YOLO, you need to convert TPS landmark files into YOLO format bounding boxes:
 
 ```bash
-python process_tps_files.py \
+python scripts/preprocessing/process_tps_files.py \
   --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
   --tps-dir /storage/ice-shared/cs8903onl/tps_files \
   --output-dir data/processed \
@@ -75,7 +76,7 @@ This will generate:
 3. Run scripts without activating venv:
    ```bash
    # Preprocess data
-   uv run python process_tps_files.py \
+   uv run python scripts/preprocessing/process_tps_files.py \
      --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
      --tps-dir /storage/ice-shared/cs8903onl/tps_files \
      --output-dir data/processed \
@@ -186,6 +187,13 @@ PIL.Image.DecompressionBombError: Image size (199042800 pixels) exceeds limit of
 ### Directory Structure
 ```
 project/
+├── scripts/
+│   ├── preprocessing/     # Data preparation scripts
+│   │   └── process_tps_files.py
+│   ├── training/          # Model training scripts
+│   │   └── train_yolo.py
+│   └── inference/         # Prediction scripts
+│       └── predict.py
 ├── data/
 │   └── processed/
 │       ├── images/         # YOLO-ready images
@@ -198,8 +206,11 @@ project/
 │   └── labels/
 │       ├── train/
 │       └── val/
-└── runs/
-    └── detect/            # YOLO training outputs
+├── runs/
+│   └── detect/            # YOLO training outputs
+├── pyproject.toml         # Python project dependencies
+├── requirements.txt       # Alternative dependency list
+└── README.md             # This documentation
 ```
 
 ### Using shared data on PACE (optional)
@@ -248,7 +259,7 @@ uv sync  # or: uv pip install -r requirements.txt
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 
 # Preprocess data
-uv run python process_tps_files.py \
+uv run python scripts/preprocessing/process_tps_files.py \
   --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
   --tps-dir /storage/ice-shared/cs8903onl/tps_files \
   --output-dir data/processed \
@@ -290,5 +301,5 @@ Predicted boxes: tensor([[x1, y1, x2, y2], ...])
 
 ### Version Information
 - Software version documented: YOLOv11 (Ultralytics 8.3.168)
-- Last tested on PACE: [2025-07-18]
+- Last tested on PACE: 2025-09-16
 - Compatible PACE environments: ICE (with Conda and Python 3.10+)
