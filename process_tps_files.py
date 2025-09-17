@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import re
 import argparse
+from tqdm import tqdm
 
 # Increase maximum image size limit
 Image.MAX_IMAGE_PIXELS = None  # Remove size limit - instead we prob want to resize image beforehand
@@ -129,7 +130,8 @@ def grayscale_image_if_needed(image):
 
 def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='output', point_size=10, add_points=False, target_size=1024):
     """Process an image with both finger and toe TPS files."""
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
     
     if not os.path.exists(finger_tps_path):
         raise FileNotFoundError(f"Finger TPS file not found: {finger_tps_path}")
@@ -205,9 +207,14 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
                 draw.ellipse([(x - point_size, y - point_size),
                               (x + point_size, y + point_size)], fill='yellow')
 
-        output_path = os.path.join(output_dir, f'marked_{os.path.basename(jpg_path)}')
-        img_copy.save(output_path)
-        print(f"Processed image saved to: {output_path}")
+        # Save processed image to images folder (without "marked_" prefix for YOLO training)
+        output_path = os.path.join(output_dir, 'images', os.path.basename(jpg_path))
+        img_gray.save(output_path)  # Save grayscale for YOLO
+
+        # Optionally save visualization with bounding boxes
+        if add_points or True:  # Always save visualization for checking
+            vis_path = os.path.join(output_dir, f'marked_{os.path.basename(jpg_path)}')
+            img_copy.save(vis_path)
 
         # Write classes.txt
         write_classes_txt(output_dir)
@@ -222,17 +229,25 @@ def batch_process_directory(image_dir, tps_dir, output_dir='output', point_size=
 
     jpg_files = [f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')]
 
+    # Count valid files first
+    valid_files = []
     for jpg_file in jpg_files:
+        base_name = os.path.splitext(jpg_file)[0]
+        finger_tps = os.path.join(tps_dir, f"{base_name}_finger.TPS")
+        toe_tps = os.path.join(tps_dir, f"{base_name}_toe.TPS")
+        if os.path.exists(finger_tps) and os.path.exists(toe_tps):
+            valid_files.append(jpg_file)
+
+    print(f"Found {len(valid_files)} images with matching TPS files out of {len(jpg_files)} total images")
+
+    # Process with progress bar
+    for jpg_file in tqdm(valid_files, desc="Processing images", unit="image"):
         base_name = os.path.splitext(jpg_file)[0]
         finger_tps = os.path.join(tps_dir, f"{base_name}_finger.TPS")
         toe_tps = os.path.join(tps_dir, f"{base_name}_toe.TPS")
         jpg_path = os.path.join(image_dir, jpg_file)
 
-        if os.path.exists(finger_tps) and os.path.exists(toe_tps):
-            print(f"Processing: {jpg_file}")
-            process_single_image(finger_tps, toe_tps, jpg_path, output_dir, point_size, add_points, target_size)
-        else:
-            print(f"Skipping {jpg_file} — missing TPS files.")
+        process_single_image(finger_tps, toe_tps, jpg_path, output_dir, point_size, add_points, target_size)
 
 
 if __name__ == "__main__":
