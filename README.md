@@ -27,7 +27,65 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
   - A labeled dataset (images + YOLO-style .txt annotations)
   - Conda environment setup 
 
+### Data Preprocessing
+
+Before training YOLO, you need to convert TPS landmark files into YOLO format bounding boxes:
+
+```bash
+python process_tps_files.py \
+  --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
+  --tps-dir /storage/ice-shared/cs8903onl/tps_files \
+  --output-dir data/processed \
+  --target-size 640
+```
+
+Parameters:
+- `--image-dir`: Directory containing JPG images
+- `--tps-dir`: Directory containing TPS files (expects `*_finger.TPS` and `*_toe.TPS` pairs)
+- `--output-dir`: Output directory for processed images and labels
+- `--target-size`: Resize images to this size (default: 1024, use 640 for YOLO training)
+- `--add-points`: (Optional) Add landmark visualization points to output images
+
+This will generate:
+- `data/processed/images/`: Processed images ready for YOLO training
+- `data/processed/labels/`: YOLO format label files (.txt)
+- `data/processed/labels/classes.txt`: Class definitions (Finger, Toe, Ruler)
+- `data/processed/marked_*.jpg`: Visualization images with bounding boxes (for verification)
+
 ### Step-by-Step Instructions
+
+#### Option A: Using uv (Recommended - Fast and Modern)
+
+1. Install uv package manager:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   export PATH="$HOME/.local/bin:$PATH"  # Add uv to PATH
+   # Optional: Add to ~/.bashrc for permanent PATH update
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+   ```
+
+2. Install dependencies (uv will automatically create venv):
+   ```bash
+   cd ~/Lizard_Toepads
+   uv sync  # Install all dependencies from pyproject.toml
+   # or
+   uv pip install -r requirements.txt  # Install from requirements.txt
+   ```
+
+3. Run scripts without activating venv:
+   ```bash
+   # Preprocess data
+   uv run python process_tps_files.py \
+     --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
+     --tps-dir /storage/ice-shared/cs8903onl/tps_files \
+     --output-dir data/processed \
+     --target-size 640
+
+   # Train YOLO
+   uv run yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+   ```
+
+#### Option B: Using Conda (Traditional)
 
 1. Enable `conda` to be able to create and manage language-agnostic virtual environments
    ```bash
@@ -47,12 +105,14 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
 
 3. Install required packages:
    ```bash
-   pip install ultralytics pillow
+   pip install ultralytics pillow numpy tqdm
    ```
 
-4. At this point, your images and `.txt` files should be split and arranged into `train` and `val` folder under `dataset/images/` and `dataset/labels/`
+4. Preprocess your TPS landmark data (see Data Preprocessing section above)
 
-5. Train the YOLO model
+5. Split the processed data from `data/processed/` into train/val sets under `dataset/images/` and `dataset/labels/`
+
+6. Train the YOLO model
 
    ```bash
    yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
@@ -67,7 +127,7 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
 
    **Output**: Once successfully trained, your model should be saved under a `runs/detect/model_name` directory
 
-6. After you have successfully trained your model, you can now run inferencing on a new image. You can either create a custom inferencing function from a Python file or from the terminal
+7. After you have successfully trained your model, you can now run inferencing on a new image. You can either create a custom inferencing function from a Python file or from the terminal
    ```bash
    yolo task=detect mode=predict model=runs/detect/tps_yolo_exp4/weights/best.pt source=data/miami_fall_24_jpgs/1001.jpg imgsz=640 save=True
    ```
@@ -139,6 +199,30 @@ project/
     └── [data files]
 ```
 
+### Using shared data on PACE (optional)
+- If you want to quickly experiment with the data and YOLO model on PACE, first follow this README to set up your environment on PACE, then bring the shared data into your project.
+- Shared directories on ICE:
+  - `/storage/ice-shared/cs8903onl/miami_fall_24_jpgs/`
+  - `/storage/ice-shared/cs8903onl/tps_files/`
+
+Option A — create symlinks (recommended to save quota):
+```bash
+mkdir -p ~/Lizard_Toepads/data
+ln -s /storage/ice-shared/cs8903onl/miami_fall_24_jpgs ~/Lizard_Toepads/data/miami_fall_24_jpgs
+ln -s /storage/ice-shared/cs8903onl/tps_files ~/Lizard_Toepads/data/tps_files
+```
+
+Option B — copy the data (uses your home/project quota):
+```bash
+mkdir -p ~/Lizard_Toepads/data
+cp -r /storage/ice-shared/cs8903onl/miami_fall_24_jpgs ~/Lizard_Toepads/data/
+cp -r /storage/ice-shared/cs8903onl/tps_files ~/Lizard_Toepads/data/
+```
+
+Notes:
+- The inference example below can then use paths like `data/miami_fall_24_jpgs/1001.jpg`.
+- If you organize a YOLO dataset split later, point your `data.yaml` to those `dataset/images` and `dataset/labels` folders accordingly.
+
 ### Additional Resources
 - Internal PACE Documentation for accessing additional computational resources:
   - https://gatech.service-now.com/home?id=kb_article_view&sysparm_article=KB0042096
@@ -146,14 +230,43 @@ project/
   - YOLO: https://www.ultralytics.com/yolo
 
 ### Complete Working Example
+
+#### Using uv (Recommended):
 ```bash
-# Allocate computational resources for training your model
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+# Install dependencies
+cd ~/Lizard_Toepads
+uv sync  # or: uv pip install -r requirements.txt
+
+# Allocate computational resources for training
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
+
+# Preprocess data
+uv run python process_tps_files.py \
+  --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
+  --tps-dir /storage/ice-shared/cs8903onl/tps_files \
+  --output-dir data/processed \
+  --target-size 640
+
+# Train model
+uv run yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+
+# Run inference
+uv run yolo task=detect mode=predict model=runs/detect/train/weights/best.pt source=data/miami_fall_24_jpgs/1001.jpg
+```
+
+#### Using Conda:
+```bash
+# Allocate computational resources
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 
 # Activate conda environment
 conda activate yolo11-env
 
-# Assumming all dependencies have been installed via pip, train your model
+# Train model
 yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
 
 # Run inference
