@@ -243,6 +243,10 @@ Notes:
 - External Resources:
   - YOLO: https://www.ultralytics.com/yolo
 
+### Project Docs
+- Improvement plan for small-object detection (YOLOv11): see `docs/YOLOv11_Improvement_Plan.md`
+- Benchmarking strategy and ablation templates: see `docs/Benchmarking_Strategy.md`
+
 ### Complete Working Example
 
 #### Using uv (Recommended):
