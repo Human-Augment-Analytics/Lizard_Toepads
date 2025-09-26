@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 import yaml
+import tempfile
+import os
 from ultralytics import YOLO
 
 
@@ -27,6 +29,18 @@ def get_opt(cfg: dict, key: str, default=None, section: str = "train"):
     return default
 
 
+def create_temp_data_yaml(data_dict):
+    """Create a temporary YAML file from dataset dictionary"""
+    temp_dir = Path("data")
+    temp_dir.mkdir(exist_ok=True)
+    temp_file = temp_dir / "temp_data.yaml"
+
+    with open(temp_file, "w") as f:
+        yaml.dump(data_dict, f, default_flow_style=False)
+
+    return str(temp_file)
+
+
 def main() -> None:
     args = parse_args()
     cfg = {}
@@ -48,7 +62,14 @@ def main() -> None:
                 data_from_dataset[k] = dataset_cfg[k]
 
     # Merge precedence for data: CLI --data > train.data in config > dataset section dict > default
-    data = args.data or get_opt(cfg, "data", None) or data_from_dataset or "data/data.yaml"
+    data_raw = args.data or get_opt(cfg, "data", None) or data_from_dataset or "data/data.yaml"
+
+    # Handle dict data by creating temporary YAML file
+    if isinstance(data_raw, dict):
+        print(f"Creating temporary data.yaml from config...")
+        data = create_temp_data_yaml(data_raw)
+    else:
+        data = data_raw
     model_path = args.model or get_opt(cfg, "model", "yolov11n.pt")
     epochs = args.epochs or get_opt(cfg, "epochs", 100)
     batch = args.batch or get_opt(cfg, "batch", 32)
