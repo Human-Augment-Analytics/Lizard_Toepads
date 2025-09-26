@@ -1,0 +1,47 @@
+# Unified project config for preprocessing, dataset split and YOLO training
+
+preprocessing:
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  output-dir: data/processed
+  target-size: 1024
+  point-size: 10
+  add-points: true
+  num-workers: 4
+
+split:
+  images-dir: data/processed/images
+  labels-dir: data/processed/labels
+  output-dir: data/dataset
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg,.jpeg,.png
+
+train:
+  # dataset yaml or file lists
+  data: data/data.yaml
+  # model weights or cfg
+  model: yolov11n.pt
+  epochs: 100
+  batch: 32
+  imgsz: 1024
+  workers: 8
+  patience: 20
+  name: tps_yolo_exp
+  device: 0         # or "0,1" for multi-GPU
+  amp: true
+  cache: true
+  save_period: 10
+
+dataset:
+  # Option 1: path + relative subpaths
+  path: /home/hice1/jzhuang48/Lizard_Toepads/data/dataset
+  train: images/train
+  val: images/val
+  # Optional test split
+  # test: images/test
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+
