@@ -8,7 +8,7 @@ from ultralytics import YOLO
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Config-driven YOLO training")
-    parser.add_argument("--config", default="configs/project.yaml", help="Path to project YAML with train.* section (default: configs/project.yaml)")
+    parser.add_argument("--config", default="configs/H1.yaml", help="Path to project YAML with train.* section (default: configs/H1.yaml)")
     # Allow overriding some common options via CLI
     parser.add_argument("--data")
     parser.add_argument("--model")

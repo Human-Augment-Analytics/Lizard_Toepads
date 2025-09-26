@@ -229,7 +229,7 @@ def process_single_image_wrapper(args):
     return process_single_image(*args)
 
 
-def batch_process_directory(image_dir, tps_dir, output_dir='output', point_size=10, add_points=False, target_size=1024, num_workers=None):
+def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', point_size=10, add_points=False, target_size=1024, num_workers=None):
     """
     Process all images in image_dir with corresponding TPS files in tps_dir.
     Matches by base filename (e.g., 001.jpg ↔ 001_finger.tps & 001_toe.tps)
@@ -279,17 +279,17 @@ def batch_process_directory(image_dir, tps_dir, output_dir='output', point_size=
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
 
-    parser.add_argument('--config', default='configs/project.yaml', help='Path to YAML config file (default: configs/project.yaml). CLI flags override config.')
+    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
 
     # Batch mode
     parser.add_argument('--image-dir', help='Directory containing JPG images')
     parser.add_argument('--tps-dir', help='Directory containing TPS files')
 
     # Shared
-    parser.add_argument('--output-dir', default='output', help='Output directory (default: output)')
-    parser.add_argument('--point-size', type=int, default=10, help='Size of landmark points (default: 10)')
+    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--point-size', type=int, help='Size of landmark points')
     parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
-    parser.add_argument('--target-size', type=int, default=1024, help='Target size for resizing images (default: 1024)')
+    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
     parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
 
     return parser.parse_args()
@@ -322,11 +322,14 @@ if __name__ == "__main__":
 
     image_dir = get_opt('image-dir', None)
     tps_dir = get_opt('tps-dir', None)
-    output_dir = get_opt('output-dir', 'output')
+    output_dir = get_opt('output-dir', 'data/processed')
     point_size = int(get_opt('point-size', 10))
     add_points = bool(get_opt('add-points', False))
     target_size = int(get_opt('target-size', 1024))
     num_workers = args.num_workers or get_opt('num-workers', None)
+
+    print(f"Using output_dir: {output_dir}")
+    print(f"Using target_size: {target_size}")
     if num_workers is not None:
         num_workers = int(num_workers)
 

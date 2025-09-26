@@ -4,10 +4,10 @@ preprocessing:
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
   tps-dir: /storage/ice-shared/cs8903onl/tps_files
   output-dir: data/processed
-  target-size: 1024
+  target-size: 1280
   point-size: 10
   add-points: true
-  num-workers: 4
+  num-workers: 8
 
 split:
   images-dir: data/processed/images
@@ -25,10 +25,10 @@ train:
   model: yolov11n.pt
   epochs: 100
   batch: 32
-  imgsz: 1024
+  imgsz: 1280
   workers: 2
   patience: 20
-  name: tps_yolo_exp
+  name: H1
   device: 0         # or "0,1" for multi-GPU
   amp: true
   cache: false

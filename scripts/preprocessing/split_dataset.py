@@ -115,31 +115,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="configs/project.yaml",
+        default="configs/H1.yaml",
         help="Path to YAML config file (default: configs/project.yaml). CLI flags override config.",
     )
     parser.add_argument(
         "--images-dir",
-        default="data/processed/images",
         help="Directory containing processed images",
     )
     parser.add_argument(
         "--labels-dir",
-        default="data/processed/labels",
         help="Directory containing YOLO label .txt files",
     )
     parser.add_argument(
         "--output-dir",
-        default="data/dataset",
         help="Output dataset root (creates images/{train,val} and labels/{train,val})",
     )
     parser.add_argument(
         "--train-ratio",
         type=float,
-        default=0.8,
         help="Proportion of data used for training (0–1)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for split")
+    parser.add_argument("--seed", type=int, help="Random seed for split")
     parser.add_argument(
         "--copy",
         action="store_true",
@@ -147,7 +143,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--exts",
-        default=".jpg,.jpeg,.png",
         help="Comma-separated list of allowed image extensions",
     )
     return parser.parse_args()
