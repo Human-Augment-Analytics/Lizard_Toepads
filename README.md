@@ -91,9 +91,15 @@ This will generate:
    ```bash
    cd ~/Lizard_Toepads
    uv sync  # Install all dependencies from pyproject.toml
-   # or
-   uv pip install -r requirements.txt  # Install from requirements.txt
+
+   # Install PyTorch with CUDA (rerun after every uv sync)
+   uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+   # For CPU-only setups:
+   uv pip install --python .venv torch torchvision torchaudio
    ```
+
+   **Note**: PyTorch is not included in pyproject.toml to avoid CPU/GPU version conflicts. After each `uv sync`, rerun `uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124` to restore the CUDA build. On newer uv releases, `uv run` re-syncs the environment before executing; that will replace the CUDA wheels with the CPU build. When you need GPU support, either add `--no-sync` to `uv run ...` (or set `UV_NO_SYNC=1`) or call the interpreter directly via `.venv\Scripts\python` so the CUDA wheels stay in place.
 
 3. Run the complete workflow:
    ```bash
@@ -103,9 +109,71 @@ This will generate:
    # Split dataset
    uv run python scripts/preprocessing/split_dataset.py
 
-   # Train YOLO
+   # Train YOLO (will auto-download YOLOv11n if needed)
    uv run python scripts/training/train_yolo.py
    ```
+
+   **Note**: Pre-trained models are stored in `models/base_models/`. The training script automatically downloads YOLOv11n on first run if not present.
+
+### Model Selection Guide
+
+#### Available YOLOv11 Models
+
+| Model | Size | Speed | mAP | GPU Memory | Use Case |
+|-------|------|-------|-----|------------|----------|
+| yolov11n | 5.4MB | Fastest | Lower | 2-4GB | Quick experiments, small datasets |
+| yolov11s | ~18MB | Fast | Good | 4-6GB | **Recommended balance** |
+| yolov11m | ~40MB | Medium | Better | 6-10GB | Larger datasets |
+| yolov11l | ~50MB | Slow | High | 10GB+ | High accuracy needs |
+| yolov11x | ~110MB | Slowest | Highest | 12GB+ | Maximum accuracy |
+
+#### Model Download
+
+##### Download All Models at Once (Recommended)
+
+```bash
+# Download all YOLOv11 models (n, s, m, l, x)
+uv run python scripts/download_models.py
+
+# Or with standard Python
+python scripts/download_models.py
+```
+
+This will download all 5 models (~220MB total) to `models/base_models/` and skip any that already exist.
+
+##### Manual Download for Individual Models
+
+```bash
+# Download YOLOv11n (nano - recommended for start)
+curl -L -o models/base_models/yolov11n.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
+
+# Download YOLOv11s (small - best balance)
+curl -L -o models/base_models/yolov11s.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"
+
+# Download YOLOv11m (medium)
+curl -L -o models/base_models/yolov11m.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt"
+
+# Download YOLOv11l (large)
+curl -L -o models/base_models/yolov11l.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt"
+
+# Download YOLOv11x (extra large)
+curl -L -o models/base_models/yolov11x.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt"
+```
+
+#### Switching Models
+
+To use a different model, update `configs/H1.yaml`:
+
+```yaml
+train:
+  model: models/base_models/yolov11s.pt  # Change from yolov11n.pt
+```
+
+Or specify via command line:
+
+```bash
+uv run python scripts/training/train_yolo.py --model models/base_models/yolov11s.pt
+```
 
 #### Option B: Using Conda (Traditional)
 
@@ -217,6 +285,9 @@ project/
 │   │   └── train_yolo.py
 │   └── inference/         # Prediction scripts
 │       └── predict.py
+├── models/
+│   └── base_models/       # Pre-trained YOLO models (auto-downloaded)
+│       └── yolov11n.pt    # Will be downloaded on first use
 ├── data/
 │   ├── processed/
 │   │   ├── images/         # YOLO-ready images
@@ -372,3 +443,8 @@ Predicted boxes: tensor([[x1, y1, x2, y2], ...])
 - Software version documented: YOLOv11 (Ultralytics 8.3.168)
 - Last tested on PACE: 2025-09-16
 - Compatible PACE environments: ICE (with Conda and Python 3.10+)
+
+
+
+
+
