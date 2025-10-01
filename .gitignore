@@ -39,3 +39,6 @@ Thumbs.db
 runs/
 results/
 .claude/
+
+# Local scripts
+scripts/clean_miami_images.py
