@@ -43,3 +43,11 @@ dataset:
   # test: images/test
   nc: 3
   names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.25      # Confidence threshold (0-1)
+  iou: 0.45       # IoU threshold for NMS (0-1)
+  imgsz: 1024     # Image size for inference
+  save: true      # Save results
+  save_txt: false # Save results as txt files
+  project: results  # Results save directory

@@ -14,11 +14,13 @@ def parse_args():
     parser.add_argument('--model', help='Path to trained model weights')
     parser.add_argument('--source', help='Path to image or directory for inference')
     parser.add_argument('--quick-test', action='store_true', help='Quick test with first 50 images from processed/images')
-    parser.add_argument('--conf', type=float, default=0.25, help='Confidence threshold')
-    parser.add_argument('--iou', type=float, default=0.45, help='IoU threshold for NMS')
-    parser.add_argument('--imgsz', type=int, default=1024, help='Image size for inference')
-    parser.add_argument('--save', action='store_true', default=True, help='Save results')
-    parser.add_argument('--save-txt', action='store_true', help='Save results as txt files')
+    parser.add_argument('--conf', type=float, help='Confidence threshold (overrides config)')
+    parser.add_argument('--iou', type=float, help='IoU threshold for NMS (overrides config)')
+    parser.add_argument('--imgsz', type=int, help='Image size for inference (overrides config)')
+    parser.add_argument('--save', action='store_true', help='Save results (overrides config)')
+    parser.add_argument('--no-save', action='store_true', help='Do not save results (overrides config)')
+    parser.add_argument('--save-txt', action='store_true', help='Save results as txt files (overrides config)')
+    parser.add_argument('--project', help='Results save directory (overrides config)')
     return parser.parse_args()
 
 
@@ -155,6 +157,33 @@ def main():
         with open(args.config, 'r') as f:
             cfg = yaml.safe_load(f) or {}
 
+    # Get inference parameters from config, with defaults
+    inference_cfg = cfg.get('inference', {})
+
+    # Determine parameters with priority: command line > config > defaults
+    conf = args.conf if args.conf is not None else inference_cfg.get('conf', 0.25)
+    iou = args.iou if args.iou is not None else inference_cfg.get('iou', 0.45)
+    imgsz = args.imgsz if args.imgsz is not None else inference_cfg.get('imgsz', 1024)
+
+    # Handle save parameter with --save and --no-save flags
+    if args.no_save:
+        save = False
+    elif args.save:
+        save = True
+    else:
+        save = inference_cfg.get('save', True)
+
+    save_txt = args.save_txt if args.save_txt else inference_cfg.get('save_txt', False)
+    project = args.project if args.project else inference_cfg.get('project', 'results')
+
+    print(f"Inference parameters from {'command line/config' if args.config else 'defaults'}:")
+    print(f"  - Confidence threshold: {conf}")
+    print(f"  - IoU threshold: {iou}")
+    print(f"  - Image size: {imgsz}")
+    print(f"  - Save results: {save}")
+    print(f"  - Save txt: {save_txt}")
+    print(f"  - Project directory: {project}")
+
     # Determine model path
     if args.model:
         model_path = args.model
@@ -213,12 +242,12 @@ def main():
     run_inference(
         model_path=model_path,
         source_path=source_path,
-        conf=args.conf,
-        iou=args.iou,
-        imgsz=args.imgsz,
-        save=args.save,
-        save_txt=args.save_txt,
-        project="results",
+        conf=conf,
+        iou=iou,
+        imgsz=imgsz,
+        save=save,
+        save_txt=save_txt,
+        project=project,
         name=f"{train_name}_inference"
     )
 
