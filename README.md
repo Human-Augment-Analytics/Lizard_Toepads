@@ -26,7 +26,7 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
   - Fast local storage (e.g., SSD-backed node storage) is recommended
 - Other prerequisites:
   - A labeled dataset (images + YOLO-style .txt annotations)
-  - Conda environment setup 
+  - Conda environment setup
 
 ### Configuration
 
@@ -354,7 +354,6 @@ Unified config for split and train:
 uv run python scripts/preprocessing/split_dataset.py
 uv run python scripts/training/train_yolo.py
 ```
-```
 
 You can now avoid a separate `data.yaml`. Put dataset info in `configs/project.yaml` under `dataset`:
 
@@ -443,8 +442,3 @@ Predicted boxes: tensor([[x1, y1, x2, y2], ...])
 - Software version documented: YOLOv11 (Ultralytics 8.3.168)
 - Last tested on PACE: 2025-09-16
 - Compatible PACE environments: ICE (with Conda and Python 3.10+)
-
-
-
-
-
