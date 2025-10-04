@@ -26,26 +26,48 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
   - Fast local storage (e.g., SSD-backed node storage) is recommended
 - Other prerequisites:
   - A labeled dataset (images + YOLO-style .txt annotations)
-  - Conda environment setup 
+  - Conda environment setup
+
+### Configuration
+
+All scripts use the unified configuration file `configs/project.yaml`. You can customize preprocessing, dataset splitting, and training parameters in one place:
+
+```yaml
+preprocessing:
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  output-dir: data/processed
+  target-size: 1024
+  point-size: 10
+  add-points: false
+
+split:
+  images-dir: data/processed/images
+  labels-dir: data/processed/labels
+  output-dir: data/dataset
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+
+train:
+  model: yolov11n.pt
+  epochs: 100
+  batch: 32
+  imgsz: 1024
+  # ... more training parameters
+```
 
 ### Data Preprocessing
 
-Before training YOLO, you need to convert TPS landmark files into YOLO format bounding boxes:
+Convert TPS landmark files into YOLO format bounding boxes:
 
 ```bash
-python scripts/preprocessing/process_tps_files.py \
-  --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
-  --tps-dir /storage/ice-shared/cs8903onl/tps_files \
-  --output-dir data/processed \
-  --target-size 640
-```
+# Using unified config (recommended)
+uv run python scripts/preprocessing/process_tps_files.py
 
-Parameters:
-- `--image-dir`: Directory containing JPG images
-- `--tps-dir`: Directory containing TPS files (expects `*_finger.TPS` and `*_toe.TPS` pairs)
-- `--output-dir`: Output directory for processed images and labels
-- `--target-size`: Resize images to this size (default: 1024, use 640 for YOLO training)
-- `--add-points`: (Optional) Add landmark visualization points to output images
+# Override specific parameters
+uv run python scripts/preprocessing/process_tps_files.py --target-size 640 --add-points
+```
 
 This will generate:
 - `data/processed/images/`: Processed images ready for YOLO training
@@ -69,22 +91,89 @@ This will generate:
    ```bash
    cd ~/Lizard_Toepads
    uv sync  # Install all dependencies from pyproject.toml
-   # or
-   uv pip install -r requirements.txt  # Install from requirements.txt
+
+   # Install PyTorch with CUDA (rerun after every uv sync)
+   uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+   # For CPU-only setups:
+   uv pip install --python .venv torch torchvision torchaudio
    ```
 
-3. Run scripts without activating venv:
+   **Note**: PyTorch is not included in pyproject.toml to avoid CPU/GPU version conflicts. After each `uv sync`, rerun `uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124` to restore the CUDA build. On newer uv releases, `uv run` re-syncs the environment before executing; that will replace the CUDA wheels with the CPU build. When you need GPU support, either add `--no-sync` to `uv run ...` (or set `UV_NO_SYNC=1`) or call the interpreter directly via `.venv\Scripts\python` so the CUDA wheels stay in place.
+
+3. Run the complete workflow:
    ```bash
-   # Preprocess data
-   uv run python scripts/preprocessing/process_tps_files.py \
-     --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
-     --tps-dir /storage/ice-shared/cs8903onl/tps_files \
-     --output-dir data/processed \
-     --target-size 640
+   # Preprocess data (using unified config)
+   uv run python scripts/preprocessing/process_tps_files.py
 
-   # Train YOLO
-   uv run yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+   # Split dataset
+   uv run python scripts/preprocessing/split_dataset.py
+
+   # Train YOLO (will auto-download YOLOv11n if needed)
+   uv run python scripts/training/train_yolo.py
    ```
+
+   **Note**: Pre-trained models are stored in `models/base_models/`. The training script automatically downloads YOLOv11n on first run if not present.
+
+### Model Selection Guide
+
+#### Available YOLOv11 Models
+
+| Model | Size | Speed | mAP | GPU Memory | Use Case |
+|-------|------|-------|-----|------------|----------|
+| yolov11n | 5.4MB | Fastest | Lower | 2-4GB | Quick experiments, small datasets |
+| yolov11s | ~18MB | Fast | Good | 4-6GB | **Recommended balance** |
+| yolov11m | ~40MB | Medium | Better | 6-10GB | Larger datasets |
+| yolov11l | ~50MB | Slow | High | 10GB+ | High accuracy needs |
+| yolov11x | ~110MB | Slowest | Highest | 12GB+ | Maximum accuracy |
+
+#### Model Download
+
+##### Download All Models at Once (Recommended)
+
+```bash
+# Download all YOLOv11 models (n, s, m, l, x)
+uv run python scripts/download_models.py
+
+# Or with standard Python
+python scripts/download_models.py
+```
+
+This will download all 5 models (~220MB total) to `models/base_models/` and skip any that already exist.
+
+##### Manual Download for Individual Models
+
+```bash
+# Download YOLOv11n (nano - recommended for start)
+curl -L -o models/base_models/yolov11n.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
+
+# Download YOLOv11s (small - best balance)
+curl -L -o models/base_models/yolov11s.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"
+
+# Download YOLOv11m (medium)
+curl -L -o models/base_models/yolov11m.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt"
+
+# Download YOLOv11l (large)
+curl -L -o models/base_models/yolov11l.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt"
+
+# Download YOLOv11x (extra large)
+curl -L -o models/base_models/yolov11x.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt"
+```
+
+#### Switching Models
+
+To use a different model, update `configs/H1.yaml`:
+
+```yaml
+train:
+  model: models/base_models/yolov11s.pt  # Change from yolov11n.pt
+```
+
+Or specify via command line:
+
+```bash
+uv run python scripts/training/train_yolo.py --model models/base_models/yolov11s.pt
+```
 
 #### Option B: Using Conda (Traditional)
 
@@ -109,14 +198,16 @@ This will generate:
    pip install ultralytics pillow numpy tqdm
    ```
 
-4. Preprocess your TPS landmark data (see Data Preprocessing section above)
-
-5. Split the processed data from `data/processed/` into train/val sets under `dataset/images/` and `dataset/labels/`
-
-6. Train the YOLO model
-
+4. Run the complete workflow using unified config:
    ```bash
-   yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+   # Preprocess data
+   python scripts/preprocessing/process_tps_files.py
+
+   # Split dataset
+   python scripts/preprocessing/split_dataset.py
+
+   # Train model
+   python scripts/training/train_yolo.py
    ```
    Parameter Descriptions
    - `task=detect`: Specifies the type of task YOLO should perform. In this case, `detect` means object detection (bounding box prediction). Other options include `segment` (segmentation), `classify` (image classification), etc.
@@ -194,11 +285,22 @@ project/
 │   │   └── train_yolo.py
 │   └── inference/         # Prediction scripts
 │       └── predict.py
+├── models/
+│   └── base_models/       # Pre-trained YOLO models (auto-downloaded)
+│       └── yolov11n.pt    # Will be downloaded on first use
 ├── data/
-│   └── processed/
-│       ├── images/         # YOLO-ready images
-│       ├── labels/         # YOLO format annotations
-│       └── visualizations/ # Verification images with bounding boxes
+│   ├── processed/
+│   │   ├── images/         # YOLO-ready images
+│   │   ├── labels/         # YOLO format annotations
+│   │   └── visualizations/ # Verification images with bounding boxes
+│   ├── dataset/
+│   │   ├── images/
+│   │   │   ├── train/
+│   │   │   └── val/
+│   │   └── labels/
+│   │       ├── train/
+│   │       └── val/
+│   └── splits/             # auto-generated file lists (train.txt/val.txt)
 ├── dataset/
 │   ├── images/
 │   │   ├── train/
@@ -235,13 +337,53 @@ cp -r /storage/ice-shared/cs8903onl/tps_files ~/Lizard_Toepads/data/
 
 Notes:
 - The inference example below can then use paths like `data/miami_fall_24_jpgs/1001.jpg`.
-- If you organize a YOLO dataset split later, point your `data.yaml` to those `dataset/images` and `dataset/labels` folders accordingly.
+- If you organize a YOLO dataset split later, point your `data.yaml` to those `data/dataset/images` and `data/dataset/labels` folders accordingly.
+
+### Create train/val split (two options)
+
+Option A — Standard folders (default symlinks, no extra storage):
+
+```bash
+uv run python scripts/preprocessing/split_dataset.py
+```
+
+Unified config for split and train:
+
+```bash
+# All scripts now use unified config by default
+uv run python scripts/preprocessing/split_dataset.py
+uv run python scripts/training/train_yolo.py
+```
+
+You can now avoid a separate `data.yaml`. Put dataset info in `configs/project.yaml` under `dataset`:
+
+```yaml
+dataset:
+  path: /home/hice1/jzhuang48/Lizard_Toepads/data/dataset
+  train: images/train
+  val: images/val
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+```
+
+Option B — File lists (no folders needed):
+
+```yaml
+train: /home/hice1/jzhuang48/Lizard_Toepads/data/splits/train.txt
+val: /home/hice1/jzhuang48/Lizard_Toepads/data/splits/val.txt
+nc: 3
+names: ["finger", "toe", "ruler"]
+```
 
 ### Additional Resources
 - Internal PACE Documentation for accessing additional computational resources:
   - https://gatech.service-now.com/home?id=kb_article_view&sysparm_article=KB0042096
 - External Resources:
   - YOLO: https://www.ultralytics.com/yolo
+
+### Project Docs
+- Improvement plan for small-object detection (YOLOv11): see `docs/YOLOv11_Improvement_Plan.md`
+- Benchmarking strategy and ablation templates: see `docs/Benchmarking_Strategy.md`
 
 ### Complete Working Example
 
@@ -258,15 +400,10 @@ uv sync  # or: uv pip install -r requirements.txt
 # Allocate computational resources for training
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 
-# Preprocess data
-uv run python scripts/preprocessing/process_tps_files.py \
-  --image-dir /storage/ice-shared/cs8903onl/miami_fall_24_jpgs \
-  --tps-dir /storage/ice-shared/cs8903onl/tps_files \
-  --output-dir data/processed \
-  --target-size 640
-
-# Train model
-uv run yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+# Complete workflow using unified config
+uv run python scripts/preprocessing/process_tps_files.py
+uv run python scripts/preprocessing/split_dataset.py
+uv run python scripts/training/train_yolo.py
 
 # Run inference
 uv run yolo task=detect mode=predict model=runs/detect/train/weights/best.pt source=data/miami_fall_24_jpgs/1001.jpg
@@ -280,11 +417,13 @@ salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 # Activate conda environment
 conda activate yolo11-env
 
-# Train model
-yolo task=detect mode=train model=yolov11n.pt data=custom_data.yaml epochs=50 imgsz=640
+# Complete workflow using unified config
+python scripts/preprocessing/process_tps_files.py
+python scripts/preprocessing/split_dataset.py
+python scripts/training/train_yolo.py
 
 # Run inference
-python yolo_predict.py
+python scripts/inference/predict.py
 ```
 
 Expected workflow and output:

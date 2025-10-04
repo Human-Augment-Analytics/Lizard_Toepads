@@ -4,6 +4,10 @@ from PIL import Image, ImageDraw, ImageFont
 import re
 import argparse
 from tqdm import tqdm
+import yaml
+from pathlib import Path
+from multiprocessing import Pool, cpu_count
+import functools
 
 # Increase maximum image size limit
 Image.MAX_IMAGE_PIXELS = None  # Remove size limit - instead we prob want to resize image beforehand
@@ -220,56 +224,124 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
         write_classes_txt(output_dir)
 
 
-def batch_process_directory(image_dir, tps_dir, output_dir='output', point_size=10, add_points=False, target_size=1024):
+def process_single_image_wrapper(args):
+    """Wrapper function for multiprocessing - unpacks arguments"""
+    return process_single_image(*args)
+
+
+def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', point_size=10, add_points=False, target_size=1024, num_workers=None):
     """
     Process all images in image_dir with corresponding TPS files in tps_dir.
     Matches by base filename (e.g., 001.jpg ↔ 001_finger.tps & 001_toe.tps)
+
+    Args:
+        num_workers: Number of parallel workers. If None, uses cpu_count()
     """
     os.makedirs(output_dir, exist_ok=True)
 
     jpg_files = [f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')]
 
-    # Count valid files first
-    valid_files = []
+    # Count valid files first and prepare arguments
+    valid_args = []
     for jpg_file in jpg_files:
-        base_name = os.path.splitext(jpg_file)[0]
-        finger_tps = os.path.join(tps_dir, f"{base_name}_finger.TPS")
-        toe_tps = os.path.join(tps_dir, f"{base_name}_toe.TPS")
-        if os.path.exists(finger_tps) and os.path.exists(toe_tps):
-            valid_files.append(jpg_file)
-
-    print(f"Found {len(valid_files)} images with matching TPS files out of {len(jpg_files)} total images")
-
-    # Process with progress bar
-    for jpg_file in tqdm(valid_files, desc="Processing images", unit="image"):
         base_name = os.path.splitext(jpg_file)[0]
         finger_tps = os.path.join(tps_dir, f"{base_name}_finger.TPS")
         toe_tps = os.path.join(tps_dir, f"{base_name}_toe.TPS")
         jpg_path = os.path.join(image_dir, jpg_file)
 
-        process_single_image(finger_tps, toe_tps, jpg_path, output_dir, point_size, add_points, target_size)
+        if os.path.exists(finger_tps) and os.path.exists(toe_tps):
+            valid_args.append((finger_tps, toe_tps, jpg_path, output_dir, point_size, add_points, target_size))
+
+    print(f"Found {len(valid_args)} images with matching TPS files out of {len(jpg_files)} total images")
+
+    if num_workers is None:
+        num_workers = min(cpu_count(), len(valid_args))
+
+    print(f"Using {num_workers} parallel workers")
+
+    # Process with multiprocessing and progress bar
+    if num_workers == 1:
+        # Single-threaded for debugging or small datasets
+        for args in tqdm(valid_args, desc="Processing images", unit="image"):
+            process_single_image_wrapper(args)
+    else:
+        # Multi-threaded processing
+        with Pool(num_workers) as pool:
+            # Use imap for progress tracking
+            list(tqdm(
+                pool.imap(process_single_image_wrapper, valid_args),
+                total=len(valid_args),
+                desc="Processing images",
+                unit="image"
+            ))
 
 
-if __name__ == "__main__":
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
-    
+
+    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
+
     # Batch mode
     parser.add_argument('--image-dir', help='Directory containing JPG images')
     parser.add_argument('--tps-dir', help='Directory containing TPS files')
 
     # Shared
-    parser.add_argument('--output-dir', default='output', help='Output directory (default: output)')
-    parser.add_argument('--point-size', type=int, default=10, help='Size of landmark points (default: 10)')
+    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--point-size', type=int, help='Size of landmark points')
     parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
-    parser.add_argument('--target-size', type=int, default=1024, help='Target size for resizing images (default: 1024)')
+    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
+    parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    # Load YAML config if provided
+    cfg = {}
+    if args.config:
+        cfg_path = Path(args.config)
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+        with open(cfg_path, 'r') as f:
+            cfg = yaml.safe_load(f) or {}
+
+    def get_opt(name: str, default):
+        # CLI has highest precedence
+        value = getattr(args, name.replace('-', '_'), None)
+        if value not in (None, ""):
+            return value
+        # then config YAML
+        # support nested under 'preprocessing' section
+        if name in cfg and cfg[name] not in (None, ""):
+            return cfg[name]
+        if isinstance(cfg.get('preprocessing'), dict) and cfg['preprocessing'].get(name) not in (None, ""):
+            return cfg['preprocessing'][name]
+        return default
+
+    image_dir = get_opt('image-dir', None)
+    tps_dir = get_opt('tps-dir', None)
+    output_dir = get_opt('output-dir', 'data/processed')
+    point_size = int(get_opt('point-size', 10))
+    add_points = bool(get_opt('add-points', False))
+    target_size = int(get_opt('target-size', 1024))
+    num_workers = args.num_workers or get_opt('num-workers', None)
+
+    print(f"Using output_dir: {output_dir}")
+    print(f"Using target_size: {target_size}")
+    if num_workers is not None:
+        num_workers = int(num_workers)
+
+    if not image_dir or not tps_dir:
+        raise ValueError("image-dir and tps-dir are required. Provide via --image-dir/--tps-dir or config file.")
 
     batch_process_directory(
-        image_dir=args.image_dir,
-        tps_dir=args.tps_dir,
-        output_dir=args.output_dir,
-        point_size=args.point_size,
-        add_points=args.add_points,
-        target_size=args.target_size
+        image_dir=image_dir,
+        tps_dir=tps_dir,
+        output_dir=output_dir,
+        point_size=point_size,
+        add_points=add_points,
+        target_size=target_size,
+        num_workers=num_workers
     )

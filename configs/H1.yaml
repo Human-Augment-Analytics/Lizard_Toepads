@@ -1,0 +1,53 @@
+# Unified project config for preprocessing, dataset split and YOLO training
+
+preprocessing:
+  image-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_jpgs
+  tps-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_tps_files
+  output-dir: data/processed
+  target-size: 1280
+  point-size: 10
+  add-points: true
+  num-workers: 8
+
+split:
+  images-dir: data/processed/images
+  labels-dir: data/processed/labels
+  output-dir: data/dataset
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg,.jpeg,.png
+
+train:
+  # dataset yaml or file lists
+  data: null # Use dataset section below instead
+  # model weights or cfg
+  model: models/base_models/yolov11n.pt
+  epochs: 100
+  batch: 32
+  imgsz: 1280
+  workers: 2
+  patience: 20
+  name: H1
+  device: 0 # Use GPU 0 (RTX 3090), set to 'cpu' if no GPU
+  amp: true
+  cache: false
+  save_period: 10
+
+dataset:
+  # Option 1: path + relative subpaths
+  path: D:\Github\Lizard_Toepads\data\dataset
+  train: images/train
+  val: images/val
+  # Optional test split
+  # test: images/test
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.25      # Confidence threshold (0-1)
+  iou: 0.45       # IoU threshold for NMS (0-1)
+  imgsz: 1024     # Image size for inference
+  save: true      # Save results
+  save_txt: false # Save results as txt files
+  project: results  # Results save directory
