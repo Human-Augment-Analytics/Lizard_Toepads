@@ -240,7 +240,7 @@ dataset:
 
 ## Experimental Results
 
-### Testing Approach 1: Confidence/IoU Threshold Adjustment
+### Testing Approach 1: Confidence/IoU(Intersection of over union) Threshold Adjustment
 
 We conducted experiments to understand the current model's detection behavior and evaluate whether simple threshold adjustments could address the bilateral detection issue.
 
