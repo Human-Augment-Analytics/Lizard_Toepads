@@ -36,3 +36,9 @@ runs/
 # OS
 .DS_Store
 Thumbs.db
+runs/
+results/
+.claude/
+
+# Local scripts
+scripts/clean_miami_images.py

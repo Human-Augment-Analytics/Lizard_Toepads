@@ -4,11 +4,12 @@ import yaml
 import tempfile
 import os
 from ultralytics import YOLO
+import urllib.request
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Config-driven YOLO training")
-    parser.add_argument("--config", default="configs/project.yaml", help="Path to project YAML with train.* section (default: configs/project.yaml)")
+    parser.add_argument("--config", default="configs/H1.yaml", help="Path to project YAML with train.* section (default: configs/H1.yaml)")
     # Allow overriding some common options via CLI
     parser.add_argument("--data")
     parser.add_argument("--model")
@@ -41,6 +42,71 @@ def create_temp_data_yaml(data_dict):
     return str(temp_file)
 
 
+def ensure_model_exists(model_path: str) -> str:
+    """Ensure model exists, download if necessary"""
+    # If it's already a full path and exists, return it
+    path = Path(model_path)
+    if path.exists():
+        return str(path)
+
+    # Check if it's a path to models/base_models/
+    if "models/base_models/" in model_path or "models\\base_models\\" in model_path:
+        # Extract just the model name
+        model_name = Path(model_path).name  # e.g., "yolov11n.pt"
+
+        # Try to find in models/base_models directory
+        base_models_dir = Path("models/base_models")
+        base_models_dir.mkdir(parents=True, exist_ok=True)
+
+        local_model_path = base_models_dir / model_name
+
+        if local_model_path.exists():
+            print(f"Found existing model: {local_model_path}")
+            return str(local_model_path)
+
+        # Download using just the model name (YOLO will auto-download)
+        print(f"Model {model_name} not found locally. Downloading...")
+
+        try:
+            # YOLO will download when initialized with just the model name
+            temp_model = YOLO(model_name)
+
+            # Find the downloaded model (usually in Ultralytics cache)
+            import shutil
+            from ultralytics.utils import SETTINGS
+
+            # Try to find the downloaded model
+            possible_paths = [
+                Path.home() / ".cache" / "ultralytics" / "assets" / model_name,
+                Path(SETTINGS.get('weights_dir', '')) / model_name if SETTINGS.get('weights_dir') else None,
+            ]
+
+            for cache_path in possible_paths:
+                if cache_path and cache_path.exists():
+                    # Copy to our local directory
+                    print(f"Copying model from {cache_path} to {local_model_path}")
+                    shutil.copy2(cache_path, local_model_path)
+                    return str(local_model_path)
+
+            # If we can't find it in cache, just use the model name
+            # YOLO will handle it
+            print(f"Model downloaded but cache location unknown. Using model name directly.")
+            return model_name
+
+        except Exception as e:
+            print(f"Warning during model setup: {e}")
+            # Just use the model name and let YOLO handle it
+            return model_name
+
+    # For simple model names, return as is (let YOLO handle download)
+    if model_path.endswith('.pt') and '/' not in model_path and '\\' not in model_path:
+        print(f"Using model: {model_path}")
+        return model_path
+
+    # For other cases, return as is
+    return model_path
+
+
 def main() -> None:
     args = parse_args()
     cfg = {}
@@ -70,7 +136,7 @@ def main() -> None:
         data = create_temp_data_yaml(data_raw)
     else:
         data = data_raw
-    model_path = args.model or get_opt(cfg, "model", "yolov11n.pt")
+    model_path = args.model or get_opt(cfg, "model", "models/base_models/yolov11n.pt")
     epochs = args.epochs or get_opt(cfg, "epochs", 100)
     batch = args.batch or get_opt(cfg, "batch", 32)
     imgsz = args.imgsz or get_opt(cfg, "imgsz", 1024)
@@ -81,6 +147,10 @@ def main() -> None:
     amp = get_opt(cfg, "amp", True)
     cache = get_opt(cfg, "cache", True)
     save_period = get_opt(cfg, "save_period", 10)
+
+    # Ensure model exists or download it
+    model_path = ensure_model_exists(model_path)
+    print(f"Using model: {model_path}")
 
     model = YOLO(model_path)
     model.train(
