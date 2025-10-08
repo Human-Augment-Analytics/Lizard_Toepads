@@ -1,0 +1,73 @@
+# PACE Pipeline Configuration
+# Extends H1.yaml for PACE ICE cluster self-learning workflow
+
+# User configuration
+user:
+  email: ""  # Your @gatech.edu email (REQUIRED - set before running)
+
+# Dropbox/rclone configuration
+dropbox:
+  remote: "dropbox-remote"  # rclone remote name (auto-configured by setup script)
+  base_path: "lizard-toepads"  # Base path in Dropbox
+  
+  # Download paths (relative to base_path)
+  inference_requests: "inference-requests"  # Where new data is uploaded
+  
+  # Upload paths (relative to base_path)
+  models_output: "models"  # Where trained models are uploaded
+
+# Self-learning download strategy
+self_learning:
+  enabled: true
+  min_instances: 1000     # Download until we have at least this many instances
+  scan_from_latest: true  # Start from most recent date and work backwards
+  max_dates: 30           # Maximum number of date folders to scan
+
+# Local data paths (relative to repository root)
+data:
+  base_dir: "data"
+  download_pattern: "{date}"  # Creates data/2024-01-15/ structure
+  images_subdir: "images"
+  labels_subdir: "labels"
+
+# SLURM resource configuration
+slurm:
+  download:
+    cpus: 4
+    memory: "4G"
+    time: "2:00:00"
+    
+  train:
+    cpus: 8
+    memory_per_gpu: "40G"
+    time: "16:00:00"
+    gpu_type: "H200"  # Options: V100, A40, A100, H100, H200, L40S
+    gpu_count: 1
+    
+  deploy:
+    cpus: 2
+    memory: "4G"
+    time: "1:00:00"
+
+# Training configuration (inherits from H1.yaml, can override here)
+training:
+  config: "configs/H1.yaml"  # Base training config to use
+  
+  # Override specific training params if needed
+  # These will take precedence over H1.yaml
+  overrides:
+    # epochs: 150
+    # batch: 16
+    # patience: 30
+    pass
+
+# Model export configuration
+export:
+  formats: ["onnx"]      # Export trained model to these formats
+  include_metrics: true  # Include training metrics in upload
+
+# Pipeline behavior
+pipeline:
+  auto_cleanup: false       # Delete local data after successful upload
+  validate_downloads: true  # Check file counts match expected
+  resume_on_failure: true   # Allow resuming failed training runs
