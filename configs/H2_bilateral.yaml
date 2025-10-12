@@ -1,0 +1,82 @@
+# H2 Bilateral Detection Configuration
+# Training-time data augmentation with vertical flip for bilateral toepad detection
+# Based on H1.yaml with added augmentation parameters
+
+preprocessing:
+  image-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_jpgs
+  tps-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_tps_files
+  output-dir: data/processed
+  target-size: 1280
+  point-size: 10
+  add-points: true
+  num-workers: 8
+
+split:
+  images-dir: data/processed/images
+  labels-dir: data/processed/labels
+  output-dir: data/dataset
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg,.jpeg,.png
+
+train:
+  # Dataset configuration
+  data: null # Use dataset section below instead
+
+  # Model configuration
+  model: models/base_models/yolov11n.pt
+
+  # Training parameters
+  epochs: 100
+  batch: 32
+  imgsz: 1280
+  workers: 2
+  patience: 20
+  name: H2_bilateral
+  device: 0 # Use GPU 0, set to 'cpu' if no GPU
+  amp: true
+  cache: false
+  save_period: 10
+
+  # ========================================
+  # Data Augmentation Parameters
+  # ========================================
+  # Key augmentation for bilateral detection
+  flipud: 0.5 # 50% probability vertical flip (helps model learn upper & lower toepads)
+  fliplr: 0.0 # Disable horizontal flip (preserves anatomical correctness)
+
+  # Conservative geometric augmentations
+  degrees: 5.0 # Slight rotation ±5 degrees
+  translate: 0.05 # Slight translation 5% of image size
+  scale: 0.2 # Slight scale variation (0.8x to 1.2x range)
+  shear: 0.0 # No shearing (keep specimens anatomically correct)
+  perspective: 0.0 # No perspective transform
+
+  # Color augmentations (YOLO defaults, good for grayscale specimens)
+  hsv_h: 0.015 # Hue variation (minimal effect on grayscale)
+  hsv_s: 0.7 # Saturation variation
+  hsv_v: 0.4 # Value/brightness variation
+
+  # Mosaic augmentation
+  mosaic: 1.0 # Keep mosaic augmentation (default, helps with multi-object detection)
+
+dataset:
+  # Dataset paths
+  path: D:\Github\Lizard_Toepads\data\dataset
+  train: images/train
+  val: images/val
+  # Optional test split
+  # test: images/test
+
+  # Class configuration
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.7 # Confidence threshold (0-1)
+  iou: 0.7 # IoU threshold for NMS (0-1)
+  imgsz: 1024 # Image size for inference
+  save: true # Save results
+  save_txt: false # Save results as txt files
+  project: results # Results save directory
