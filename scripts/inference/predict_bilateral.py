@@ -31,6 +31,9 @@ def parse_args():
                        help='Detection method: split (region-based), flip (vertical flip upper), or both')
     parser.add_argument('--overlap', type=float, default=0.1,
                        help='Overlap ratio between regions (0-0.5)')
+    
+    add_rclone_args(parser)
+    
     return parser.parse_args()
 
 
@@ -266,7 +269,7 @@ def calculate_iou(box, boxes):
 
 def run_bilateral_inference(model_path, source_path, conf, iou, imgsz,
                           method='both', overlap=0.1, save=True, save_txt=False,
-                          project='results', name='bilateral_inference'):
+                          project='results', name='bilateral_inference', uploader=None):
     """
     Run bilateral inference on images with saving functionality matching predict.py
     """
@@ -388,6 +391,10 @@ def run_bilateral_inference(model_path, source_path, conf, iou, imgsz,
         print(f"\nResults saved to: {output_dir}/")
         # Save summary JSON
         save_summary(results_summary, output_dir)
+        
+    # Upload to cloud storage if uploader is provided and enabled
+    if uploader and save:
+        uploader.upload_results(output_dir, run_name=name)
 
     return results_summary
 
@@ -494,6 +501,13 @@ def main():
     conf = args.conf if args.conf is not None else inference_cfg.get('conf', 0.25)
     iou = args.iou if args.iou is not None else inference_cfg.get('iou', 0.45)
     imgsz = args.imgsz if args.imgsz is not None else inference_cfg.get('imgsz', 1024)
+    
+    # Create uploader from args and config
+    uploader = get_uploader_from_args(args, cfg)
+    
+    if uploader.enabled:
+        print(f"  - Upload remote: {uploader.remote_name}")
+        print(f"  - Upload path: {uploader.base_path}")
 
     # Handle save parameter
     if args.no_save:
@@ -553,6 +567,7 @@ def main():
         save_txt=save_txt,
         project=project,
         name=f"{train_name}_bilateral"
+        uploader=uploader
     )
 
 
