@@ -4,6 +4,7 @@ import os
 import argparse
 import yaml
 from pathlib import Path
+from rclone_uploader import RcloneUploader, add_rclone_args, get_uploader_from_args
 import glob
 
 Image.MAX_IMAGE_PIXELS = None
@@ -21,6 +22,10 @@ def parse_args():
     parser.add_argument('--no-save', action='store_true', help='Do not save results (overrides config)')
     parser.add_argument('--save-txt', action='store_true', help='Save results as txt files (overrides config)')
     parser.add_argument('--project', help='Results save directory (overrides config)')
+    
+    # Add rclone arguments
+    add_rclone_args(parser)
+    
     return parser.parse_args()
 
 
@@ -75,7 +80,8 @@ def preprocess_for_inference(img_path, target_size=1024):
         return resized_img
 
 
-def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save=True, save_txt=False, project="results", name="inference"):
+def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save=True, 
+                 save_txt=False, project="results", name="inference", uploader=None):
     """Run inference on images"""
     print(f"Loading model: {model_path}")
     model = YOLO(model_path)
@@ -145,10 +151,15 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
                 print(f"  {j+1}. {class_name}: {confidence:.3f} confidence")
                 print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
 
+    results_dir = f"{project}/{name}"
     print(f"\n=== Summary ===")
     print(f"Total images processed: {image_count}")
     print(f"Total detections: {total_detections}")
-    print(f"Results saved to: {project}/{name}/")
+    print(f"Results saved to: {results_dir}/")
+
+    # Upload to cloud storage if uploader is provided and enabled
+    if uploader and save:
+        uploader.upload_results(results_dir, run_name=name)
 
 
 def main():
@@ -179,6 +190,9 @@ def main():
     save_txt = args.save_txt if args.save_txt else inference_cfg.get('save_txt', False)
     project = args.project if args.project else inference_cfg.get('project', 'results')
 
+    # Create uploader from args and config
+    uploader = get_uploader_from_args(args, cfg)
+
     print(f"Inference parameters from {'command line/config' if args.config else 'defaults'}:")
     print(f"  - Confidence threshold: {conf}")
     print(f"  - IoU threshold: {iou}")
@@ -186,6 +200,10 @@ def main():
     print(f"  - Save results: {save}")
     print(f"  - Save txt: {save_txt}")
     print(f"  - Project directory: {project}")
+    print(f"  - Upload enabled: {uploader.enabled}")
+    if uploader.enabled:
+        print(f"  - Upload remote: {uploader.remote_name}")
+        print(f"  - Upload path: {uploader.base_path}")
 
     # Determine model path
     if args.model:
@@ -251,7 +269,8 @@ def main():
         save=save,
         save_txt=save_txt,
         project=project,
-        name=f"{train_name}_inference"
+        name=f"{train_name}_inference",
+        uploader=uploader
     )
 
 
