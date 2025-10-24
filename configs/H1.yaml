@@ -1,13 +1,13 @@
 # Unified project config for preprocessing, dataset split and YOLO training
 
 preprocessing:
-  image-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_jpgs
-  tps-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_tps_files
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
   output-dir: data/processed
-  target-size: 1280
+  target-size: 1024
   point-size: 10
   add-points: true
-  num-workers: 8
+  num-workers: 4
 
 split:
   images-dir: data/processed/images
@@ -20,23 +20,23 @@ split:
 
 train:
   # dataset yaml or file lists
-  data: null # Use dataset section below instead
+  data: null  # Use dataset section below instead
   # model weights or cfg
-  model: models/base_models/yolov11n.pt
+  model: yolo11n.pt
   epochs: 100
   batch: 32
-  imgsz: 1280
+  imgsz: 640
   workers: 2
   patience: 20
-  name: H1
-  device: 0 # Use GPU 0 (RTX 3090), set to 'cpu' if no GPU
+  name: tps_yolo_exp
+  device: 0         # or "0,1" for multi-GPU
   amp: true
   cache: false
   save_period: 10
 
 dataset:
   # Option 1: path + relative subpaths
-  path: D:\Github\Lizard_Toepads\data\dataset
+  path: /home/hice1/aupadhyay64/Lizard_Toepads/data/dataset
   train: images/train
   val: images/val
   # Optional test split
@@ -44,10 +44,8 @@ dataset:
   nc: 3
   names: ["finger", "toe", "ruler"]
 
-inference:
-  conf: 0.25      # Confidence threshold (0-1)
-  iou: 0.45       # IoU threshold for NMS (0-1)
-  imgsz: 1024     # Image size for inference
-  save: true      # Save results
-  save_txt: false # Save results as txt files
-  project: results  # Results save directory
+#config for extraction
+extracting:
+  image-dir: /Users/ashnaupadhyay/Documents/CS8903/marked_images
+  label-dir: /Users/ashnaupadhyay/Documents/CS8903/marked_images/labels
+  output-dir: data/processed

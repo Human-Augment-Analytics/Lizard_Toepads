@@ -1,20 +1,11 @@
-"""
-ID OCR Pipeline with YOLO Landmarks + EasyOCR
----------------------------------------------
-Reads YOLO label files, extracts the ID region, and runs OCR
-(using EasyOCR) with orientation correction.
-
-Input:
-    images/ and labels/ directories
-Output:
-    text_results/ containing detected 4-digit IDs
-"""
-
 import os
 import cv2
 import easyocr
 import argparse
+
+import numpy as np
 import yaml
+import re
 from pathlib import Path
 reader = easyocr.Reader(["en"], gpu=False)
 
@@ -36,9 +27,13 @@ def get_last_landmark(txt_path):
 # -----------------------------
 # Crop Region from Image
 # -----------------------------
-def crop_from_yolo(image, x_center, y_center, box_width, box_height):
+def crop_from_yolo(image, x_center, y_center, box_width, box_height,enhance=True, target_size=(128,64)):
     """Convert YOLO coords to pixel coords and crop image with padding."""
-    h, w = image.shape[:2]
+    # Denoise and sharpen
+    denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+    sharp_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    crop = cv2.filter2D(denoised, -1, sharp_kernel)
+    h, w = crop.shape[:2]
     x_center_px = x_center * w
     y_center_px = y_center * h
     box_w_px = box_width * w
@@ -49,8 +44,8 @@ def crop_from_yolo(image, x_center, y_center, box_width, box_height):
     y_min = int(y_center_px - box_h_px / 2)
     y_max = int(y_center_px + box_h_px / 2)
 
-    padding_ratio_x = 0.0
-    padding_ratio_y = 0.0
+    padding_ratio_x = -0.01
+    padding_ratio_y = -0.01
 
     pad_x = box_w_px * padding_ratio_x
     pad_y = box_h_px * padding_ratio_y
@@ -59,33 +54,95 @@ def crop_from_yolo(image, x_center, y_center, box_width, box_height):
     y_min = max(0, int(y_min - pad_y))
     y_max = min(h, int(y_max + pad_y))
 
+    # Shrink bottom by, say, 10% of box height
+    shrink_ratio = 0.10  # 10%
+    y_max = int(y_max - box_h_px * shrink_ratio)
+
     crop = image[y_min:y_max, x_min:x_max]
+
+    # Resize while maintaining aspect ratio
+    target_w, target_h = target_size
+    cropped_h, cropped_w = crop.shape[:2]
+
+    scale_w = target_w / cropped_w
+    scale_h = target_h / cropped_h
+    scale = min(scale_w, scale_h)
+
+    new_w = int(cropped_w * scale)
+    new_h = int(cropped_h * scale)
+    resized = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    # Pad to target size
+    pad_w = target_w - new_w
+    pad_h = target_h - new_h
+    top = pad_h // 2
+    bottom = pad_h - top
+    left = pad_w // 2
+    right = pad_w - left
+
+    crop = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[1,1,1])
+
+
+    if enhance and crop.size > 0:
+        # Convert to grayscale
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+        # Increase contrast and brightness
+        alpha = 2.0  # Contrast control (1.0–3.0)
+        beta = 10  # Brightness control (0–100)
+        enhanced = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+
+        # Apply adaptive threshold to make digits stand out
+        thresh = cv2.adaptiveThreshold(enhanced, 255,
+                                       cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 11, 2)
+
+        crop = thresh
 
     return crop
 
-# -----------------------------
-# Run OCR (with Rotation Check)
-# -----------------------------
-def detect_digits(image):
-    """Run EasyOCR on both normal and rotated image, choose 4-digit result."""
-    result = reader.readtext(image, detail=0, allowlist='0123456789')
-    result = [r for r in result if r.isdigit()]  # filter digits only
+def detect_digits(image,conf_threshold=0.5):
+    # Run EasyOCR at 0° first
+    # Optional morphological enhancement
 
-    # If we already have a 4-digit result, return it
-    for r in result:
-        if len(r) == 4:
-            return r
+    results_0 = reader.readtext(image,detail=1, allowlist="0123456789")
+    best_text = ""
+    best_conf = 0
+    if results_0:
+        for (bbox, text, conf) in results_0:
+            text = re.sub(r"\D", "", text)
+            if not text:
+                continue
+            candidates = [text[i:i + 4] for i in range(len(text) - 3)] if len(text) > 4 else [text]
 
-    # Try 180-degree rotation
-    crop_rot = cv2.rotate(image, cv2.ROTATE_180)
-    result = reader.readtext(crop_rot, detail=0, allowlist='0123456789')
-    result = [r for r in result if r.isdigit()]
-    for r in result:
-        if len(r) == 4:
-            return r
+            valid_candidates = [c for c in candidates if 000 <= int(c) <= 2000]
+            for c in valid_candidates[::-1]:
+                print(c, conf)
+                if 3 <= len(c) <= 4 and conf > best_conf:
+                    best_conf = conf
+                    best_text = c
 
-    # If still no 4-digit, return the first numeric result or empty string
-    return result[0] if result else ""
+    # Only try 180° rotation if confidence is below threshold
+    if best_conf < conf_threshold:
+        rotated_img = cv2.rotate(image, cv2.ROTATE_180)
+        results_180 = reader.readtext(rotated_img, detail=1, allowlist="0123456789")
+        if results_180:
+            for (bbox, text, conf) in results_180:
+                text = re.sub(r"\D", "", text)
+                if not text:
+                    continue
+                candidates = [text[i:i + 4] for i in range(len(text) - 3)] if len(text) > 4 else [text]
+                valid_candidates = [c for c in candidates if 0 <= int(c) <= 2000]
+                for c in valid_candidates:
+                    if 3 <= len(c) <= 4 and conf > best_conf:
+                        best_conf = conf
+                        best_text = c
+                        print(f"↩️ Rotation 180° → {best_text} (conf {best_conf:.2f})")
+    else:
+        print(f"↩️ Rotation 0° → {best_text} (conf {best_conf:.2f})")
+
+    return best_text
+
 
 # -----------------------------
 # Batch Processing
