@@ -95,7 +95,7 @@ def crop_from_yolo(image, x_center, y_center, box_width, box_height,enhance=True
         # Apply adaptive threshold to make digits stand out
         thresh = cv2.adaptiveThreshold(enhanced, 255,
                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                       cv2.THRESH_BINARY, 11, 2)
+                                       cv2.THRESH_BINARY, 27, 10)
 
         crop = thresh
 
@@ -104,8 +104,22 @@ def crop_from_yolo(image, x_center, y_center, box_width, box_height,enhance=True
 def detect_digits(image,conf_threshold=0.5):
     # Run EasyOCR at 0° first
     # Optional morphological enhancement
+    cnts, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = sorted(cnts, key=lambda c: cv2.boundingRect(c)[0])  # left → right
 
-    results_0 = reader.readtext(image,detail=1, allowlist="0123456789")
+    digit_imgs = []
+    for c in cnts:
+        x, y, w, h = cv2.boundingRect(c)
+        if w * h > 80:  # skip noise
+            digit_imgs.append(image[y:y + h, x:x + w])
+
+    # results_0 = reader.readtext(image,detail=1, allowlist="0123456789")
+
+    results_0 = []
+    for d in digit_imgs:
+        result = reader.readtext(d, detail=1, allowlist='0123456789')
+        results_0.append(result[0]) if result else ""
+
     best_text = ""
     best_conf = 0
     if results_0:
