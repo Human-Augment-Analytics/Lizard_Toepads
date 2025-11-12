@@ -46,6 +46,6 @@ dataset:
 
 #config for extraction
 extracting:
-  image-dir: /Users/ashnaupadhyay/Documents/CS8903/marked_images
-  label-dir: /Users/ashnaupadhyay/Documents/CS8903/marked_images/labels
+  image-dir: /home/hice1/aupadhyay64/Lizard_Toepads/data/processed/visualizations
+  label-dir: /home/hice1/aupadhyay64/Lizard_Toepads/data/processed/labels
   output-dir: data/processed
