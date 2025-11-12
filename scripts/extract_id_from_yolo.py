@@ -1,3 +1,79 @@
+"""
+# 🧾 ID Detection Pipeline using YOLO + EasyOCR
+
+This script automates:
+- Cropping YOLO-detected regions
+- Enhancing and thresholding cropped images
+- Running EasyOCR to detect numeric IDs
+- Comparing OCR results against ground truth for accuracy
+
+---
+
+## ⚙️ Workflow Overview
+1. **Load YOLO label file** (.txt) → Extract (x_center, y_center, width, height)
+2. **Crop the target region** from the original image using those coordinates
+3. **Enhance** the cropped image (denoise, sharpen, threshold)
+4. **Detect digits** using EasyOCR
+5. **Compute accuracy** across all processed images
+
+---
+
+## 🚀 Example Usage
+```bash
+python extract_id.py --image-dir data/images --labels-dir data/labels --output-dir results
+
+
+## Pipeline Overview
+Step	Function	Description
+1️⃣	get_last_landmark()	Reads the last YOLO label line to extract class ID and bounding box coordinates (x_center, y_center, width, height).
+2️⃣	crop_from_yolo()	Converts YOLO normalized coordinates to pixel values, crops the region, sharpens it, applies denoising, brightness/contrast enhancement, and adaptive thresholding to isolate digits.
+3️⃣	detect_digits()	Segments each digit contour, performs morphological closing to fill missing strokes, applies EasyOCR per digit, concatenates results, and validates based on confidence and range.
+4️⃣	batch_process_directory()	Runs cropping and OCR detection over all image-label pairs, saves cropped IDs and recognized text outputs.
+5️⃣	calculate_accuracy()	Compares OCR output with expected IDs (from filenames) to compute detection accuracy.
+6️⃣	parse_args()	Handles CLI and YAML-based configuration management.
+
+## Preprocessing Strategy
+
+To maximize OCR readability, multiple image processing experiments were conducted:
+Attempt	Method	Result
+1. Raw Crops	Direct YOLO crop → OCR	❌ Low accuracy, faint/missing digits due to blur and low contrast.
+2. Gaussian Blur + Threshold	Blurring followed by simple binary threshold	⚠️ Reduced noise but over-smoothed digits; thin strokes disappeared.
+3. Denoising + Sharpening (final)	cv2.fastNlMeansDenoisingColored() + 3×3 sharpen kernel	✅ Clearer digit edges, better contrast, minimal halo artifacts.
+4. Adaptive Thresholding (blockSize=11, C=2)	Initial thresholding values	⚠️ Missed faint strokes, uneven background illumination.
+5. Tuned Threshold (blockSize=27, C=10)	Final configuration	✅ Optimal balance: clean digit separation, minimal background noise.
+6. Morphological Closing (3×3 kernel)	Fill broken digit gaps	✅ Significantly improved recognition of digits like 3, 5, 8.
+7. Contour-based segmentation	Extract each digit individually	✅ Prevents OCR confusion between merged digits.
+8. Per-digit OCR + Confidence filtering	Readtext per contour with EasyOCR allowlist='0123456789'	✅ Stable per-digit accuracy, handles variations in spacing and rotation.
+Rotation Handling
+
+The script first runs OCR on the original orientation (0°).
+If confidence is below threshold (default: 0.5), the image is rotated 180°, and OCR is repeated.
+The higher-confidence result is selected as the final ID.
+This approach helps when the ID appears upside-down or mirrored.
+
+## Final Enhancements
+✅ Contrast control (alpha=2.0, beta=10) — improves digit edge definition
+✅ Cropping refinement — shrinks bottom region by 10% to remove unwanted markings
+✅ Padding and resizing — ensures consistent aspect ratio and normalization for OCR
+✅ Confidence-weighted filtering — selects best numeric candidate between 000–2000 range
+✅ Per-digit segmentation — avoids merged OCR results and improves reliability
+
+Typical Output Example
+marked_1153.jpg → Detected ID: 1153
+marked_1198.jpg → Detected ID: 1198
+marked_0976.jpg → Detected ID: 976
+❌ Mismatch: marked_1015 → Detected: 105, Expected: 1015
+
+Total labeled images: 40
+Correctly detected: 35
+Accuracy: 87.5%
+
+Notebook Integration Notes
+!python extract_id_from_yolo.py --image-dir data/images --labels-dir data/labels --output-dir data/output
+
+Optionally, call calculate_accuracy(output_dir) to get performance metrics.
+"""
+
 import os
 import cv2
 import easyocr
