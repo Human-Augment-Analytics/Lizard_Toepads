@@ -19,8 +19,7 @@ This script automates:
 ---
 
 ## 🚀 Example Usage
-```bash
-python extract_id.py --image-dir data/images --labels-dir data/labels --output-dir results
+python extract_id.py --image-dir data/images --label-dir data/labels --output-dir results
 
 
 ## Pipeline Overview
