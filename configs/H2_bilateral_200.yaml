@@ -1,0 +1,50 @@
+# H2 Bilateral Detection - 200 Image Training (从头训练)
+# Uses bilateral annotations (2 fingers + 2 toes + 1 ruler per image)
+
+preprocessing:
+  source-images: data/processed/images
+  output-dir: data/hybrid_bilateral_200
+  annotation:
+    model: runs/detect/H1/weights/best.pt
+    conf: 0.3
+    verify: true
+
+split:
+  images-dir: data/hybrid_bilateral_200/images
+  labels-dir: data/hybrid_bilateral_200/labels
+  output-dir: data/dataset_bilateral_200
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg
+
+train:
+  # 从基础YOLOv11n模型开始（不用预训练权重）
+  model: models/base_models/yolov11n.pt
+
+  # Training parameters
+  epochs: 200
+  batch: 16
+  imgsz: 1280
+  workers: 2
+  patience: 30
+  name: H2_bilateral_200
+  device: 0
+  amp: true
+  cache: true
+  save_period: 10
+
+dataset:
+  path: data/dataset_bilateral_200
+  train: images/train
+  val: images/val
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.25
+  iou: 0.45
+  imgsz: 1024
+  save: true
+  save_txt: true
+  project: results
