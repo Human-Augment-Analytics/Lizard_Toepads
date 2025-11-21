@@ -1,8 +1,8 @@
 # Unified project config for preprocessing, dataset split and YOLO training
 
 preprocessing:
-  image-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_jpgs
-  tps-dir: D:\Github\Lizard_Toepads\data\archive\miami_fall_24_tps_files
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
   output-dir: data/processed
   target-size: 1280
   point-size: 10
@@ -10,8 +10,8 @@ preprocessing:
   num-workers: 8
 
 split:
-  images-dir: data/processed/images
-  labels-dir: data/processed/labels
+  images-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  labels-dir: /storage/ice-shared/cs8903onl/tps_files
   output-dir: data/dataset
   train-ratio: 0.8
   seed: 42
