@@ -51,3 +51,9 @@ inference:
   save: true      # Save results
   save_txt: false # Save results as txt files
   project: results  # Results save directory
+
+#config for id extraction
+extracting:
+  image-dir: /home/hice1/aupadhyay64/Lizard_Toepads/data/processed/visualizations
+  label-dir: /home/hice1/aupadhyay64/Lizard_Toepads/data/processed/labels
+  output-dir: data/processed
