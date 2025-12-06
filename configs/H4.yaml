@@ -5,15 +5,17 @@
 preprocessing:
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
   tps-dir: /storage/ice-shared/cs8903onl/tps_files
-  output-dir: data/final_processed_id_bilateral
+  bottom-view-processed-dir: data/processed_bottom
+  addtional-upper-side-data-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train
+  merged-processed-dir: data/processed_merged
   target-size: 1280
   point-size: 10
   add-points: true
-  num-workers: 8
+  num-workers: 2
 
 split:
-  images-dir: data/final_processed_id_bilateral/images
-  labels-dir: data/final_processed_id_bilateral/labels
+  images-dir: data/processed_merged/images
+  labels-dir: data/processed_merged/labels
   output-dir: data/dataset
   train-ratio: 0.8
   seed: 42
@@ -32,8 +34,8 @@ train:
   batch: 32
   imgsz: 1280
   workers: 2
-  patience: 50
-  name: H3
+  patience: 100
+  name: H4
   device: 0 # Use GPU 0, set to 'cpu' if no GPU
   amp: true
   cache: false
@@ -44,7 +46,7 @@ train:
   # ========================================
 
   # Conservative geometric augmentations
-  degrees: 8.0 # Slight rotation ±5 degrees
+  degrees: 10.0 # Slight rotation ±10 degrees
   translate: 0.1 # Slight translation 5% of image size
   scale: 0.3 # Slight scale variation (0.8x to 1.2x range)
   shear: 0.0 # No shearing (keep specimens anatomically correct)
@@ -60,8 +62,8 @@ train:
 
   # Advanced augmentations
   fliplr: 0.5      # Horizontal flip (50% probability)
-  mixup: 0.1       # Mixup augmentation
-  copy_paste: 0.1  # Copy-paste augmentation
+  mixup: 0.2       # Mixup augmentation
+  copy_paste: 0.3  # Copy-paste augmentation
 
   # Training strategies
   cos_lr: true     # Cosine learning rate scheduler

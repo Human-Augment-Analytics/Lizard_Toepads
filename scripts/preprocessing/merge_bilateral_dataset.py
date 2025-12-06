@@ -161,9 +161,44 @@ def merge_datasets(processed_dir, upper_dir, output_dir, viz_count=50):
     print(f"Output directory: {output_dir}")
     print(f"Visualizations saved to: {out_viz_dir}")
 
+import argparse
+import yaml
+from pathlib import Path
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Merge bilateral datasets.')
+    parser.add_argument('--config', default='configs/H4.yaml', help='Path to YAML config file')
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    processed_dir = "/home/hice1/jzhuang48/Lizard_Toepads/data/processed"
-    upper_dir = "/home/hice1/jzhuang48/Lizard_Toepads/data/upper_dataset_roboflow/train"
-    output_dir = "/home/hice1/jzhuang48/Lizard_Toepads/data/final_processed_id_bilateral"
+    args = parse_args()
+    
+    # Load config
+    cfg = {}
+    if args.config:
+        with open(args.config, 'r') as f:
+            cfg = yaml.safe_load(f) or {}
+            
+    # Get paths from config
+    preprocessing = cfg.get('preprocessing', {})
+    
+    # 1. processed_dir: The output of the previous step (process_tps_files)
+    # In H4.yaml this is 'bottom-view-processed-dir': data/processed_bottom
+    processed_dir = preprocessing.get('bottom-view-processed-dir', 'data/processed')
+    
+    # 2. upper_dir: The additional upper side dataset
+    upper_dir = preprocessing.get('addtional-upper-side-data-dir')
+    
+    # 3. output_dir: The final destination for the merged dataset
+    # In H4.yaml this is 'merged-processed-dir'
+    output_dir = preprocessing.get('merged-processed-dir', 'data/final_processed_id_bilateral')
+    
+    if not upper_dir:
+        raise ValueError("addtional-upper-side-data-dir not found in config")
+        
+    print(f"Merging datasets:")
+    print(f"  Source (Bottom): {processed_dir}")
+    print(f"  Source (Upper):  {upper_dir}")
+    print(f"  Destination:     {output_dir}")
     
     merge_datasets(processed_dir, upper_dir, output_dir)
