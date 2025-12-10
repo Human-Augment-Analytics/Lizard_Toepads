@@ -42,7 +42,7 @@ preprocessing:
   bottom-view-processed-dir: data/processed_bottom
   
   # Step 3: Integrate upper view dataset
-  addtional-upper-side-data-dir: data/upper_dataset_roboflow/train
+  addtional-upper-side-data-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train
   
   # Step 4: Merge bilateral annotations
   merged-processed-dir: data/processed_merged
