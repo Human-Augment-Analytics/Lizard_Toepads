@@ -125,7 +125,7 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
 
     # Print results summary
     total_detections = 0
-    class_names = ['finger', 'toe', 'ruler']  # match our training classes
+    class_names = model.names
     image_count = 0
 
     for i, r in enumerate(results):
@@ -138,7 +138,7 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
 
             for j, box in enumerate(boxes):
                 class_id = int(box.cls[0])
-                class_name = class_names[class_id] if class_id < len(class_names) else f"Class_{class_id}"
+                class_name = class_names[class_id]
                 confidence = float(box.conf[0])
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
 

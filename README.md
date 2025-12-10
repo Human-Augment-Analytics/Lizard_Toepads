@@ -3,7 +3,7 @@
 ## Document Metadata
 * **Authors**: Dylan Herbig, Junling Zhuang
 * **Date Created**: 2025-07-18
-* **Last Updated**: 2025-09-16 By Junling Zhuang
+* **Last Updated**: 2025-12-10 By Junling Zhuang
 * **Applicable Clusters**: Only utilized on ICE, but also applicable for Phoenix and Hive
 
 ## YOLO Model Setup
@@ -30,50 +30,71 @@ This documentation describes the setup and usage of a YOLOv8-based object detect
 
 ### Configuration
 
-All scripts use the unified configuration file `configs/project.yaml`. You can customize preprocessing, dataset splitting, and training parameters in one place:
+All scripts use a unified configuration file (e.g., `configs/H4.yaml`). You can customize preprocessing, merging, dataset splitting, and training parameters in one place:
 
 ```yaml
 preprocessing:
+  # Step 1: Raw data sources
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
   tps-dir: /storage/ice-shared/cs8903onl/tps_files
-  output-dir: data/processed
-  target-size: 1024
+  
+  # Step 2: Process bottom view with TPS landmarks
+  bottom-view-processed-dir: data/processed_bottom
+  
+  # Step 3: Integrate upper view dataset
+  addtional-upper-side-data-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train
+  
+  # Step 4: Merge bilateral annotations
+  merged-processed-dir: data/processed_merged
+  target-size: 1280
   point-size: 10
-  add-points: false
+  add-points: true
 
 split:
-  images-dir: data/processed/images
-  labels-dir: data/processed/labels
+  # Step 5: Train/val split
+  images-dir: data/processed_merged/images
+  labels-dir: data/processed_merged/labels
   output-dir: data/dataset
   train-ratio: 0.8
   seed: 42
   copy: false
 
 train:
-  model: yolov11n.pt
-  epochs: 100
+  model: models/base_models/yolov11s.pt
+  epochs: 300
   batch: 32
-  imgsz: 1024
+  imgsz: 1280
   # ... more training parameters
 ```
 
 ### Data Preprocessing
 
-Convert TPS landmark files into YOLO format bounding boxes:
+Run the 3-step preprocessing pipeline to generate the bilateral dataset (6 classes):
 
 ```bash
-# Using unified config (recommended)
-uv run python scripts/preprocessing/process_tps_files.py
+# 1. Process TPS landmarks (Bottom View)
+uv run python scripts/preprocessing/process_tps_files_with_id.py --config configs/H4.yaml
 
-# Override specific parameters
-uv run python scripts/preprocessing/process_tps_files.py --target-size 640 --add-points
+# 2. Merge with Upper View Dataset
+uv run python scripts/preprocessing/merge_bilateral_dataset.py --config configs/H4.yaml
+
+# 3. Create Train/Val Split
+uv run python scripts/preprocessing/split_dataset.py --config configs/H4.yaml
 ```
 
 This will generate:
-- `data/processed/images/`: Processed images ready for YOLO training
-- `data/processed/labels/`: YOLO format label files (.txt)
-- `data/processed/labels/classes.txt`: Class definitions (Finger, Toe, Ruler)
-- `data/processed/visualizations/marked_*.jpg`: Visualization images with bounding boxes (for verification)
+- `data/processed_bottom/`: Intermediate bottom view data
+- `data/processed_merged/`: Combined bilateral dataset (6 classes)
+- `data/dataset/`: Final split ready for YOLO training
+- `data/processed_merged/visualizations/`: Visualization images with bounding boxes (for verification)
+
+**Class Mapping:**
+- 0: up_finger
+- 1: up_toe
+- 2: bot_finger
+- 3: bot_toe
+- 4: ruler
+- 5: id
 
 ### Step-by-Step Instructions
 
@@ -103,14 +124,15 @@ This will generate:
 
 3. Run the complete workflow:
    ```bash
-   # Preprocess data (using unified config)
-   uv run python scripts/preprocessing/process_tps_files.py
+   # Preprocess & Merge Data
+   uv run python scripts/preprocessing/process_tps_files_with_id.py --config configs/H4.yaml
+   uv run python scripts/preprocessing/merge_bilateral_dataset.py --config configs/H4.yaml
 
    # Split dataset
-   uv run python scripts/preprocessing/split_dataset.py
+   uv run python scripts/preprocessing/split_dataset.py --config configs/H4.yaml
 
-   # Train YOLO (will auto-download YOLOv11n if needed)
-   uv run python scripts/training/train_yolo.py
+   # Train YOLO (will auto-download YOLOv11s if needed)
+   uv run python scripts/training/train_yolo_aug.py --config configs/H4.yaml
    ```
 
    **Note**: Pre-trained models are stored in `models/base_models/`. The training script automatically downloads YOLOv11n on first run if not present.
