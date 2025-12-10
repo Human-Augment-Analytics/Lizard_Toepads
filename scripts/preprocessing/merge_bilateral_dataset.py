@@ -117,11 +117,8 @@ def merge_datasets(processed_dir, upper_dir, output_dir, viz_count=50):
                 draw = ImageDraw.Draw(img)
                 width, height = img.size
                 
-                # Load a font (optional, fall back to default if needed)
-                try:
-                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 20)
-                except:
-                    font = ImageFont.load_default()
+                # Use default font for visualization labels
+                font = ImageFont.load_default()
 
                 for line in merged_lines:
                     parts = line.strip().split()
