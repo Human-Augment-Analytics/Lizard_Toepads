@@ -3,7 +3,7 @@
 ## Document Metadata
 * **Authors**: Dylan Herbig, Junling Zhuang
 * **Date Created**: 2025-07-18
-* **Last Updated**: 2025-09-16 By Junling Zhuang
+* **Last Updated**: 2025-12-10 By Junling Zhuang
 * **Applicable Clusters**: Only utilized on ICE, but also applicable for Phoenix and Hive
 
 ## YOLO Model Setup
