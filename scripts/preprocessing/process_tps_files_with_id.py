@@ -533,10 +533,6 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
         # Only process images that have all three TPS files: finger, toe, and ID
         if os.path.exists(finger_tps) and os.path.exists(toe_tps) and os.path.exists(id_tps):
             valid_args.append((finger_tps, toe_tps, jpg_path, id_tps, output_dir, point_size, add_points, target_size))
-        else:
-            if "1001" in base_name:
-                print(f"Skipping 1001: Finger={os.path.exists(finger_tps)}, Toe={os.path.exists(toe_tps)}, ID={os.path.exists(id_tps)}")
-                print(f"Paths: {finger_tps}, {toe_tps}, {id_tps}")
 
     print(f"Found {len(valid_args)} images with all three TPS files (finger + toe + ID) out of {len(jpg_files)} total images")
 
