@@ -1,9 +1,13 @@
 import os
 import shutil
 import glob
+import random
+import argparse
+from pathlib import Path
+
+import yaml
 from tqdm import tqdm
 from PIL import Image, ImageDraw, ImageFont
-import random
 
 def merge_datasets(processed_dir, upper_dir, output_dir, viz_count=50):
     """
@@ -158,9 +162,7 @@ def merge_datasets(processed_dir, upper_dir, output_dir, viz_count=50):
     print(f"Output directory: {output_dir}")
     print(f"Visualizations saved to: {out_viz_dir}")
 
-import argparse
-import yaml
-from pathlib import Path
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Merge bilateral datasets.')
