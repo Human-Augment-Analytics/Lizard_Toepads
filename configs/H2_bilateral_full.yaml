@@ -1,0 +1,79 @@
+# H2 Bilateral Detection - Full Bilateral Annotation Configuration
+# Uses semi-automated bilateral annotation (Approach 4)
+# Each image has complete bilateral annotations: 2 fingers + 2 toes + 2 rulers
+
+preprocessing:
+  # Source images for annotation generation
+  source-images: data/processed/images  # Original processed images
+  output-dir: data/bilateral_annotated  # Output for bilateral annotations
+
+  # Annotation generation parameters
+  annotation:
+    model: runs/detect/H2_bilateral_preprocessed/weights/best.pt
+    conf: 0.3  # Confidence threshold for annotation generation
+    iou: 0.5   # IoU threshold for NMS
+    verify: true  # Generate verification visualizations
+
+split:
+  images-dir: data/bilateral_annotated/images
+  labels-dir: data/bilateral_annotated/labels
+  output-dir: data/dataset_bilateral
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg,.jpeg,.png
+  # No group-by-suffix needed - each image is independent
+
+train:
+  # Dataset configuration
+  data: null # Use dataset section below instead
+
+  # Model configuration
+  model: models/base_models/yolov11n.pt  # Start from scratch or use pretrained
+
+  # Training parameters
+  epochs: 200
+  batch: 32
+  imgsz: 1280
+  workers: 2
+  patience: 20
+  name: H2_bilateral_full
+  device: 0 # Use GPU 0, set to 'cpu' if no GPU
+  amp: true
+  cache: false
+  save_period: 10
+
+  # Augmentation parameters (optional - can add training-time augmentation)
+  # Since data already has bilateral coverage, training aug is optional
+  # hsv_h: 0.015
+  # hsv_s: 0.7
+  # hsv_v: 0.4
+  # degrees: 0.0  # No rotation to preserve anatomical orientation
+  # translate: 0.1
+  # scale: 0.1
+  # shear: 0.0
+  # perspective: 0.0
+  # flipud: 0.0  # No vertical flip - data already has both orientations
+  # fliplr: 0.0  # No horizontal flip - preserves bilateral anatomy
+  # mosaic: 1.0
+  # mixup: 0.0
+
+dataset:
+  # Dataset paths
+  path: data/dataset_bilateral
+  train: images/train
+  val: images/val
+  # Optional test split
+  # test: images/test
+
+  # Class configuration (same 3 classes - each image now has 2 of each)
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.25 # Confidence threshold (0-1)
+  iou: 0.45 # IoU threshold for NMS (0-1)
+  imgsz: 1024 # Image size for inference
+  save: true # Save results
+  save_txt: false # Save results as txt files
+  project: results # Results save directory

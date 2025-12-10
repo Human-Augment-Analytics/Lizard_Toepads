@@ -105,7 +105,7 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
         # Single file
         source = source_path
 
-    # Run inference
+    # Run inference with optimized settings to avoid OOM
     results = model.predict(
         source=source,
         save=save,
@@ -118,13 +118,18 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
         project=project,
         name=name,
         exist_ok=True,
+        stream=True,      # Use streaming to avoid memory accumulation
+        augment=False,    # Disable Test Time Augmentation to save memory
+        batch=1,          # Process one image at a time to minimize GPU memory usage
     )
 
     # Print results summary
     total_detections = 0
     class_names = ['finger', 'toe', 'ruler']  # match our training classes
+    image_count = 0
 
     for i, r in enumerate(results):
+        image_count += 1
         boxes = r.boxes
         if boxes is not None:
             num_detections = len(boxes)
@@ -141,11 +146,9 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
                 print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
 
     print(f"\n=== Summary ===")
-    print(f"Total images processed: {len(results)}")
+    print(f"Total images processed: {image_count}")
     print(f"Total detections: {total_detections}")
     print(f"Results saved to: {project}/{name}/")
-
-    return results
 
 
 def main():

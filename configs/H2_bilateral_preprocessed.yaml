@@ -1,0 +1,65 @@
+# H2 Bilateral Detection - Preprocessing Augmentation Configuration
+# Uses preprocessing-time vertical flip augmentation instead of training-time augmentation
+# Based on H2_bilateral.yaml but with flipud applied during data generation
+
+preprocessing:
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  output-dir: data/processed_augmented
+  target-size: 1280
+  point-size: 10
+  add-points: false  # Only show bounding boxes, not landmark points (faster)
+  num-workers: 8
+  flipud-augmentation: true  # Enable vertical flip augmentation during preprocessing
+
+split:
+  images-dir: data/processed_augmented/images
+  labels-dir: data/processed_augmented/labels
+  output-dir: data/dataset_augmented
+  train-ratio: 0.8
+  seed: 42
+  copy: false
+  exts: .jpg,.jpeg,.png
+  group-by-suffix: _flipud  # Group augmented images with their originals during split
+
+train:
+  # Dataset configuration
+  data: null # Use dataset section below instead
+
+  # Model configuration
+  model: models/base_models/yolov11n.pt
+
+  # Training parameters
+  epochs: 200
+  batch: 32
+  imgsz: 1280
+  workers: 2
+  patience: 20
+  name: H2_bilateral_preprocessed
+  device: 0 # Use GPU 0, set to 'cpu' if no GPU
+  amp: true
+  cache: false
+  save_period: 10
+
+  # No training-time augmentation (data already augmented during preprocessing)
+  # This improves training speed compared to H2_bilateral.yaml
+
+dataset:
+  # Dataset paths
+  path: data/dataset_augmented
+  train: images/train
+  val: images/val
+  # Optional test split
+  # test: images/test
+
+  # Class configuration
+  nc: 3
+  names: ["finger", "toe", "ruler"]
+
+inference:
+  conf: 0.05 # Confidence threshold (0-1)
+  iou: 0.45 # IoU threshold for NMS (0-1)
+  imgsz: 1024 # Image size for inference
+  save: true # Save results
+  save_txt: false # Save results as txt files
+  project: results # Results save directory

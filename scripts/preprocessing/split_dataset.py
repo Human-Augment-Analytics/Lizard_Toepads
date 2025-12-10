@@ -37,6 +37,34 @@ def find_image_label_pairs(
     return pairs
 
 
+def group_pairs_by_base_name(pairs: List[Tuple[Path, Path]], suffix: str = "_flipud") -> List[List[Tuple[Path, Path]]]:
+    """
+    Group augmented images with their base images to avoid data leakage.
+
+    For example, if suffix="_flipud", then:
+    - "001.jpg" and "001_flipud.jpg" will be grouped together
+    - Both will be assigned to the same split (train or val)
+
+    Args:
+        pairs: List of (image_path, label_path) tuples
+        suffix: Suffix used for augmented images (e.g., "_flipud")
+
+    Returns:
+        List of groups, where each group is a list of (image, label) pairs
+    """
+    from collections import defaultdict
+    groups_dict = defaultdict(list)
+
+    for img, lbl in pairs:
+        # Remove suffix to get base name
+        base_name = img.stem.replace(suffix, "")
+        groups_dict[base_name].append((img, lbl))
+
+    # Convert dict to list of groups
+    groups = list(groups_dict.values())
+    return groups
+
+
 def make_link_or_copy(src: Path, dst: Path, copy: bool) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
@@ -76,17 +104,40 @@ def split_and_materialize(
     seed: int,
     copy: bool,
     allowed_exts: Iterable[str],
+    group_by_suffix: str = None,
 ) -> Tuple[int, int]:
     pairs = find_image_label_pairs(images_dir, labels_dir, allowed_exts)
     if not pairs:
         raise RuntimeError("No (image, label) pairs found. Ensure labels/*.txt match images by stem.")
 
     rng = random.Random(seed)
-    rng.shuffle(pairs)
 
-    num_train = int(len(pairs) * train_ratio)
-    train_pairs = pairs[:num_train]
-    val_pairs = pairs[num_train:]
+    # If group_by_suffix is specified, group augmented images with their originals
+    if group_by_suffix:
+        print(f"Grouping images by suffix '{group_by_suffix}' to avoid data leakage...")
+        groups = group_pairs_by_base_name(pairs, group_by_suffix)
+        print(f"Found {len(groups)} base image groups (total {len(pairs)} images)")
+
+        # Shuffle groups instead of individual pairs
+        rng.shuffle(groups)
+
+        # Split groups
+        num_train_groups = int(len(groups) * train_ratio)
+        train_groups = groups[:num_train_groups]
+        val_groups = groups[num_train_groups:]
+
+        # Flatten groups back to pairs
+        train_pairs = [pair for group in train_groups for pair in group]
+        val_pairs = [pair for group in val_groups for pair in group]
+
+        print(f"Train groups: {len(train_groups)} ({len(train_pairs)} images)")
+        print(f"Val groups: {len(val_groups)} ({len(val_pairs)} images)")
+    else:
+        # Original behavior: shuffle individual pairs
+        rng.shuffle(pairs)
+        num_train = int(len(pairs) * train_ratio)
+        train_pairs = pairs[:num_train]
+        val_pairs = pairs[num_train:]
 
     images_train_dir = output_root / "images" / "train"
     images_val_dir = output_root / "images" / "val"
@@ -145,6 +196,10 @@ def parse_args() -> argparse.Namespace:
         "--exts",
         help="Comma-separated list of allowed image extensions",
     )
+    parser.add_argument(
+        "--group-by-suffix",
+        help="Group images with this suffix together (e.g., '_flipud') to avoid data leakage",
+    )
     return parser.parse_args()
 
 
@@ -181,6 +236,7 @@ def main() -> None:
     copy_flag = bool(get_opt("copy", False))
     exts_raw = str(get_opt("exts", ".jpg,.jpeg,.png"))
     allowed_exts = [e.strip().lower() if e.strip().startswith(".") else f".{e.strip().lower()}" for e in exts_raw.split(",") if e.strip()]
+    group_by_suffix = get_opt("group-by-suffix", None)
 
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -192,6 +248,7 @@ def main() -> None:
         seed=seed,
         copy=copy_flag,
         allowed_exts=allowed_exts,
+        group_by_suffix=group_by_suffix,
     )
 
     print("=== Split complete ===")
