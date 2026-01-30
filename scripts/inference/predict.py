@@ -128,13 +128,15 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
     class_names = model.names
     image_count = 0
 
+    print(f"Processing {len(source) if isinstance(source, list) else 'all'} images...")
     for i, r in enumerate(results):
         image_count += 1
+        if image_count % 50 == 0:
+            print(f"  Processed {image_count} images...")
         boxes = r.boxes
         if boxes is not None:
             num_detections = len(boxes)
             total_detections += num_detections
-            print(f"\nImage {i+1}: Found {num_detections} detections")
 
             for j, box in enumerate(boxes):
                 class_id = int(box.cls[0])

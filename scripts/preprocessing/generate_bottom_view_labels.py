@@ -179,6 +179,12 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, id_tps_path=No
     os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'visualizations'), exist_ok=True)
     
+    # Clean up existing label file to prevent duplicates
+    label_filename = f"{os.path.splitext(os.path.basename(jpg_path))[0]}.txt"
+    label_path = os.path.join(output_dir, 'labels', label_filename)
+    if os.path.exists(label_path):
+        os.remove(label_path)
+    
     if not os.path.exists(finger_tps_path):
         raise FileNotFoundError(f"Finger TPS file not found: {finger_tps_path}")
     if not os.path.exists(toe_tps_path):
@@ -284,52 +290,9 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, id_tps_path=No
         # Always save visualization with bounding boxes for verification
         vis_path = os.path.join(output_dir, 'visualizations', f'marked_{os.path.basename(jpg_path)}')
         img_copy.save(vis_path)
-    label_path = os.path.join(labels_dir, f"{os.path.splitext(image_name)[0]}.txt")
-    mode = 'a' if os.path.exists(label_path) else 'w'
-    with open(label_path, mode) as f:
-        f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {box_width:.6f} {box_height:.6f}\n")
 
-    return x_min, y_min, x_max, y_max
 
-def create_id_label(id_points, img_width, img_height, output_dir, image_name, class_id,
-                     padding_ratio_x=0.05, padding_ratio_y=0.05):
-    """Create YOLO label from ID box (2 points: top-left and bottom-right)."""
-    # ID format: point 0 = top-left, point 1 = bottom-right
-    top_left_x, top_left_y = id_points[0]
-    bottom_right_x, bottom_right_y = id_points[1]
 
-    # Convert Y coordinates (TPS uses bottom-left origin)
-    top_left_y = img_height - top_left_y
-    bottom_right_y = img_height - bottom_right_y
-
-    # Calculate box dimensions
-    box_width_px = abs(bottom_right_x - top_left_x)
-    box_height_px = abs(top_left_y - bottom_right_y)
-
-    # Add padding
-    padding_x = max(5, box_width_px * padding_ratio_x)
-    padding_y = max(5, box_height_px * padding_ratio_y)
-
-    x_min = max(0, min(top_left_x, bottom_right_x) - padding_x)
-    x_max = min(img_width, max(top_left_x, bottom_right_x) + padding_x)
-    y_min = max(0, min(top_left_y, bottom_right_y) - padding_y)
-    y_max = min(img_height, max(top_left_y, bottom_right_y) + padding_y)
-
-    # Convert to YOLO format (normalized center x, center y, width, height)
-    box_width = (x_max - x_min) / img_width
-    box_height = (y_max - y_min) / img_height
-    center_x = (x_min + x_max) / (2 * img_width)
-    center_y = (y_min + y_max) / (2 * img_height)
-
-    labels_dir = os.path.join(output_dir, 'labels')
-    os.makedirs(labels_dir, exist_ok=True)
-
-    label_path = os.path.join(labels_dir, f"{os.path.splitext(image_name)[0]}.txt")
-    mode = 'a' if os.path.exists(label_path) else 'w'
-    with open(label_path, mode) as f:
-        f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {box_width:.6f} {box_height:.6f}\n")
-
-    return x_min, y_min, x_max, y_max
 
 def write_classes_txt(output_dir):
     """Write YOLO class names to classes.txt."""
@@ -516,6 +479,7 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
         tps_dir: Directory containing finger, toe, and ID TPS files
         num_workers: Number of parallel workers. If None, uses cpu_count()
     """
+    print(f"Processing to output directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
 
     jpg_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')])
