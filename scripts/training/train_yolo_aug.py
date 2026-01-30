@@ -235,7 +235,7 @@ def main() -> None:
 
     # Explicitly run validation to ensure plots (confusion matrix, results.png) are generated
     print("\nTraining complete. Running final validation to generate plots...")
-    model.val(data=data)
+    model.val(data=data, plots=True)
 
 
 if __name__ == "__main__":
