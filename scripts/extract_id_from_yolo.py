@@ -342,7 +342,7 @@ if __name__ == "__main__":
         return default
 
     image_dir = get_opt('image-dir', None)
-    label_dir = get_opt('label-dir', None)
+    label_dir = get_opt('labels-dir', None)
     output_dir = get_opt('output-dir', 'data/processed')
 
     print(f"Using output_dir: {output_dir}")
