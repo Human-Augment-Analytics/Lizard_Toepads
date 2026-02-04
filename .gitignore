@@ -42,4 +42,4 @@ results/
 
 # Local scripts
 scripts/clean_miami_images.py
-.scratch/calculate_averages.py
+.scratch/
