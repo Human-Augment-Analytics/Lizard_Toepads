@@ -140,10 +140,13 @@ All future configurations should follow the **H4.yaml pattern**:
    # 4. Standard Allocation Command (H200 GPU)
    salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 
-   # 5. Train YOLO (will auto-download YOLOv11s if needed)
+   # 5.launch an interactive shell on the allocated node
+   srun --pty bash
+
+   # 6. Train YOLO (will auto-download YOLOv11s if needed)
    uv run python scripts/training/train_yolo_aug.py --config configs/H4.yaml
 
-   # 6. Predict / Inference
+   # 7. Predict / Inference
    uv run python scripts/inference/predict.py --config configs/H4.yaml --quick-test
    ```
 
