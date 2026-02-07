@@ -1,7 +1,7 @@
 # Classic dlib ml-morph workflow configuration for toe dataset
 
 preprocessing:
-  input_dir: train  # Directory containing toe images
+  input_dir: images  # Directory containing toe images
   tps_file: consolidated_toe.tps
   train_ratio: 0.8
   output_train: train.xml
@@ -15,7 +15,7 @@ detector:
   symmetrical: false
   epsilon: 0.01
   c_param: 5
-  upsample: 0
+  upsample: 1
   # window_size: 50000  # Optional: adjust based on toe image size
 
 shape:
