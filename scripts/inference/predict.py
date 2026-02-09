@@ -126,17 +126,20 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
 
     # Print results summary
     total_detections = 0
-    class_names = ['finger', 'toe', 'ruler']  # match our training classes
+    class_names = model.names
     image_count = 0
 
+    print(f"Processing {len(source) if isinstance(source, list) else 'all'} images...")
     for i, r in enumerate(results):
         image_count += 1
+        if image_count % 50 == 0:
+            print(f"  Processed {image_count} images...")
+
         # OBB results use r.obb, standard detection uses r.boxes
         detections = r.obb if r.obb is not None and len(r.obb) > 0 else r.boxes
         if detections is not None:
             num_detections = len(detections)
             total_detections += num_detections
-            print(f"\nImage {i+1}: Found {num_detections} detections")
 
             for j in range(num_detections):
                 class_id = int(detections.cls[j])
