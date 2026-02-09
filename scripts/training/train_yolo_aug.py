@@ -160,6 +160,10 @@ def main() -> None:
     hsv_s = get_opt(cfg, "hsv_s", None)        # Saturation variation (0.0-1.0)
     hsv_v = get_opt(cfg, "hsv_v", None)        # Value/brightness variation (0.0-1.0)
     mosaic = get_opt(cfg, "mosaic", None)      # Mosaic augmentation probability (0.0-1.0)
+    mixup = get_opt(cfg, "mixup", None)        # Mixup augmentation probability (0.0-1.0)
+    copy_paste = get_opt(cfg, "copy_paste", None) # Copy-paste augmentation probability (0.0-1.0)
+    cos_lr = get_opt(cfg, "cos_lr", None)      # Cosine learning rate scheduler (bool)
+    close_mosaic = get_opt(cfg, "close_mosaic", None) # Disable mosaic for last N epochs (int)
 
     # Ensure model exists or download it
     model_path = ensure_model_exists(model_path)
@@ -203,11 +207,20 @@ def main() -> None:
         train_args["hsv_v"] = hsv_v
     if mosaic is not None:
         train_args["mosaic"] = mosaic
+    if mixup is not None:
+        train_args["mixup"] = mixup
+    if copy_paste is not None:
+        train_args["copy_paste"] = copy_paste
+    if cos_lr is not None:
+        train_args["cos_lr"] = cos_lr
+    if close_mosaic is not None:
+        train_args["close_mosaic"] = close_mosaic
 
     # Print augmentation configuration
     aug_params = {k: v for k, v in train_args.items() if k in [
         "flipud", "fliplr", "degrees", "translate", "scale", "shear",
-        "perspective", "hsv_h", "hsv_s", "hsv_v", "mosaic"
+        "perspective", "hsv_h", "hsv_s", "hsv_v", "mosaic",
+        "mixup", "copy_paste", "cos_lr", "close_mosaic"
     ]}
     if aug_params:
         print("\n=== Data Augmentation Configuration ===")
@@ -219,6 +232,10 @@ def main() -> None:
 
     model = YOLO(model_path)
     model.train(**train_args)
+
+    # Explicitly run validation to ensure plots (confusion matrix, results.png) are generated
+    print("\nTraining complete. Running final validation to generate plots...")
+    model.val(data=data, plots=True)
 
 
 if __name__ == "__main__":

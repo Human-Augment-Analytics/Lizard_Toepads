@@ -1,15 +1,16 @@
+import sys
+print("Script loaded", flush=True)
 import os
+import argparse
+import multiprocessing
+from multiprocessing import Pool, cpu_count
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import re
-import argparse
 from tqdm import tqdm
 import yaml
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
-import functools
 
-# Increase maximum image size limit
 Image.MAX_IMAGE_PIXELS = None  # Remove size limit - instead we prob want to resize image beforehand
 
 def read_tps_file(tps_path):
@@ -178,6 +179,12 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, id_tps_path=No
     os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'visualizations'), exist_ok=True)
     
+    # Clean up existing label file to prevent duplicates
+    label_filename = f"{os.path.splitext(os.path.basename(jpg_path))[0]}.txt"
+    label_path = os.path.join(output_dir, 'labels', label_filename)
+    if os.path.exists(label_path):
+        os.remove(label_path)
+    
     if not os.path.exists(finger_tps_path):
         raise FileNotFoundError(f"Finger TPS file not found: {finger_tps_path}")
     if not os.path.exists(toe_tps_path):
@@ -287,10 +294,34 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, id_tps_path=No
         # Write classes.txt
         write_classes_txt(output_dir)
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
+
+    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
+
+    # Batch mode
+    parser.add_argument('--image-dir', help='Directory containing JPG images')
+    parser.add_argument('--tps-dir', help='Directory containing TPS files')
+
+    # Shared
+    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--point-size', type=int, help='Size of landmark points')
+    parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
+    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
+    parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
+
+    return parser.parse_args()
+
 
 def process_single_image_wrapper(args):
     """Wrapper function for multiprocessing - unpacks arguments"""
-    return process_single_image(*args)
+    try:
+        return process_single_image(*args)
+    except Exception as e:
+        print(f"Error processing {args[2]}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', point_size=10, add_points=False, target_size=1024, num_workers=None):
@@ -303,9 +334,11 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
         tps_dir: Directory containing finger, toe, and ID TPS files
         num_workers: Number of parallel workers. If None, uses cpu_count()
     """
+    print(f"Processing to output directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
 
-    jpg_files = [f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')]
+    jpg_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')])
+    print(f"Found {len(jpg_files)} JPG files in {image_dir}")
 
     # Count valid files first and prepare arguments
     valid_args = []
@@ -344,26 +377,8 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
             ))
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
-
-    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
-
-    # Batch mode
-    parser.add_argument('--image-dir', help='Directory containing JPG images')
-    parser.add_argument('--tps-dir', help='Directory containing TPS files')
-
-    # Shared
-    parser.add_argument('--output-dir', help='Output directory')
-    parser.add_argument('--point-size', type=int, help='Size of landmark points')
-    parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
-    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
-    parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
-
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
+    print("Script starting...", flush=True)
     args = parse_args()
 
     # Load YAML config if provided
@@ -390,7 +405,7 @@ if __name__ == "__main__":
 
     image_dir = get_opt('image-dir', None)
     tps_dir = get_opt('tps-dir', None)
-    output_dir = get_opt('output-dir', 'data/processed')
+    output_dir = get_opt('bottom-view-processed-dir', 'data/processed')
     point_size = int(get_opt('point-size', 10))
     add_points = bool(get_opt('add-points', False))
     target_size = int(get_opt('target-size', 1024))

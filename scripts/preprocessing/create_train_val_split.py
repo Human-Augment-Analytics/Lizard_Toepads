@@ -67,7 +67,7 @@ def group_pairs_by_base_name(pairs: List[Tuple[Path, Path]], suffix: str = "_fli
 
 def make_link_or_copy(src: Path, dst: Path, copy: bool) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.exists():
+    if dst.exists() or dst.is_symlink():
         # Replace existing file/link to ensure idempotency
         if dst.is_symlink() or dst.is_file():
             dst.unlink()
