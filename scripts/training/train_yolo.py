@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--imgsz", type=int)
     parser.add_argument("--device")  # e.g. 0 or 0,1 or [0,1]
     parser.add_argument("--name")
+    parser.add_argument("--task", choices=["detect", "obb"], help="YOLO task type (default: detect)")
     return parser.parse_args()
 
 
@@ -147,10 +148,16 @@ def main() -> None:
     amp = get_opt(cfg, "amp", True)
     cache = get_opt(cfg, "cache", True)
     save_period = get_opt(cfg, "save_period", 10)
+    task = args.task or get_opt(cfg, "task", "detect")
+
+    # For OBB, default to OBB-specific base model if none specified
+    if task == "obb" and model_path == "models/base_models/yolov11n.pt":
+        model_path = "models/base_models/yolov11n-obb.pt"
 
     # Ensure model exists or download it
     model_path = ensure_model_exists(model_path)
     print(f"Using model: {model_path}")
+    print(f"Task: {task}")
 
     model = YOLO(model_path)
     model.train(
@@ -165,6 +172,7 @@ def main() -> None:
         amp=amp,
         cache=cache,
         save_period=save_period,
+        task=task,
     )
 
 
