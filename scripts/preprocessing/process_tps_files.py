@@ -384,7 +384,13 @@ if __name__ == "__main__":
     add_points = bool(get_opt('add-points', False))
     target_size = int(get_opt('target-size', 1024))
     num_workers = args.num_workers or get_opt('num-workers', None)
-    obb = args.obb or bool(get_opt('obb', False))
+    # args.obb from store_true defaults to False, so check it explicitly
+    # to avoid shadowing the config value in get_opt
+    if args.obb:
+        obb = True
+    else:
+        obb_cfg = (cfg.get('preprocessing') or {}).get('obb', cfg.get('obb', False))
+        obb = bool(obb_cfg)
 
     print(f"Using output_dir: {output_dir}")
     print(f"Using target_size: {target_size}")
