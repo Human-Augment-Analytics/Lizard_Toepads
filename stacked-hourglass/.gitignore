@@ -1,0 +1,7 @@
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Project directories to ignore
+checkpoints/
+data/
+models/
