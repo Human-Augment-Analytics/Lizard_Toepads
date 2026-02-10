@@ -43,6 +43,7 @@ results/
 # Local scripts
 scripts/clean_miami_images.py
 .scratch/
+logs/
 
 # YOLO generated files
 configs/temp_val.yaml
