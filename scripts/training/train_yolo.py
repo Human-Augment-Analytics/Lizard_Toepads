@@ -152,7 +152,7 @@ def main() -> None:
 
     # For OBB, default to OBB-specific base model if none specified
     if task == "obb" and model_path == "models/base_models/yolov11n.pt":
-        model_path = "models/base_models/yolov11n-obb.pt"
+        model_path = "models/base_models/yolo11n-obb.pt"
 
     # Ensure model exists or download it
     model_path = ensure_model_exists(model_path)

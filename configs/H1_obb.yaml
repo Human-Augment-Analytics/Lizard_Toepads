@@ -21,7 +21,7 @@ split:
   exts: .jpg,.jpeg,.png
 
 train:
-  model: models/base_models/yolov11n-obb.pt
+  model: models/base_models/yolo11n-obb.pt
   task: obb
   epochs: 100
   batch: 32
