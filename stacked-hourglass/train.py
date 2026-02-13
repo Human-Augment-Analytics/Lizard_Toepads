@@ -18,6 +18,7 @@ def main(args):
     configName = args.config
     config = loadConfig(configName)
     validateConfig(config) # fill any missing values
+    initEnvironment()
 
     npz_dir = Path(f"{training_data_dir}/heatmaps")
     npz_paths = list(npz_dir.glob("*.npz"))
@@ -34,20 +35,20 @@ def main(args):
     valid_dataset = LizardDataset(val_paths, aug_factor=1)
     valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
-    device = 'cuda'
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     shg = StackedHourGlass()
     shg.to(device)
 
     optimizer = torch.optim.Adam(shg.parameters(), lr=config["initialLR"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=config["scheduler"]["factor"], patience=["scheduler"]["patience"]
+        optimizer, mode='min', factor=config["scheduler"]["factor"], patience=config["scheduler"]["patience"]
     )
     num_epochs = config["epochs"]
     for epoch in range(num_epochs):
         shg.train()
         running_loss = 0.0
 
-        total = len(dataloader.dataset)
+        total = len(dataloader)
 
         batchct = 0
         for imgs, gt_heatmaps in dataloader:
@@ -58,14 +59,13 @@ def main(args):
             loss = shg.calc_loss(combined_hm_preds, gt_heatmaps).mean()
             loss.backward()
             optimizer.step()
-            scheduler.step(avg_val_loss)
             running_loss += loss.item()
             batchct += 1
             endtime = time.time()
             runtime = endtime-starttime
-            print(f"Batch {batchct} / {total / 8} | Process Time: {runtime} s | ETA: {((total/8)-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
+            print(f"Batch {batchct} / {total} | Process Time: {runtime} s | ETA: {(total-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
         avg_train_loss = running_loss / len(dataloader)
-
+        scheduler.step(avg_val_loss)
         # -------------------------
         # Validation
         # -------------------------
@@ -79,10 +79,14 @@ def main(args):
                 val_loss += loss.item()
         avg_val_loss = val_loss / len(valid_dataloader)
         checkpoint_path = f"checkpoints/shg_epoch{epoch+1}.pth"
-        torch.save(shg.state_dict(), checkpoint_path)
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(shg.state_dict(), checkpoint_path)
         print()
         print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
+def initEnvironment():
+    Path("checkpoints").mkdir(parents=True, exist_ok=True)
 
 def loadConfig(cname):
     if cname != None:
@@ -92,7 +96,7 @@ def loadConfig(cname):
                 with open(p, "r") as f:
                     config = f.read()
                     return config
-            except:
+            except Exception as e:
                 print(f"Unable to load config {cname} at path {p}")
     else:
         return loadDefaultConfig()
@@ -101,7 +105,7 @@ def loadConfig(cname):
 def loadDefaultConfig():
     p = Path(f"./configs/default.json")
     with open(p, "r") as f:
-        config = f.read()
+        config = json.load(f)
         return config
 
 def validateConfig(config):
