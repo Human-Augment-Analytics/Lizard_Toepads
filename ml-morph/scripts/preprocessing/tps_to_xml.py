@@ -11,6 +11,11 @@ from typing import List, Tuple
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
+from PIL import Image
+
+# Allow very large images (normalized images can be ~10k x 10k)
+Image.MAX_IMAGE_PIXELS = None
+
 
 def parse_tps_file(tps_path: Path) -> List[Tuple[str, List[Tuple[float, float]]]]:
     """Parse TPS file and return list of (image_name, landmarks)."""
@@ -69,13 +74,22 @@ def create_xml_dataset(annotations: List[Tuple[str, List[Tuple[float, float]]]],
             print(f"Warning: Image not found: {img_path}, skipping...")
             continue
 
+        # Get image height for TPS y-axis inversion
+        # TPS uses Cartesian coordinates (y=0 at bottom),
+        # image coordinates have y=0 at top
+        img = Image.open(img_path)
+        img_w, img_h = img.size
+
+        # Invert y: y_image = image_height - y_tps
+        landmarks_img = [(x, img_h - y) for x, y in landmarks]
+
         # Create image element
         image = ET.SubElement(images, 'image', file=str(img_path))
 
         # Calculate bounding box from landmarks
-        if landmarks:
-            xs = [x for x, y in landmarks]
-            ys = [y for x, y in landmarks]
+        if landmarks_img:
+            xs = [x for x, y in landmarks_img]
+            ys = [y for x, y in landmarks_img]
             min_x, max_x = min(xs), max(xs)
             min_y, max_y = min(ys), max(ys)
 
@@ -83,8 +97,8 @@ def create_xml_dataset(annotations: List[Tuple[str, List[Tuple[float, float]]]],
             padding = 20
             min_x = max(0, min_x - padding)
             min_y = max(0, min_y - padding)
-            max_x = max_x + padding
-            max_y = max_y + padding
+            max_x = min(img_w, max_x + padding)
+            max_y = min(img_h, max_y + padding)
 
             width = max_x - min_x
             height = max_y - min_y
@@ -97,7 +111,7 @@ def create_xml_dataset(annotations: List[Tuple[str, List[Tuple[float, float]]]],
                                height=str(int(height)))
 
             # Add landmarks as parts
-            for idx, (x, y) in enumerate(landmarks):
+            for idx, (x, y) in enumerate(landmarks_img):
                 ET.SubElement(box, 'part', name=str(idx), x=str(int(x)), y=str(int(y)))
 
     # Pretty print XML

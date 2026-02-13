@@ -33,8 +33,7 @@ echo "Environment: lizard"
 # Run YOLO training
 # Using yolo11m-obb.pt (Medium) with 6-class merged dataset
 yolo obb train \
-    data=/home/hice1/yloh30/scratch/Lizard_Toepads/configs/data_obb_6class.yaml \
-
+    data=/home/hice1/yloh30/scratch/Lizard_Toepads/configs/H1_obb_6class.yaml \
     model=yolo11m-obb.pt \
     epochs=200 \
     patience=100 \

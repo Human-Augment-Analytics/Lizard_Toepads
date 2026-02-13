@@ -17,6 +17,9 @@ Upper bbox labels: 5-value lines (class cx cy w h) -> converted to 9-value OBB
 import argparse
 import os
 from pathlib import Path
+import cv2
+import numpy as np
+import math
 
 
 # Class remapping
@@ -24,18 +27,105 @@ BOTTOM_REMAP = {0: 2, 1: 3, 2: 4}  # finger->bot_finger, toe->bot_toe, ruler->ru
 UPPER_REMAP = {0: 0, 1: 1}          # up_finger->up_finger, up_toe->up_toe
 
 
+def rotate_bbox_to_obb(cx, cy, w, h, angle_deg):
+    """Convert bbox (cx, cy, w, h) rotated by angle_deg to 4 corners.
+    
+    Args:
+        cx, cy: Center coordinates
+        w, h: Width and height (unrotated dimensions)
+        angle_deg: Rotation angle in degrees (clockwise positive? standard cv2 convention)
+    
+    Returns:
+        8 floats: x1 y1 ... x4 y4
+    """
+    # Create the unrotated rectangle corners relative to center (0,0)
+    # BL, TL, TR, BR order to match cv2 structure usually? 
+    # Actually, let's just use simple rotation matrix.
+    
+    # 4 corners relative to center:
+    # (-w/2, -h/2), (w/2, -h/2), (w/2, h/2), (-w/2, h/2)  <-- TL, TR, BR, BL order?
+    # TL: -w/2, -h/2
+    # TR: w/2, -h/2
+    # BR: w/2, h/2
+    # BL: -w/2, h/2
+    
+    corners = np.array([
+        [-w/2, -h/2],
+        [w/2, -h/2],
+        [w/2, h/2],
+        [-w/2, h/2]
+    ])
+    
+    # Rotation matrix
+    theta = np.radians(angle_deg)
+    c, s = np.cos(theta), np.sin(theta)
+    R = np.array(((c, -s), (s, c)))
+    
+    # Rotate
+    rotated_corners = corners @ R.T
+    
+    # Shift to center
+    rotated_corners[:, 0] += cx
+    rotated_corners[:, 1] += cy
+    
+    # Flatten
+    return tuple(rotated_corners.flatten())
+
+
 def bbox_to_obb(cx, cy, w, h):
     """Convert standard bbox (cx, cy, w, h) to 4 axis-aligned corners.
 
     Returns 8 floats: x1 y1 x2 y2 x3 y3 x4 y4 (TL, TR, BR, BL).
     """
-    half_w = w / 2
-    half_h = h / 2
-    x1, y1 = cx - half_w, cy - half_h  # TL
-    x2, y2 = cx + half_w, cy - half_h  # TR
-    x3, y3 = cx + half_w, cy + half_h  # BR
-    x4, y4 = cx - half_w, cy + half_h  # BL
-    return x1, y1, x2, y2, x3, y3, x4, y4
+    return rotate_bbox_to_obb(cx, cy, w, h, 0.0)
+
+
+def extract_bot_info(label_path):
+    """Extract class, angle, width, and height from bottom-view OBB labels.
+    
+    Returns:
+        dict: {target_cls_id: {'angle': float, 'w': float, 'h': float}}
+        Target class ID is the UPPER class that corresponds to the found BOTTOM class.
+        e.g. found bot_finger (0) -> store under up_finger (0)
+    """
+    info = {}
+    if not label_path.exists():
+        return info
+
+    # Mapping from bot class to upper class for storage
+    # bot_finger (0) -> up_finger (0)
+    # bot_toe (1) -> up_toe (1)
+    # ruler (2) -> X
+    BOT_TO_UP_MAP = {0: 0, 1: 1} # Reverse of BOTTOM_REMAP but using raw class IDs
+
+    with open(label_path) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 9:
+                continue
+            
+            cls = int(parts[0])
+            if cls not in BOT_TO_UP_MAP:
+                continue
+            
+            upper_cls = BOT_TO_UP_MAP[cls]
+            
+            # Extract corners
+            coords = list(map(float, parts[1:]))
+            pts = np.array(coords).reshape(4, 2).astype(np.float32)
+            
+            # Get MinAreaRect
+            # (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
+            rect = cv2.minAreaRect(pts)
+            (cx, cy), (w, h), angle = rect
+            
+            # Use the larger dimension as length? 
+            # Roboflow bbox w/h are usually width/height relative to image axis.
+            # But here we want the physical dimensions of the limb.
+            
+            info[upper_cls] = {'angle': angle, 'w': w, 'h': h}
+            
+    return info
 
 
 def parse_bottom_obb_labels(label_path):
@@ -55,9 +145,17 @@ def parse_bottom_obb_labels(label_path):
     return lines
 
 
-def parse_upper_bbox_labels(label_path):
-    """Read upper-view label file, convert standard bbox to OBB, remap classes."""
+def parse_upper_bbox_labels(label_path, bot_info=None):
+    """Read upper-view label file, convert standard bbox to OBB, remap classes.
+    
+    Args:
+        label_path: Path to upper label file
+        bot_info: dict containing angle/dim info from bottom view, keyed by upper class ID
+    """
     lines = []
+    if bot_info is None:
+        bot_info = {}
+
     with open(label_path) as f:
         for line in f:
             parts = line.strip().split()
@@ -68,7 +166,26 @@ def parse_upper_bbox_labels(label_path):
                 continue
             new_cls = UPPER_REMAP[cls]
             cx, cy, w, h = map(float, parts[1:])
-            corners = bbox_to_obb(cx, cy, w, h)
+            
+            # Check if we have transfer info
+            angle = 0.0
+            
+            # For Dim transfer, if available, use bot's w/h
+            if new_cls in bot_info:
+                angle = bot_info[new_cls]['angle']
+                
+                # Use Bot dimensions if they exist
+                # But notice: MinAreaRect returns (w,h) which might be rotated 90 deg relative to what we expect.
+                # However, for an OBB, (w,h) and angle define the box.
+                # If we just use bot's w, h, angle centered at upper's cx, cy, 
+                # we get a box of identical shape/orientation to bot, but at upper position.
+                # This assumes upper limb size ~= bottom limb size (plausible)
+                
+                # Override w, h with bot's
+                w = bot_info[new_cls]['w']
+                h = bot_info[new_cls]['h']
+            
+            corners = rotate_bbox_to_obb(cx, cy, w, h, angle)
             coords_str = ' '.join(f"{v:.6f}" for v in corners)
             lines.append(f"{new_cls} {coords_str}")
     return lines
@@ -131,15 +248,20 @@ def create_dataset(args):
             # Merge labels
             merged_lines = []
 
-            # Upper-view labels (converted bbox -> OBB)
+            # Bottom-view OBB labels
+            bottom_file = bottom_labels_dir / f"{stem}.txt"
+            
+            # Extract info for transfer FIRST
+            bot_info = {}
+            if bottom_file.exists():
+                bot_info = extract_bot_info(bottom_file)
+                # Also append bottom labels to merged
+                merged_lines.extend(parse_bottom_obb_labels(bottom_file))
+
+            # Upper-view labels (converted bbox -> OBB using bot info)
             upper_file = upper_labels_dir / f"{stem}.txt"
             if upper_file.exists():
-                merged_lines.extend(parse_upper_bbox_labels(upper_file))
-
-            # Bottom-view OBB labels (9-value lines only)
-            bottom_file = bottom_labels_dir / f"{stem}.txt"
-            if bottom_file.exists():
-                merged_lines.extend(parse_bottom_obb_labels(bottom_file))
+                merged_lines.extend(parse_upper_bbox_labels(upper_file, bot_info))
 
             # Write merged label file
             lbl_dst = lbl_out / f"{stem}.txt"

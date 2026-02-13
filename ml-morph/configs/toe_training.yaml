@@ -21,7 +21,7 @@ detector:
 shape:
   dataset: train.xml
   test: test.xml
-  output: toe_predictor.dat
+  output: toe_predictor
   threads: 7
   tree_depth: 4
   cascade_depth: 15

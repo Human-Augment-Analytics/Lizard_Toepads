@@ -24,6 +24,7 @@ def make_config_name(params):
         f"over{params['oversampling']}",
         f"fp{params['feature_pool_size']}",
         f"splits{params['test_splits']}",
+        f"tj{params.get('translation_jitter', 0)}",
     ]
     return "_".join(parts)
 
@@ -42,6 +43,7 @@ def train_and_evaluate(train_xml, test_xml, params, output_dir='hyperparam_resul
     normalized_params.setdefault('oversampling', 10)
     normalized_params.setdefault('feature_pool_size', 500)
     normalized_params.setdefault('test_splits', 20)
+    normalized_params.setdefault('translation_jitter', 0)
     normalized_params.setdefault('threads', 4)
 
     # Create unique name for this configuration
@@ -74,6 +76,7 @@ def train_and_evaluate(train_xml, test_xml, params, output_dir='hyperparam_resul
     options.oversampling_amount = normalized_params['oversampling']
     options.feature_pool_size = normalized_params['feature_pool_size']
     options.num_test_splits = normalized_params['test_splits']
+    options.oversampling_translation_jitter = normalized_params['translation_jitter']
     options.num_threads = normalized_params['threads']
     options.be_verbose = True
 
@@ -111,33 +114,33 @@ def build_param_grid(args):
     """
     if args.refine:
         return {
-            'tree_depth': [2, 3],
-            'cascade_depth': [8, 10, 12],
-            'nu': [0.05, 0.075, 0.1, 0.125, 0.15],
-            'num_trees': [500, 600, 700, 800],
-            'oversampling': [8, 12, 16],
-            'feature_pool_size': [500, 700],
-            'test_splits': [20, 30],
+            'tree_depth': [2, 3, 4],
+            'cascade_depth': [12, 18, 25],
+            'nu': [0.1, 0.15, 0.2, 0.3],
+            'num_trees': [500, 700],
+            'oversampling': [20, 30],
+            'feature_pool_size': [500],
+            'test_splits': [20],
             'threads': [args.threads],
         }
     if args.quick:
         return {
             'tree_depth': [3, 4, 5],
-            'cascade_depth': [10, 15],
-            'nu': [0.05, 0.1, 0.2],
+            'cascade_depth': [10, 15, 20],
+            'nu': [0.05, 0.1, 0.15, 0.2],
             'num_trees': [300, 500],
-            'oversampling': [10],
+            'oversampling': [20, 30],
             'feature_pool_size': [500],
             'test_splits': [20],
             'threads': [args.threads],
         }
     # Full search
     return {
-        'tree_depth': [2, 3, 4, 5, 6],
-        'cascade_depth': [8, 10, 12, 15],
-        'nu': [0.01, 0.05, 0.1, 0.15, 0.2],
-        'num_trees': [200, 300, 500, 700],
-        'oversampling': [5, 10, 20],
+        'tree_depth': [2, 3, 4, 5],
+        'cascade_depth': [10, 15, 20],
+        'nu': [0.05, 0.1, 0.15, 0.2],
+        'num_trees': [300, 500, 700],
+        'oversampling': [10, 20, 30],
         'feature_pool_size': [500],
         'test_splits': [20],
         'threads': [args.threads],
