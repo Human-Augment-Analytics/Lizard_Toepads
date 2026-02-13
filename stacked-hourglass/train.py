@@ -8,33 +8,41 @@ import time
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 import argparse
+import json
 
 def main(args):
     training_data_dir = args.data
     if training_data_dir is None:
         training_data_dir = "./data/training_data"
 
+    configName = args.config
+    config = loadConfig(configName)
+    validateConfig(config) # fill any missing values
+
     npz_dir = Path(f"{training_data_dir}/heatmaps")
     npz_paths = list(npz_dir.glob("*.npz"))
     print(f"Found {len(npz_paths)} training samples")
 
-    train_paths, val_paths = train_test_split(npz_paths, test_size=0.2, random_state=42)
+    tsize = 1 - config["trainTestSplit"]
+    train_paths, val_paths = train_test_split(npz_paths, test_size=tsize, random_state=config["randomState"])
 
-    dataset = LizardDataset(train_paths, aug_factor=8)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=True, num_workers=0, pin_memory=True)
+    batch_size = config["batchSize"]
+
+    dataset = LizardDataset(train_paths, aug_factor=config["augmentationFactor"])
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
 
     valid_dataset = LizardDataset(val_paths, aug_factor=1)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=8, shuffle=False, num_workers=0, pin_memory=True)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
     device = 'cuda'
     shg = StackedHourGlass()
     shg.to(device)
 
-    optimizer = torch.optim.Adam(shg.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(shg.parameters(), lr=config["initialLR"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5
+        optimizer, mode='min', factor=config["scheduler"]["factor"], patience=["scheduler"]["patience"]
     )
-    num_epochs = 100
+    num_epochs = config["epochs"]
     for epoch in range(num_epochs):
         shg.train()
         running_loss = 0.0
@@ -55,7 +63,7 @@ def main(args):
             batchct += 1
             endtime = time.time()
             runtime = endtime-starttime
-            print(f"Sample {batchct} / {total / 8} | Process Time: {runtime} s | ETA: {((total/8)-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
+            print(f"Batch {batchct} / {total / 8} | Process Time: {runtime} s | ETA: {((total/8)-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
         avg_train_loss = running_loss / len(dataloader)
 
         # -------------------------
@@ -76,9 +84,36 @@ def main(args):
         print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
 
+def loadConfig(cname):
+    if cname != None:
+        p = Path(f"./configs/{cname}.json")
+        if p.exists():
+            try:
+                with open(p, "r") as f:
+                    config = f.read()
+                    return config
+            except:
+                print(f"Unable to load config {cname} at path {p}")
+    else:
+        return loadDefaultConfig()
+    return None
+
+def loadDefaultConfig():
+    p = Path(f"./configs/default.json")
+    with open(p, "r") as f:
+        config = f.read()
+        return config
+
+def validateConfig(config):
+    default = loadDefaultConfig()
+    for key in default:
+        if key not in config:
+            config[key] = default[key]
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Stacked Hourglass")
 
+    parser.add_argument("--config", type=str, required=False, help="Name of config file to use in config directory")
     parser.add_argument("--data", type=str, required=False, help="Path to training data directory")
 
     args = parser.parse_args()
