@@ -1,8 +1,0 @@
-path: /home/hice1/yloh30/scratch/Lizard_Toepads/data/dataset_obb_2class
-train: images/train
-val: images/val
-test:  # Optional
-
-names:
-  0: bot_finger
-  1: bot_toe
