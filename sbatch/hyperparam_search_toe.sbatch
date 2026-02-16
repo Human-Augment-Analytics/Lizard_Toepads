@@ -14,7 +14,8 @@
 
 set -e
 
-cd /home/hice1/yloh30/scratch/Lizard_Toepads/ml-morph
+PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+cd $PROJECT_ROOT/ml-morph
 
 module load anaconda3
 source activate lizard

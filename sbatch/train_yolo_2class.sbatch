@@ -13,7 +13,8 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=yloh30@gatech.edu
 
-cd /home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+cd $PROJECT_ROOT
 
 # Load environment
 module load anaconda3
@@ -21,7 +22,7 @@ source activate lizard
 
 # Training Command:
 yolo obb train \
-    data=/home/hice1/yloh30/scratch/Lizard_Toepads/configs/H1_obb_2class.yaml \
+    data=$PROJECT_ROOT/configs/H1_obb_2class.yaml \
     model=yolo11m-obb.pt \
     epochs=200 \
     patience=100 \

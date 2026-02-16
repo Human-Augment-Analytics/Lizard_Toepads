@@ -17,6 +17,8 @@
 # Exit on error
 set -e
 
+PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+
 # Change to the directory where the job was submitted
 cd $SLURM_SUBMIT_DIR
 
@@ -33,7 +35,7 @@ echo "Environment: lizard"
 # Run YOLO training
 # Using yolo11m-obb.pt (Medium) with 6-class merged dataset
 yolo obb train \
-    data=/home/hice1/yloh30/scratch/Lizard_Toepads/configs/H1_obb_6class.yaml \
+    data=$PROJECT_ROOT/configs/H1_obb_6class.yaml \
     model=yolo11m-obb.pt \
     epochs=200 \
     patience=100 \

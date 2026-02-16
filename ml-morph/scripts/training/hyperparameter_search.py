@@ -112,6 +112,19 @@ def build_param_grid(args):
     """
     Construct the parameter grid based on CLI flags.
     """
+    if args.baseline:
+        # Narrowed 144-config grid based on OBB hyperparam results
+        # Best regions: depth 2-3, cascade 12-25, nu 0.1-0.25, trees 400-700, over 30
+        return {
+            'tree_depth': [2, 3, 4],
+            'cascade_depth': [12, 15, 18, 25],
+            'nu': [0.1, 0.15, 0.2, 0.25],
+            'num_trees': [400, 500, 700],
+            'oversampling': [30],
+            'feature_pool_size': [500],
+            'test_splits': [20],
+            'threads': [args.threads],
+        }
     if args.refine:
         return {
             'tree_depth': [2, 3, 4],
@@ -256,6 +269,7 @@ def main():
                         help='Category name for organizing results (default: finger)')
     parser.add_argument('--quick', action='store_true', help='Quick search with fewer parameters')
     parser.add_argument('--refine', action='store_true', help='Focused search around best-performing configurations')
+    parser.add_argument('--baseline', action='store_true', help='Narrowed 144-config grid for YOLO baseline comparison')
     parser.add_argument('--threads', type=int, default=4, help='Number of threads')
 
     args = parser.parse_args()
@@ -268,9 +282,10 @@ def main():
     print(f"Training data: {args.train}")
     print(f"Test data: {args.test}")
     print(f"Output directory: {args.output_dir}")
-    if args.refine and args.quick:
-        raise ValueError("Use only one of --quick or --refine.")
-    mode = 'Refine' if args.refine else ('Quick' if args.quick else 'Full')
+    mode_count = sum([args.refine, args.quick, args.baseline])
+    if mode_count > 1:
+        raise ValueError("Use only one of --quick, --refine, or --baseline.")
+    mode = 'Baseline' if args.baseline else ('Refine' if args.refine else ('Quick' if args.quick else 'Full'))
     print(f"Mode: {mode}")
 
     param_grid = build_param_grid(args)

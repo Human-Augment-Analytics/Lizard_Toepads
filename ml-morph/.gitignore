@@ -103,9 +103,15 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+*_train*.xml
+*_test*.xml
+*.dat
+
 hyperparam_results*/
 images/
 outlier_visualizations/
 test/
 train/
 tps_files/
+crops_obb*/
+worst_predictions*/

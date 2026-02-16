@@ -130,6 +130,8 @@ def main():
     parser.add_argument('-i', '--images', required=True, help='Directory containing images')
     parser.add_argument('--train-ratio', type=float, default=0.8, help='Train/test split ratio')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--output-train', type=str, default='train.xml', help='Output train XML filename')
+    parser.add_argument('--output-test', type=str, default='test.xml', help='Output test XML filename')
     args = parser.parse_args()
 
     tps_path = Path(args.tps)
@@ -150,12 +152,14 @@ def main():
     print(f"\nSplit: {len(train_annotations)} train, {len(test_annotations)} test")
 
     # Create XML files
-    create_xml_dataset(train_annotations, image_dir, Path('train.xml'))
-    create_xml_dataset(test_annotations, image_dir, Path('test.xml'))
+    train_out = Path(args.output_train)
+    test_out = Path(args.output_test)
+    create_xml_dataset(train_annotations, image_dir, train_out)
+    create_xml_dataset(test_annotations, image_dir, test_out)
 
     print("\n✅ Preprocessing complete!")
-    print(f"  Created: train.xml ({len(train_annotations)} images)")
-    print(f"  Created: test.xml ({len(test_annotations)} images)")
+    print(f"  Created: {train_out} ({len(train_annotations)} images)")
+    print(f"  Created: {test_out} ({len(test_annotations)} images)")
 
 
 if __name__ == '__main__':

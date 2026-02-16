@@ -17,7 +17,8 @@
 set -e
 
 # Change to ml-morph directory
-cd /home/hice1/yloh30/scratch/Lizard_Toepads/ml-morph
+PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+cd $PROJECT_ROOT/ml-morph
 
 # Load necessary modules
 module load anaconda3
@@ -44,11 +45,9 @@ python scripts/preprocessing/tps_to_xml.py \
     -t consolidated_finger.tps \
     -i "$IMAGE_DIR" \
     --train-ratio 0.8 \
-    --seed 42
-
-# Rename to avoid overwriting toe XMLs
-mv train.xml finger_train.xml
-mv test.xml finger_test.xml
+    --seed 42 \
+    --output-train finger_train.xml \
+    --output-test finger_test.xml
 
 echo "Created finger_train.xml and finger_test.xml"
 echo "Train images: $(grep -c '<image' finger_train.xml)"
@@ -63,7 +62,7 @@ echo "============================================================"
 echo "STEP 2: Generating YOLO-derived bounding boxes"
 echo "============================================================"
 
-YOLO_MODEL=/home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H1_obb_2class2/weights/best.pt
+YOLO_MODEL=$PROJECT_ROOT/runs/obb/H1_obb_2class2/weights/best.pt
 PADDING=0.3
 FALLBACK_PADDING=0.5
 CONF=0.25
