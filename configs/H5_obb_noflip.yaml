@@ -1,0 +1,14 @@
+# YOLO-OBB 6-Class Dataset (no flip - bot only + ruler)
+# For fair comparison against H5 detect baseline
+path: /home/hice1/yloh30/scratch/Lizard_Toepads/data/dataset_obb_noflip
+train: images/train
+val: images/val
+test:  # Optional
+
+names:
+  0: up_finger
+  1: up_toe
+  2: bot_finger
+  3: bot_toe
+  4: ruler
+  5: id
