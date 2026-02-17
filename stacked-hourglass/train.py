@@ -81,7 +81,7 @@ def main(args):
                 val_loss += loss.item()
         avg_val_loss = val_loss / len(valid_dataloader)
         scheduler.step(avg_val_loss)
-        checkpoint_path = f"checkpoints/shg_epoch{epoch+1}.pth"
+        checkpoint_path = f"checkpoints/shg_epoch_best.pth"
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(shg.state_dict(), checkpoint_path)
