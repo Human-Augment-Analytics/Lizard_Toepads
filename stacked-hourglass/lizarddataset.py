@@ -1,3 +1,11 @@
+import numpy as np
+from torch import nn
+import torch
+from torch.utils.data import DataLoader
+import torch.nn.functional as F
+import albumentations as A
+import cv2
+
 class LizardDataset(torch.utils.data.Dataset):
     def __init__(self, npz_paths, aug_factor=8):
         self.paths = npz_paths
@@ -23,3 +31,35 @@ class LizardDataset(torch.utils.data.Dataset):
             align_corners=False
         )
         return img_tensor, heatmaps_tensor
+
+
+def apply_base_transform(img, heatmap):
+    base_transform = A.Compose([
+        A.LongestMaxSize(max_size=512),
+        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, border_value=0),
+    ])
+
+    out = base_transform(image=img, mask=heatmap)
+    image = out["image"]
+    heatmap = out["mask"]
+
+    return image, heatmap
+
+def apply_augmentation(img, heatmap):
+    aug_transform = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=15, border_mode=cv2.BORDER_CONSTANT, p=0.8),
+        A.OneOf([
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=15, val_shift_limit=10, p=0.5)
+        ], p=0.7),
+        A.GaussNoise(var_limit=(5, 20), p=0.3),
+        A.ElasticTransform(alpha=1, sigma=10, p=0.2)
+    ], additional_targets={"heatmap": "mask"})
+
+    out = aug_transform(image=img, mask=heatmap)
+    image = out["image"]
+    heatmap = out["mask"]
+
+    return image, heatmap
