@@ -23,7 +23,7 @@ def main(args):
 
     npz_dir = Path(f"{training_data_dir}/heatmaps")
     npz_paths = list(npz_dir.glob("*.npz"))
-    print(f"Found {len(npz_paths)} training samples")
+    print(f"Found {len(npz_paths)} training samples at location {npz_dir}")
 
     tsize = 1 - config["trainTestSplit"]
     train_paths, val_paths = train_test_split(npz_paths, test_size=tsize, random_state=config["randomState"])
