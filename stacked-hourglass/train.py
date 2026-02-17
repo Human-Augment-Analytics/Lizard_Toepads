@@ -13,7 +13,7 @@ import json
 def main(args):
     training_data_dir = args.data
     if training_data_dir is None:
-        training_data_dir = "./data/training_data"
+        training_data_dir = "./data"
 
     configName = args.config
     config = loadConfig(configName)
