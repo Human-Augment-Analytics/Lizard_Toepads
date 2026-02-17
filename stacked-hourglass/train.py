@@ -18,6 +18,7 @@ def main(args):
     configName = args.config
     config = loadConfig(configName)
     validateConfig(config) # fill any missing values
+    print(config)
     initEnvironment()
 
     npz_dir = Path(f"{training_data_dir}/heatmaps")
@@ -94,7 +95,7 @@ def loadConfig(cname):
         if p.exists():
             try:
                 with open(p, "r") as f:
-                    config = f.read()
+                    config = json.load(f)
                     return config
             except Exception as e:
                 print(f"Unable to load config {cname} at path {p}")
