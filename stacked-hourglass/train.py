@@ -66,7 +66,7 @@ def main(args):
             runtime = endtime-starttime
             print(f"Batch {batchct} / {total} | Process Time: {runtime} s | ETA: {(total-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
         avg_train_loss = running_loss / len(dataloader)
-        scheduler.step(avg_val_loss)
+        
         # -------------------------
         # Validation
         # -------------------------
@@ -79,6 +79,7 @@ def main(args):
                 loss = shg.calc_loss(preds, gt_heatmaps).mean()
                 val_loss += loss.item()
         avg_val_loss = val_loss / len(valid_dataloader)
+        scheduler.step(avg_val_loss)
         checkpoint_path = f"checkpoints/shg_epoch{epoch+1}.pth"
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
