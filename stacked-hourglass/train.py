@@ -45,6 +45,7 @@ def main(args):
         optimizer, mode='min', factor=config["scheduler"]["factor"], patience=config["scheduler"]["patience"]
     )
     num_epochs = config["epochs"]
+    best_val_loss = 10
     for epoch in range(num_epochs):
         shg.train()
         running_loss = 0.0
