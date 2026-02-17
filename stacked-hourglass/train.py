@@ -1,5 +1,5 @@
 from model.stackedhourglass import StackedHourGlass
-from data.lizarddataset import LizardDataset
+from lizarddataset import LizardDataset
 import numpy as np
 from torch import nn
 import torch
