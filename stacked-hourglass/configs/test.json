@@ -1,0 +1,13 @@
+{
+    "name": "default",
+    "augmentationFactor": 8,
+    "epochs": 2,
+    "trainTestSplit": 0.8,
+    "initialLR": 1e-3,
+    "scheduler": {
+        "factor": 0.5,
+        "patience": 5
+    },
+    "batchSize": 4,
+    "randomState": 42
+}
