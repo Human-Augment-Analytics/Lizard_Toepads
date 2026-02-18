@@ -27,12 +27,11 @@ class LizardDataset(torch.utils.data.Dataset):
         heatmaps_tensor = F.interpolate(
             heatmaps_tensor.unsqueeze(0),
             size=(128,128),
-            mode='bilinear',
+            mode='area',
             align_corners=False
         )
 
-        heatmaps_tensor *= 20.0  # scale so peaks survive interpolation
-        heatmaps_tensor = torch.clamp(heatmaps_tensor, 0, 1)
+        heatmaps_tensor = heatmaps_tensor / heatmaps_tensor.max()
         return img_tensor, heatmaps_tensor
 
 
