@@ -40,7 +40,13 @@ def main(args):
     shg = StackedHourGlass()
     shg.to(device)
 
-    optimizer = torch.optim.Adam(shg.parameters(), lr=config["initialLR"])
+    #optimizer = torch.optim.Adam(shg.parameters(), lr=config["initialLR"])
+    optimizer = torch.optim.SGD(
+        shg.parameters(),
+        lr=1e-3,
+        momentum=0.9,
+        weight_decay=1e-4
+    )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=config["scheduler"]["factor"], patience=config["scheduler"]["patience"]
     )
