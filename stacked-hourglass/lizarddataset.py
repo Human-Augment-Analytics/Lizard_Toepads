@@ -27,10 +27,11 @@ class LizardDataset(torch.utils.data.Dataset):
         heatmaps_tensor = F.interpolate(
             heatmaps_tensor.unsqueeze(0),
             size=(128,128),
-            mode='bilinear',
+            mode='area',
             align_corners=False,
             antialias=True
         )
+        heatmaps_tensor = heatmaps_tensor.squeeze(0)
 
         heatmaps_tensor = heatmaps_tensor / heatmaps_tensor.max()
         return img_tensor, heatmaps_tensor
@@ -39,12 +40,12 @@ class LizardDataset(torch.utils.data.Dataset):
 def apply_base_transform(img, heatmap):
     base_transform = A.Compose([
         A.LongestMaxSize(max_size=512),
-        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_REFLECT_101, border_value=0),
+        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, border_value=0),
     ])
 
-    out = base_transform(image=img, mask=heatmap)
+    out = base_transform(image=img, additional_targets=heatmap)
     image = out["image"]
-    heatmap = out["mask"]
+    heatmap = out["heatmap"]
 
     return image, heatmap
 
@@ -58,7 +59,7 @@ def apply_augmentation(img, heatmap):
             A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=15, val_shift_limit=10, p=0.5)
         ], p=0.7),
         A.GaussNoise(var_limit=(5, 20), p=0.3),
-        A.ElasticTransform(alpha=1, sigma=10, p=0.2)
+        #A.ElasticTransform(alpha=1, sigma=10, p=0.2)
     ], additional_targets={"heatmap": "mask"})
 
     out = aug_transform(image=img, mask=heatmap)
