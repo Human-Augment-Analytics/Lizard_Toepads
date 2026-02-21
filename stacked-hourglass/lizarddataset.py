@@ -41,9 +41,10 @@ def apply_base_transform(img, heatmap):
     base_transform = A.Compose([
         A.LongestMaxSize(max_size=512),
         A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, border_value=0),
-    ])
+    ],
+    additional_targets={"heatmap": "image"})
 
-    out = base_transform(image=img, additional_targets=heatmap)
+    out = base_transform(image=img, heatmap=heatmap)
     image = out["image"]
     heatmap = out["heatmap"]
 
