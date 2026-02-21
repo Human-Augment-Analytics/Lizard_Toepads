@@ -34,6 +34,7 @@ class LizardDataset(torch.utils.data.Dataset):
         print("before:", heatmaps_tensor.shape)
         heatmaps_tensor = heatmaps_tensor.squeeze(0)
         print("after:", heatmaps_tensor.shape) 
+        
         heatmaps_tensor = heatmaps_tensor / heatmaps_tensor.max()
         return img_tensor, heatmaps_tensor
 
