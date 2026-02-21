@@ -84,7 +84,8 @@ def main(args):
             for imgs, gt_heatmaps in valid_dataloader:
                 imgs, gt_heatmaps = imgs.to(device), gt_heatmaps.to(device)
                 preds = shg(imgs)
-                loss = shg.calc_loss(preds, gt_heatmaps).mean()
+                pred_list = [preds[:, i, :, :, :] for i in range(preds.shape[1])] #hack
+                loss = shg.calc_loss(pred_list, gt_heatmaps).mean()
                 val_loss += loss.item()
         avg_val_loss = val_loss / len(valid_dataloader)
         scheduler.step(avg_val_loss)
