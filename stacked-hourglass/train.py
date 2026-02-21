@@ -64,9 +64,8 @@ def main(args):
             imgs, gt_heatmaps = imgs.to(device), gt_heatmaps.to(device)
             optimizer.zero_grad()
             combined_hm_preds = shg(imgs)
-            print(f"preds: {combined_hm_preds.shape}")
-            print(f"gt: {gt_heatmaps.shape}")
-            loss = shg.calc_loss(combined_hm_preds, gt_heatmaps).mean()
+            pred_list = [combined_hm_preds[:, i, :, :, :] for i in range(combined_hm_preds.shape[1])] #hack
+            loss = shg.calc_loss(pred_list, gt_heatmaps).mean()
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
