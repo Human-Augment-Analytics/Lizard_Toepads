@@ -28,8 +28,8 @@ class LizardDataset(torch.utils.data.Dataset):
             heatmaps_tensor.unsqueeze(0),
             size=(128,128),
             mode='area',
-            align_corners=False,
-            antialias=True
+            #align_corners=False,
+            #antialias=True
         )
         heatmaps_tensor = heatmaps_tensor.squeeze(0)
 
