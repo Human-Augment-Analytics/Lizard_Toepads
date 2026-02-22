@@ -40,8 +40,20 @@ runs/
 results/
 .claude/
 
+# Personal reports
+docs/junling/
+
 # Local scripts
 scripts/clean_miami_images.py
+.scratch/
+logs/
 
 # YOLO generated files
 configs/temp_val.yaml
+
+# Untracked upstream/generated ml-morph assets
+ml-morph/images
+ml-morph/license-images
+ml-morph/logo.png
+ml-morph/predictions.xml
+scripts/preprocessing/misc/process_tps_files copy.py
