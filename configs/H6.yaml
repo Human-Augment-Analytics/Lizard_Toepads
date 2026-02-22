@@ -1,6 +1,6 @@
-# H2 Bilateral Detection Configuration
-# Training-time data augmentation with vertical flip for bilateral toepad detection
-# Based on H1.yaml with added augmentation parameters
+# H6 Bilateral Detection Configuration
+# Best hyperparameters from Ray Tune Bayesian search (50 trials, 4xH200)
+# Based on H5 with tuned augmentation and training parameters
 
 preprocessing:
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
@@ -30,43 +30,55 @@ train:
 
   # Training parameters
   epochs: 300
-  batch: 32
+  batch: 8         # tuned (was 32)
   imgsz: 1280
   workers: 2
   patience: 100
   name: H6
-  device: 0 # Use GPU 0, set to 'cpu' if no GPU
+  device: 0
   amp: true
   cache: false
   save_period: 10
 
   # ========================================
-  # Data Augmentation Parameters
+  # Tuned Training Parameters
+  # ========================================
+  lr0: 0.00020512243800954098
+  lrf: 0.3844383780337243
+  momentum: 0.9481289811379563
+  weight_decay: 3.887628761969104e-05
+  warmup_epochs: 3.0576753172725946
+
+  # Loss weights (tuned)
+  box: 9.553580631345802
+  cls: 0.8553963999739769
+  dfl: 1.6268280626964176
+
+  # ========================================
+  # Tuned Augmentation Parameters
   # ========================================
 
-  # Conservative geometric augmentations
-  degrees: 10.0 # Slight rotation ±10 degrees
-  translate: 0.1 # Slight translation 5% of image size
-  scale: 0.3 # Slight scale variation (0.8x to 1.2x range)
-  shear: 0.0 # No shearing (keep specimens anatomically correct)
-  perspective: 0.0 # No perspective transform
+  # Geometric augmentations
+  degrees: 4.652517071401157
+  translate: 0.1210777400278381
+  scale: 0.24088612975386736
+  shear: 0.0
+  perspective: 0.0
 
-  # Color augmentations (YOLO defaults, good for grayscale specimens)
-  hsv_h: 0.015 # Hue variation (minimal effect on grayscale)
-  hsv_s: 0.7 # Saturation variation
-  hsv_v: 0.4 # Value/brightness variation
+  # Color augmentations
+  hsv_h: 0.03207977739965227
+  hsv_s: 0.20925556783546193
+  hsv_v: 0.45625097748314736
 
-  # Mosaic augmentation
-  mosaic: 1.0 # Keep mosaic augmentation (default, helps with multi-object detection)
-
-  # Advanced augmentations
-  fliplr: 0.5      # Horizontal flip (50% probability)
-  mixup: 0.2       # Mixup augmentation
-  copy_paste: 0.3  # Copy-paste augmentation
+  # Mosaic & advanced augmentations
+  mosaic: 0.32143111078396946
+  fliplr: 0.45012266182668975
+  mixup: 0.31214368266935344
+  copy_paste: 0.0
 
   # Training strategies
-  cos_lr: true     # Cosine learning rate scheduler
-  close_mosaic: 10 # Disable mosaic for the last 10 epochs
+  cos_lr: true
+  close_mosaic: 10
 
 dataset:
   # Dataset paths
@@ -79,14 +91,6 @@ dataset:
   # Class configuration
   nc: 6
   names: ["up_finger", "up_toe", "bot_finger", "bot_toe", "ruler", "id"]
-
-tune:
-  # Paths resolved from env vars YOLO_PROJECT / RAY_STORAGE_PATH (set in SLURM script).
-  # Fallback: runs/tune and runs/ray_results under project root.
-  search_space:
-    batch_size:
-      type: choice
-      values: [4, 8, 16]
 
 inference:
   conf: 0.2 # Confidence threshold (0-1)

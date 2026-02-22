@@ -1,0 +1,76 @@
+# H8 OBB No-Flip Configuration
+# YOLO-OBB training with bottom-only views (fair comparison against H5 detect baseline)
+# Same 6-class scheme but upper-view classes have no annotations
+
+preprocessing:
+  # Step 1: generate_obb_from_tps.py — TPS → OBB labels
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  obb-output-dir: data/obb/processed_obb/labels
+
+  # Step 2: create_merged_obb_dataset.py — merge bottom OBB + upper bbox → 6-class
+  bottom-labels-dir: data/obb/processed_obb/labels
+  upper-labels-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels
+  images-dir: data/obb/processed_obb/images
+  splits-dir: data/obb/dataset_obb/splits
+  merged-output-dir: data/obb/dataset_6class
+
+  # Step 3: create_noflip_obb_dataset.py — filter to bottom-only
+  source-obb-dataset: data/obb/dataset_6class
+  output-dir: data/obb/dataset_noflip
+
+train:
+  # Task and model
+  task: obb
+  data: null  # Use dataset section below instead
+  model: yolo26m-obb.pt
+
+  # Training parameters
+  epochs: 200
+  batch: 16
+  imgsz: 1280
+  workers: 2
+  patience: 100
+  name: H8_obb_noflip
+  device: 0
+  amp: true
+  cache: false
+  save_period: 10
+
+  # Geometric augmentations (conservative for OBB)
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.3
+  shear: 0.0
+  perspective: 0.0
+
+  # Color augmentations
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+
+  # Mosaic & advanced augmentations
+  mosaic: 1.0
+  fliplr: 0.5
+  mixup: 0.2
+  copy_paste: 0.3
+
+  # Training strategies
+  cos_lr: true
+  close_mosaic: 10
+
+dataset:
+  path: data/obb/dataset_noflip
+  train: images/train
+  val: images/val
+
+  nc: 6
+  names: ["up_finger", "up_toe", "bot_finger", "bot_toe", "ruler", "id"]
+
+inference:
+  conf: 0.2
+  iou: 0.2
+  imgsz: 1280
+  save: true
+  save_txt: false
+  project: results
