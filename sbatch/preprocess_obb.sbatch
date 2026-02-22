@@ -11,7 +11,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/preproc_obb_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=$USER@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 # OBB preprocessing: TPS -> XML -> YOLO-OBB bbox XML with crop+rotate
 # Uses H5_obb_noflip model (6-class, no flip - bot_finger, bot_toe + ruler).

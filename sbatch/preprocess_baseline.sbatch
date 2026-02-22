@@ -11,7 +11,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/preproc_baseline_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=$USER@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 # Baseline preprocessing: TPS -> XML -> YOLO baseline bbox XML
 # Generates train/test XMLs for both toe and finger using the

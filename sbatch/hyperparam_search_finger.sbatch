@@ -10,7 +10,7 @@
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/hp_finger_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=yloh30@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 set -e
 

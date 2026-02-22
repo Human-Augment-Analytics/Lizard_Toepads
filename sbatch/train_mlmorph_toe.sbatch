@@ -11,7 +11,7 @@
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/mlmorph_toe_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=$USER@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 # Exit on error
 set -e

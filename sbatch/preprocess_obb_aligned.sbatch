@@ -11,7 +11,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/preproc_obb_aligned_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=$USER@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 # OBB preprocessing: axis-aligned conversion with 30% padding (original approach).
 # No crop+rotate. OBB corners -> min/max -> axis-aligned rect -> 30% padding.

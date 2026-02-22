@@ -10,7 +10,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=logs/hp_finger_baseline_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=$USER@gatech.edu
+#SBATCH --mail-user=%u@gatech.edu
 
 # 144-config hyperparameter search for FINGER with YOLO baseline bboxes.
 # Requires preprocess_baseline.sbatch to have completed first.
