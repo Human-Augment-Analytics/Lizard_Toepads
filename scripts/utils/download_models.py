@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download all YOLOv11 pre-trained models to models/base_models/
+Download YOLO pre-trained models (YOLOv11 detect + YOLO26 OBB) to models/base_models/
 """
 
 import os
@@ -10,11 +10,18 @@ from typing import Dict, Tuple
 
 # Model configurations: (filename, size_mb)
 MODELS: Dict[str, Tuple[str, float]] = {
+    # Detection models
     "yolov11n.pt": ("yolo11n.pt", 5.4),
     "yolov11s.pt": ("yolo11s.pt", 18.5),
     "yolov11m.pt": ("yolo11m.pt", 40.2),
     "yolov11l.pt": ("yolo11l.pt", 49.7),
     "yolov11x.pt": ("yolo11x.pt", 109.3),
+    # YOLO26 OBB (Oriented Bounding Box) models
+    "yolo26n-obb.pt": ("yolo26n-obb.pt", 5.0),
+    "yolo26s-obb.pt": ("yolo26s-obb.pt", 18.0),
+    "yolo26m-obb.pt": ("yolo26m-obb.pt", 38.0),
+    "yolo26l-obb.pt": ("yolo26l-obb.pt", 48.0),
+    "yolo26x-obb.pt": ("yolo26x-obb.pt", 110.0),
 }
 
 BASE_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
@@ -55,7 +62,7 @@ def main():
     models_dir = Path("models/base_models")
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    print("YOLOv11 Model Downloader")
+    print("YOLO Model Downloader (YOLOv11 Detect + YOLO26 OBB)")
     print("=" * 50)
     print(f"Download directory: {models_dir.absolute()}")
     print()
