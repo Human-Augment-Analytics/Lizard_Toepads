@@ -8,6 +8,7 @@ from pathlib import Path
 from ultralytics import YOLO
 import dlib
 import sys
+import os
 
 # Class definitions
 CLASSES = {0: 'bot_finger', 1: 'bot_toe', 2: 'up_finger', 3: 'up_toe'}
@@ -101,9 +102,10 @@ def visualize_yolo_obb(img_path, model_path, output_path):
 
 def main():
     # Paths
+    project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
     img_path = Path("/storage/ice-shared/cs8903onl/miami_fall_24_jpgs/1001.jpg")
-    bbox_model = Path("/home/hice1/yloh30/scratch/Lizard_Toepads/yolo_bounding_box.pt")
-    obb_model = Path("/home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H1_obb_2class2/weights/best.pt")
+    bbox_model = Path(f"{project_root}/yolo_bounding_box.pt")
+    obb_model = Path(f"{project_root}/runs/obb/H1_obb_2class2/weights/best.pt")
     output_dir = Path("inference_results/progression")
     
     output_dir.mkdir(parents=True, exist_ok=True)

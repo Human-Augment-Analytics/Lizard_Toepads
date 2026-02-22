@@ -11,13 +11,13 @@
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/mlmorph_finger_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=yloh30@gatech.edu
+#SBATCH --mail-user=$USER@gatech.edu
 
 # Exit on error
 set -e
 
 # Change to ml-morph directory
-PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/$USER/scratch/Lizard_Toepads
 cd $PROJECT_ROOT/ml-morph
 
 # Load necessary modules

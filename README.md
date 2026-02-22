@@ -279,6 +279,12 @@ salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 *   `-t8:00:00`: 8 hours duration
 *   `--gres=gpu:H200:1`: Request 1 NVIDIA H200 GPU
 
+## Landmark Prediction (ml-morph) Experiments
+
+For details on the `ml-morph` landmark prediction experiments (Baseline vs. OBB detection) and step-by-step instructions to train the shape predictors, please see:
+* **[ML_MORPH_PIPELINE.md](docs/ML_MORPH_PIPELINE.md)** - Main guide and instructions for running the pipeline.
+* [COMPARISON_BASELINE_VS_OBB.md](docs/COMPARISON_BASELINE_VS_OBB.md) - Detailed analysis of baseline vs OBB bounding boxes.
+* [EXPERIMENT_CROP_ROTATE_OBB.md](docs/EXPERIMENT_CROP_ROTATE_OBB.md) - Analysis of crop & rotate experiments.
 
 ### Additional Resources
 - Internal PACE Documentation for accessing additional computational resources:

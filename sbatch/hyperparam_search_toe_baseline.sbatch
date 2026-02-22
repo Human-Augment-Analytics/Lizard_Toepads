@@ -10,14 +10,14 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=logs/hp_toe_baseline_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=yloh30@gatech.edu
+#SBATCH --mail-user=$USER@gatech.edu
 
 # 144-config hyperparameter search for TOE with YOLO baseline bboxes.
 # Requires preprocess_baseline.sbatch to have completed first.
 
 set -e
 
-PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/$USER/scratch/Lizard_Toepads
 cd $PROJECT_ROOT/ml-morph
 
 module load anaconda3

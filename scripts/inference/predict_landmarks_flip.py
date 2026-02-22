@@ -287,9 +287,10 @@ def draw_results(img, detections, landmarks_list):
 
 def main():
     parser = argparse.ArgumentParser(description="Run inference with flip strategy + landmarks")
-    parser.add_argument('--model', default='/home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H1_obb_2class2/weights/best.pt', help="Path to YOLO model")
-    parser.add_argument('--finger-predictor', default='/home/hice1/yloh30/scratch/Lizard_Toepads/ml-morph/finger_predictor_yolo_bbox.dat', help="Path to finger shape predictor")
-    parser.add_argument('--toe-predictor', default='/home/hice1/yloh30/scratch/Lizard_Toepads/ml-morph/toe_predictor_yolo_bbox.dat', help="Path to toe shape predictor")
+    project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
+    parser.add_argument('--model', default=f'{project_root}/runs/obb/H1_obb_2class2/weights/best.pt', help="Path to YOLO model")
+    parser.add_argument('--finger-predictor', default=f'{project_root}/ml-morph/finger_predictor_yolo_bbox.dat', help="Path to finger shape predictor")
+    parser.add_argument('--toe-predictor', default=f'{project_root}/ml-morph/toe_predictor_yolo_bbox.dat', help="Path to toe shape predictor")
     parser.add_argument('--source', required=True, help="Image file")
     parser.add_argument('--output-dir', default='inference_results', help="Output directory")
     parser.add_argument('--no-rotation', action='store_true',

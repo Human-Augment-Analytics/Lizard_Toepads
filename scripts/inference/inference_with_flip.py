@@ -98,7 +98,8 @@ def draw_detections(img, detections):
 
 def main():
     parser = argparse.ArgumentParser(description="Run inference with flip strategy")
-    parser.add_argument('--model', default='/home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H1_obb_2class2/weights/best.pt', help="Path to model")
+    project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
+    parser.add_argument('--model', default=f'{project_root}/runs/obb/H1_obb_2class2/weights/best.pt', help="Path to model")
     parser.add_argument('--source', required=True, help="Image file or directory")
     parser.add_argument('--output-dir', default='inference_outputs', help="Output directory")
     parser.add_argument('--conf', type=float, default=0.25, help="Confidence threshold")

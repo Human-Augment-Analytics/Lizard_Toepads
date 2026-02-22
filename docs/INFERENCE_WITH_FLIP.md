@@ -24,7 +24,7 @@ This results in a full set of accurate OBBs for all limb classes without requiri
 
 ### 1. Model Checkpoint
 You need a trained YOLOv11-OBB model that performs well on `bot_finger` and `bot_toe`.
-*   **Default Path**: `/home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H6_obb_6class3/weights/best.pt`
+*   **Default Path**: `$PROJECT_ROOT/runs/obb/H6_obb_6class3/weights/best.pt`
 
 ### 2. Environment
 Ensure your Python environment has the following installed:

@@ -11,7 +11,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/preproc_obb_aligned_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=yloh30@gatech.edu
+#SBATCH --mail-user=$USER@gatech.edu
 
 # OBB preprocessing: axis-aligned conversion with 30% padding (original approach).
 # No crop+rotate. OBB corners -> min/max -> axis-aligned rect -> 30% padding.
@@ -19,7 +19,7 @@
 
 set -e
 
-PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/$USER/scratch/Lizard_Toepads
 cd $PROJECT_ROOT/ml-morph
 
 module load anaconda3

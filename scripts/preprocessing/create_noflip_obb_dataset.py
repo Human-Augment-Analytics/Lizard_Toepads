@@ -23,9 +23,10 @@ from pathlib import Path
 
 
 # Paths
-SRC_6CLASS = Path("/home/hice1/yloh30/scratch/Lizard_Toepads/data/dataset_obb_6class")
-SRC_PROCESSED_OBB = Path("/home/hice1/yloh30/scratch/Lizard_Toepads/data/processed_obb/labels")
-DST_DATASET = Path("/home/hice1/yloh30/scratch/Lizard_Toepads/data/dataset_obb_noflip")
+project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
+SRC_6CLASS = Path(f"{project_root}/data/dataset_obb_6class")
+SRC_PROCESSED_OBB = Path(f"{project_root}/data/processed_obb/labels")
+DST_DATASET = Path(f"{project_root}/data/dataset_obb_noflip")
 
 # From dataset_obb_6class: keep only bot_finger (2) and bot_toe (3)
 KEEP_CLASSES = {2, 3}

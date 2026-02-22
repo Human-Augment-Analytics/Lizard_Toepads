@@ -11,7 +11,7 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=logs/yolo_train_obb_noflip_%j.out
 #SBATCH --mail-type=ALL
-#SBATCH --mail-user=yloh30@gatech.edu
+#SBATCH --mail-user=$USER@gatech.edu
 
 # Train YOLO-OBB on 6-class no-flip dataset for fair comparison against H5 detect baseline.
 # Step 1: Create the dataset (drop up_finger/up_toe, keep bot + ruler OBB)
@@ -19,7 +19,7 @@
 
 set -e
 
-PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/$USER/scratch/Lizard_Toepads
 cd $PROJECT_ROOT
 
 module load anaconda3

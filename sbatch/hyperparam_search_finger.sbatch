@@ -14,7 +14,7 @@
 
 set -e
 
-PROJECT_ROOT=/home/hice1/yloh30/scratch/Lizard_Toepads
+PROJECT_ROOT=/home/hice1/$USER/scratch/Lizard_Toepads
 cd $PROJECT_ROOT/ml-morph
 
 module load anaconda3
