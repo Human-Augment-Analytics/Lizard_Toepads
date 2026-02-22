@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument('--no-save', action='store_true', help='Do not save results (overrides config)')
     parser.add_argument('--save-txt', action='store_true', help='Save results as txt files (overrides config)')
     parser.add_argument('--project', help='Results save directory (overrides config)')
+    parser.add_argument('--task', choices=['detect', 'obb'], help='YOLO task type (default: detect)')
     return parser.parse_args()
 
 
@@ -133,19 +134,27 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
         image_count += 1
         if image_count % 50 == 0:
             print(f"  Processed {image_count} images...")
-        boxes = r.boxes
-        if boxes is not None:
-            num_detections = len(boxes)
+
+        # OBB results use r.obb, standard detection uses r.boxes
+        detections = r.obb if r.obb is not None and len(r.obb) > 0 else r.boxes
+        if detections is not None:
+            num_detections = len(detections)
             total_detections += num_detections
 
-            for j, box in enumerate(boxes):
-                class_id = int(box.cls[0])
-                class_name = class_names[class_id]
-                confidence = float(box.conf[0])
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-
+            for j in range(num_detections):
+                class_id = int(detections.cls[j])
+                class_name = class_names[class_id] if class_id < len(class_names) else f"Class_{class_id}"
+                confidence = float(detections.conf[j])
                 print(f"  {j+1}. {class_name}: {confidence:.3f} confidence")
-                print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
+
+                if hasattr(detections, 'xywhr') and detections.xywhr is not None:
+                    # OBB: print center, size, and rotation angle
+                    cx, cy, w, h, angle = detections.xywhr[j].tolist()
+                    import math
+                    print(f"     OBB: center=({cx:.1f}, {cy:.1f}) size=({w:.1f}x{h:.1f}) angle={math.degrees(angle):.1f}°")
+                else:
+                    x1, y1, x2, y2 = detections.xyxy[j].tolist()
+                    print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
 
     print(f"\n=== Summary ===")
     print(f"Total images processed: {image_count}")
