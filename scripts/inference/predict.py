@@ -21,26 +21,27 @@ def parse_args():
     parser.add_argument('--no-save', action='store_true', help='Do not save results (overrides config)')
     parser.add_argument('--save-txt', action='store_true', help='Save results as txt files (overrides config)')
     parser.add_argument('--project', help='Results save directory (overrides config)')
+    parser.add_argument('--task', help='Task type: detect or obb (overrides config)')
     return parser.parse_args()
 
 
-def get_model_from_config(cfg):
-    """Get model path based on training name from config"""
+def get_model_from_config(cfg, task='detect'):
+    """Get model path based on training name and task from config"""
     train_name = cfg.get('train', {}).get('name', 'H1')
-    model_path = f"runs/detect/{train_name}/weights/best.pt"
+    model_path = f"runs/{task}/{train_name}/weights/best.pt"
 
     if os.path.exists(model_path):
         return model_path
     else:
         # Fallback to latest model
-        return get_latest_model()
+        return get_latest_model(task)
 
 
-def get_latest_model():
-    """Find the latest best.pt model in runs/detect/"""
-    model_paths = glob.glob("runs/detect/*/weights/best.pt")
+def get_latest_model(task='detect'):
+    """Find the latest best.pt model in runs/{task}/"""
+    model_paths = glob.glob(f"runs/{task}/*/weights/best.pt")
     if not model_paths:
-        raise FileNotFoundError("No trained models found in runs/detect/*/weights/best.pt")
+        raise FileNotFoundError(f"No trained models found in runs/{task}/*/weights/best.pt")
 
     # Get the most recent model by modification time
     latest_model = max(model_paths, key=os.path.getmtime)
@@ -133,19 +134,33 @@ def run_inference(model_path, source_path, conf=0.25, iou=0.45, imgsz=1024, save
         image_count += 1
         if image_count % 50 == 0:
             print(f"  Processed {image_count} images...")
-        boxes = r.boxes
-        if boxes is not None:
-            num_detections = len(boxes)
+
+        # Handle both OBB and standard box detections
+        detections = None
+        is_obb = False
+        if r.obb is not None and len(r.obb) > 0:
+            detections = r.obb
+            is_obb = True
+        elif r.boxes is not None and len(r.boxes) > 0:
+            detections = r.boxes
+
+        if detections is not None:
+            num_detections = len(detections)
             total_detections += num_detections
 
-            for j, box in enumerate(boxes):
-                class_id = int(box.cls[0])
+            for j in range(num_detections):
+                class_id = int(detections.cls[j])
                 class_name = class_names[class_id]
-                confidence = float(box.conf[0])
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                confidence = float(detections.conf[j])
 
-                print(f"  {j+1}. {class_name}: {confidence:.3f} confidence")
-                print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
+                if is_obb and hasattr(detections, 'xywhr'):
+                    cx, cy, w, h, angle = detections.xywhr[j].tolist()
+                    print(f"  {j+1}. {class_name}: {confidence:.3f} confidence")
+                    print(f"     OBB: center=({cx:.1f}, {cy:.1f}) size=({w:.1f}x{h:.1f}) angle={angle:.1f}")
+                else:
+                    x1, y1, x2, y2 = detections.xyxy[j].tolist()
+                    print(f"  {j+1}. {class_name}: {confidence:.3f} confidence")
+                    print(f"     Box: ({x1:.1f}, {y1:.1f}) to ({x2:.1f}, {y2:.1f})")
 
     print(f"\n=== Summary ===")
     print(f"Total images processed: {image_count}")
@@ -189,12 +204,16 @@ def main():
     print(f"  - Save txt: {save_txt}")
     print(f"  - Project directory: {project}")
 
+    # Determine task type
+    task = args.task or cfg.get('train', {}).get('task', 'detect')
+    print(f"  - Task: {task}")
+
     # Determine model path
     if args.model:
         model_path = args.model
     else:
         try:
-            model_path = get_model_from_config(cfg)
+            model_path = get_model_from_config(cfg, task=task)
             print(f"Using model from config: {model_path}")
         except FileNotFoundError as e:
             print(f"Error: {e}")
