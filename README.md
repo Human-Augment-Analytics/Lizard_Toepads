@@ -1,284 +1,286 @@
-# PACE Documentation Contribution Template
+# Lizard Toepad Detection Pipeline
 
-## Document Metadata
-* **Authors**: Dylan Herbig, Junling Zhuang
-* **Date Created**: 2025-07-18
-* **Last Updated**: 2026-01-23 By Junling Zhuang
-* **Applicable Clusters**: Only utilized on ICE, but also applicable for Phoenix and Hive
+**Authors**: Dylan Herbig, Junling Zhuang, Leyang Shen
+**Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
 
-## Bilateral Toepad Detection Pipeline
+## Overview
 
-### Overview
-This documentation describes the setup and usage of a YOLOv8-based object detection pipeline used to identify lizard toepads from scanned images. The pipeline now supports **bilateral detection** by integrating:
-1.  **Bottom View**: Processed from TPS landmark files.
-2.  **Upper View**: Integrated from a separate annotated dataset (Roboflow).
+A two-stage pipeline for lizard toepad analysis:
 
+1. **Stage 1 — YOLO Detection**: Detect toepad regions (fingers, toes, ruler, ID) using YOLOv11, with support for both standard bounding boxes (`detect`) and oriented bounding boxes (`obb`).
+2. **Stage 2 — ml-morph Landmark Prediction**: Crop detected regions and predict anatomical landmarks using dlib shape predictors. See [docs/ML_MORPH_PIPELINE.md](docs/ML_MORPH_PIPELINE.md).
 
-This unified pipeline processes raw data, merges annotations, splits the dataset, and trains a generic YOLOv11 model.
+### Class Mapping (6 classes, shared across detect and OBB)
+
+| ID | Class      | Source              |
+|----|------------|---------------------|
+| 0  | up_finger  | Upper view dataset  |
+| 1  | up_toe     | Upper view dataset  |
+| 2  | bot_finger | TPS landmark files  |
+| 3  | bot_toe    | TPS landmark files  |
+| 4  | ruler      | TPS landmark files  |
+| 5  | id         | TPS landmark files  |
+
+---
+
+## Prerequisites
+
+- Active PACE account with GPU allocation access
+- Python 3.10+ (tested with 3.13)
+- [uv](https://docs.astral.sh/uv/) package manager
 
 ### Data Sources (ICE Cluster)
-The project relies on shared datasets available on the ICE cluster.
 
-**Shared Directories:**
-*   **Images**: `/storage/ice-shared/cs8903onl/miami_fall_24_jpgs/`
-*   **TPS Landmarks**: `/storage/ice-shared/cs8903onl/tps_files/` (Includes `_finger.TPS`, `_toe.TPS`, and `_id.TPS`)
-*   **Upper View Dataset**: `/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/`
+| Data | Path |
+|------|------|
+| Images | `/storage/ice-shared/cs8903onl/miami_fall_24_jpgs/` |
+| TPS Landmarks | `/storage/ice-shared/cs8903onl/tps_files/` |
+| Upper View Dataset | `/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/` |
 
-**Note:** For local development or training, you can symlink these to your project directory (see "Using shared data on PACE").
+---
 
+## Setup
 
-### Prerequisites
-- Required access/permissions:
-  - Active PACE account
-  - Allocate computational resources using `salloc`. See [Computational Resources](#computational-resources) for details.
-- Software dependencies:
-  - conda 
-  - Python 3.10+ (tested with 3.13)
-  - Ultralytics YOLOv11 (`pip install ultralytics`)
-  - Pillow (`pip install pillow`)
-- Storage requirements:
-  - At least 5–10 GB for dataset preparation and model training
-  - Fast local storage (e.g., SSD-backed node storage) is recommended
-- Other prerequisites:
-  - A labeled dataset (images + YOLO-style .txt annotations)
-  - Conda environment setup
+### 1. Install uv and dependencies
 
-### Pipeline Standardization
-
-#### Complete Preprocessing Flow (Reference: `configs/H4.yaml`)
-```yaml
-preprocessing:
-  # Step 1: Raw data sources
-  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
-  tps-dir: /storage/ice-shared/cs8903onl/tps_files
-
-  # Step 2: Process bottom view with TPS landmarks
-  bottom-view-processed-dir: data/processed_bottom
-  
-  # Step 3: Integrate upper view dataset
-  addtional-upper-side-data-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train
-  
-  # Step 4: Merge bilateral annotations
-  merged-processed-dir: data/processed_merged
-  
-split:
-  # Step 5: Train/val split
-  images-dir: data/processed_merged/images
-  labels-dir: data/processed_merged/labels
-  output-dir: data/dataset
-  train-ratio: 0.8
-```
-
-#### Pipeline Scripts
-1. **generate_bottom_view_labels.py** - Converts TPS landmarks to YOLO labels (Bottom View)
-2. **merge_upper_bottom_views.py** - Merges upper and bottom view annotations
-3. **create_train_val_split.py** - Splits dataset into train/val sets
-
-#### Key Integration: Upper View Dataset
-
-**Class Mapping (6 classes total)**
-```python
-0: up_finger   # From upper view dataset
-1: up_toe      # From upper view dataset
-2: bot_finger  # From TPS processing
-3: bot_toe     # From TPS processing
-4: ruler       # From TPS processing
-5: id          # From TPS processing
-```
-
-This enables bilateral detection by combining:
-- **Bottom view** (TPS-based processing) - classes 2, 3, 4, 5
-- **Upper view** (Roboflow annotations) - classes 0, 1
-
-**Note**: Upper view dataset is available on ICE cloud storage at `/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/`. For local development, the dataset has been copied to `data/upper_dataset_roboflow/train/`.
-
-### Configuration Guidelines
-
-All future configurations should follow the **H4.yaml pattern**:
-1. Define all preprocessing paths in `preprocessing` section
-2. Specify merged output directory
-3. Configure split parameters
-4. Include dataset section with 6-class mapping
-
-### Step-by-Step Instructions
-
-### Step-by-Step Instructions
-
-1. Install uv package manager:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   export PATH="$HOME/.local/bin:$PATH"  # Add uv to PATH
-   # Optional: Add to ~/.bashrc for permanent PATH update
-   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-   ```
-
-2. Install dependencies (uv will automatically create venv):
-   ```bash
-   cd ~/Lizard_Toepads
-   uv sync  # Install all dependencies from pyproject.toml
-
-   # Install PyTorch with CUDA (rerun after every uv sync)
-   uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-   # For CPU-only setups:
-   uv pip install --python .venv torch torchvision torchaudio
-   ```
-
-   **Note**: PyTorch is not included in pyproject.toml to avoid CPU/GPU version conflicts. After each `uv sync`, rerun `uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124` to restore the CUDA build. On newer uv releases, `uv run` re-syncs the environment before executing; that will replace the CUDA wheels with the CPU build. When you need GPU support, either add `--no-sync` to `uv run ...` (or set `UV_NO_SYNC=1`) or call the interpreter directly via `.venv\Scripts\python` so the CUDA wheels stay in place.
-
-3. Run the complete workflow:
-   ```bash
-   # 1. Generate Bottom View Labels (TPS → YOLO)
-   uv run python scripts/preprocessing/generate_bottom_view_labels.py --config configs/H4.yaml
-
-   # 2. Merge Upper and Bottom Views
-   uv run python scripts/preprocessing/merge_upper_bottom_views.py --config configs/H4.yaml
-
-   # 3. Create Train/Val Split
-   uv run python scripts/preprocessing/create_train_val_split.py --config configs/H4.yaml
-
-   # 4. Standard Allocation Command (H200 GPU)
-   salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
-
-   # 5. Train YOLO (will auto-download YOLOv11s if needed)
-   uv run python scripts/training/train_yolo_aug.py --config configs/H4.yaml
-
-   # 6. Predict / Inference
-   uv run python scripts/inference/predict.py --config configs/H4.yaml --quick-test
-   ```
-
-   **Note**: Pre-trained models are stored in `models/base_models/`. The training script automatically downloads YOLOv11n on first run if not present.
-
-
-### Using shared data on PACE (optional)
-- If you want to quickly experiment with the data and YOLO model on PACE, first follow this README to set up your environment on PACE, then bring the shared data into your project.
-- Shared directories on ICE:
-  - `/storage/ice-shared/cs8903onl/miami_fall_24_jpgs/`
-  - `/storage/ice-shared/cs8903onl/tps_files/`
-
-Option A — create symlinks (recommended to save quota):
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+cd ~/Lizard_Toepads
+uv sync
+```
+
+### 2. Install PyTorch with CUDA
+
+```bash
+# CUDA 12.4 (must rerun after every uv sync)
+uv pip install --python .venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# CPU-only alternative:
+# uv pip install --python .venv torch torchvision torchaudio
+```
+
+> **Note**: PyTorch is excluded from `pyproject.toml` to avoid CPU/GPU version conflicts. After `uv sync`, rerun the CUDA install command. When using `uv run`, either pass `--no-sync` or set `UV_NO_SYNC=1` to prevent overwriting CUDA wheels.
+
+### 3. Download pre-trained models
+
+```bash
+uv run python scripts/utils/download_models.py
+```
+
+This downloads all YOLOv11 detect + OBB models to `models/base_models/`.
+
+### 4. Using shared data on PACE (optional)
+
+```bash
+# Symlink shared data (saves quota)
 mkdir -p ~/Lizard_Toepads/data
 ln -s /storage/ice-shared/cs8903onl/miami_fall_24_jpgs ~/Lizard_Toepads/data/miami_fall_24_jpgs
 ln -s /storage/ice-shared/cs8903onl/tps_files ~/Lizard_Toepads/data/tps_files
 ```
 
-Option B — copy the data (uses your home/project quota):
-```bash
-mkdir -p ~/Lizard_Toepads/data
-cp -r /storage/ice-shared/cs8903onl/miami_fall_24_jpgs ~/Lizard_Toepads/data/
-cp -r /storage/ice-shared/cs8903onl/tps_files ~/Lizard_Toepads/data/
-```
+---
 
-Notes:
-- The inference example below can then use paths like `data/miami_fall_24_jpgs/1001.jpg`.
-- If you organize a YOLO dataset split later, point your `data.yaml` to those `data/dataset/images` and `data/dataset/labels` folders accordingly.
+## Pipeline Overview
 
-### Validation
+### Shared Steps
 
-Pipeline successfully executed on 843 images:
-```
-Process:  843 images -> data/processed_bottom
-Merge:    843 samples -> data/processed_merged (6 classes)
-Split:    674 train / 169 val -> data/dataset
-```
-
-**Sample output** (data/processed_merged/labels/1001.txt):
-```
-0 0.358266 0.322761 0.045961 0.018611  # up_finger
-1 0.507359 0.163987 0.032164 0.107369  # up_toe
-2 0.359118 0.586415 0.034185 0.029258  # bot_finger
-3 0.537083 0.688274 0.022763 0.112405  # bot_toe
-4 0.027159 0.855338 0.054319 0.016750  # ruler
-5 0.117353 0.104960 0.112912 0.098565  # id
-```
-
-### Model Selection Guide
-
-#### Available YOLOv11 Models
-
-| Model | Size | Speed | mAP | GPU Memory | Use Case |
-|-------|------|-------|-----|------------|----------|
-| yolov11n | 5.4MB | Fastest | Lower | 2-4GB | Quick experiments, small datasets |
-| yolov11s | ~18MB | Fast | Good | 4-6GB | **Recommended balance** |
-| yolov11m | ~40MB | Medium | Better | 6-10GB | Larger datasets |
-| yolov11l | ~50MB | Slow | High | 10GB+ | High accuracy needs |
-| yolov11x | ~110MB | Slowest | Highest | 12GB+ | Maximum accuracy |
-
-#### Model Download
-
-##### Download All Models at Once (Recommended)
+1. Install dependencies and download models (see [Setup](#setup))
+2. Generate bottom view labels from TPS landmarks
 
 ```bash
-# Download all YOLOv11 models (n, s, m, l, x)
-uv run python scripts/download_models.py
+uv run python scripts/preprocessing/detect/generate_bottom_view_labels.py --config configs/H5.yaml
 ```
 
-This will download all 5 models (~220MB total) to `models/base_models/` and skip any that already exist.
-
-##### Manual Download for Individual Models
+### YOLO Detect Pipeline
 
 ```bash
-# Download YOLOv11n (nano - recommended for start)
-curl -L -o models/base_models/yolov11n.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"
+# 3a. Merge upper + bottom views (6-class bbox)
+uv run python scripts/preprocessing/detect/merge_upper_bottom_views.py --config configs/H5.yaml
 
-# Download YOLOv11s (small - best balance)
-curl -L -o models/base_models/yolov11s.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"
+# 4a. Create train/val split
+uv run python scripts/preprocessing/create_train_val_split.py --config configs/H5.yaml  # shared
 
-# Download YOLOv11m (medium)
-curl -L -o models/base_models/yolov11m.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt"
+# 5a. Allocate GPU and train
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
+srun --pty bash
 
-# Download YOLOv11l (large)
-curl -L -o models/base_models/yolov11l.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt"
+uv run python scripts/training/train_yolo.py --config configs/H5.yaml
 
-# Download YOLOv11x (extra large)
-curl -L -o models/base_models/yolov11x.pt "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt"
+# 6a. Inference
+uv run python scripts/inference/predict.py --config configs/H5.yaml --quick-test
 ```
 
-#### Switching Models
-To use a different model, update `configs/H1.yaml`:
+### YOLO OBB Pipeline
+
+```bash
+# 3b. Generate OBB labels from TPS
+uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H8_obb_noflip.yaml
+
+# 4b. Create merged OBB dataset (bbox → OBB conversion)
+uv run python scripts/preprocessing/obb/create_merged_obb_dataset.py --config configs/H8_obb_noflip.yaml
+
+# 5b. Create no-flip OBB dataset (bottom-only, fair comparison against detect baseline)
+uv run python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_noflip.yaml
+
+# 6b. Allocate GPU and train
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
+srun --pty bash
+
+uv run --no-sync python scripts/training/train_yolo.py --config configs/H8_obb_noflip.yaml
+
+# 7b. Inference (flip strategy for upper-view detection)
+uv run --no-sync python scripts/inference/inference_with_flip.py --config configs/H8_obb_noflip.yaml --source data/images/
+```
+
+### Hyperparameter Tuning (either pipeline)
+
+```bash
+# Detect tuning
+uv run python scripts/tuning/tune_hyperparams.py --config configs/H5.yaml --num-samples 50
+
+# OBB tuning
+uv run python scripts/tuning/tune_hyperparams.py --config configs/H8_obb_noflip.yaml --num-samples 50
+```
+
+### Stage 2: ml-morph (Landmark Prediction)
+
+After YOLO detections, crop regions and run dlib shape predictors:
+```bash
+cd ml-morph
+# See docs/ML_MORPH_PIPELINE.md for full instructions
+```
+
+---
+
+## Configuration
+
+All training parameters live in YAML configs under `configs/`. The training script passes every key in the `train:` section directly to YOLO — **adding a new parameter requires zero code changes**, just add it to the YAML.
+
+### Available Configs
+
+| Config | Task | Description |
+|--------|------|-------------|
+| `H5.yaml` | detect | Bilateral detection with augmentation |
+| `H6.yaml` | detect | H5 + Ray Tune best hyperparameters |
+| `H7_obb_6class.yaml` | obb | OBB with merged upper+bottom views |
+| `H8_obb_noflip.yaml` | obb | OBB bottom-only (fair baseline comparison) |
+
+### Config Structure
 
 ```yaml
 train:
-  model: models/base_models/yolov11s.pt  # Change from yolov11n.pt
+  task: detect          # or obb
+  model: yolo11m.pt     # auto-downloaded by YOLO
+  epochs: 300
+  batch: 32
+  imgsz: 1280
+  # ... any YOLO train() parameter works here
+
+dataset:
+  path: data/dataset
+  train: images/train
+  val: images/val
+  nc: 6
+  names: ["up_finger", "up_toe", "bot_finger", "bot_toe", "ruler", "id"]
+
+inference:
+  conf: 0.2
+  iou: 0.2
 ```
 
-Or specify via command line:
+---
+
+## Model Selection Guide
+
+This project uses two model families from [Ultralytics](https://docs.ultralytics.com/):
+
+- **[YOLOv11](https://docs.ultralytics.com/models/yolo11/) (detect)** — standard axis-aligned bounding boxes. Good when objects are roughly upright.
+- **[YOLO26](https://docs.ultralytics.com/models/yolo26/) (OBB)** — oriented (rotated) bounding boxes with the latest architecture. NMS-free end-to-end inference, ~43% faster CPU speed vs YOLO11.
+
+### YOLOv11 Detection Models (`task: detect`)
+
+Used by configs: `H5.yaml`, `H6.yaml`
+
+| Model | Filename | Params | Speed | Use Case |
+|-------|----------|--------|-------|----------|
+| YOLOv11n | yolov11n.pt | 2.6M | Fastest | Quick experiments |
+| YOLOv11s | yolov11s.pt | 9.4M | Fast | Good balance |
+| **YOLOv11m** | **yolov11m.pt** | 20.1M | Medium | **Recommended** |
+| YOLOv11l | yolov11l.pt | 25.3M | Slow | High accuracy |
+| YOLOv11x | yolov11x.pt | 56.9M | Slowest | Maximum accuracy |
+
+### YOLO26-OBB Models (`task: obb`)
+
+Used by configs: `H7_obb_6class.yaml`, `H8_obb_noflip.yaml`
+
+| Model | Filename | Params | Speed | Use Case |
+|-------|----------|--------|-------|----------|
+| YOLO26n-OBB | yolo26n-obb.pt | 2.5M | Fastest | Quick experiments |
+| YOLO26s-OBB | yolo26s-obb.pt | 9.0M | Fast | Good balance |
+| **YOLO26m-OBB** | **yolo26m-obb.pt** | 19.3M | Medium | **Recommended** |
+| YOLO26l-OBB | yolo26l-obb.pt | 24.4M | Slow | High accuracy |
+| YOLO26x-OBB | yolo26x-obb.pt | 57.6M | Slowest | Maximum accuracy |
+
+> **Why different versions?** YOLO26 is the latest Ultralytics architecture with NMS-free inference and improved speed. We use it for OBB where the new rotation head benefits most. Detect stays on YOLOv11 which has proven results on our dataset. Both are swappable via config — just change `model:` in the YAML.
+>
+> **When to use OBB?** If toepad specimens are scanned at various angles, OBB produces tighter bounding boxes and cleaner crops for downstream landmark prediction. See [docs/COMPARISON_BASELINE_VS_OBB.md](docs/COMPARISON_BASELINE_VS_OBB.md) for a quantitative comparison.
+
+---
+
+## SLURM Allocation Examples
+
 ```bash
-uv run python scripts/training/train_yolo.py --model models/base_models/yolov11s.pt
-```
-
-### Storage and Resource Considerations
-- Disk Space Requirements:
-  - Temporary storage: 5-10 GB
-  - Permanent storage: Optional, depending on output volume
-- Memory Usage:
-  - Minimum: 4 GB RAM
-  - Recommended: 16+ GB RAM for large batch training
-- CPU Requirements:
-  - Minimum cores: 2 cores
-  - Optimal performance: 8+ cores or GPU-enabled compute node
-- Quota Impact:
-  - High read/write I/O during training. Avoid running on shared `/home` paths.
-
-### Computational Resources
-
-To run training effectively, allocate a GPU node using `salloc`.
-
-**Standard Allocation Command (H200 GPU):**
-```bash
+# Single H200 GPU (recommended for training)
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
+
+# Single A100 GPU
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:A100:1
+
+# Multi-GPU for hyperparameter tuning
+salloc -N1 --ntasks-per-node=8 -t12:00:00 --gres=gpu:H200:4
 ```
 
-**Resource Breakdown:**
-*   `-N1`: 1 Node
-*   `--ntasks-per-node=4`: 4 CPU cores (good for data loading)
-*   `-t8:00:00`: 8 hours duration
-*   `--gres=gpu:H200:1`: Request 1 NVIDIA H200 GPU
+See `sbatch/` for pre-built SLURM batch scripts.
 
+---
 
-### Additional Resources
-- Internal PACE Documentation for accessing additional computational resources:
-  - https://gatech.service-now.com/home?id=kb_article_view&sysparm_article=KB0042096
-- External Resources:
-  - YOLO: https://www.ultralytics.com/yolo
+## Project Structure
+
+```
+Lizard_Toepads/
+├── configs/                          # YOLO training configs (H5, H6, H7, H8)
+├── scripts/
+│   ├── preprocessing/
+│   │   ├── detect/                   # Detect pipeline: TPS→bbox, merge views
+│   │   ├── obb/                      # OBB pipeline: TPS→OBB, merge datasets
+│   │   ├── create_train_val_split.py # Shared: train/val split
+│   │   └── consolidate_tps_by_category.py
+│   ├── training/                     # train_yolo.py (unified detect + OBB)
+│   ├── inference/                    # predict.py, predict_bilateral.py, inference_with_flip.py
+│   ├── tuning/                       # tune_hyperparams.py (Ray Tune + Optuna)
+│   ├── visualization/
+│   └── utils/                        # download_models.py, setup_gpu.py, extract_id
+├── ml-morph/                         # Stage 2: dlib landmark prediction (self-contained)
+├── sbatch/                           # SLURM batch scripts
+├── docs/                             # Additional documentation
+├── data/                             # Datasets (gitignored)
+├── models/                           # Pre-trained models (gitignored)
+└── runs/                             # Training outputs (gitignored)
+```
+
+---
+
+## Additional Documentation
+
+- [Baseline vs OBB Comparison](docs/COMPARISON_BASELINE_VS_OBB.md)
+- [OBB Crop & Rotate Experiment](docs/EXPERIMENT_CROP_ROTATE_OBB.md)
+- [Inference with Flip Strategy](docs/INFERENCE_WITH_FLIP.md)
+- [ml-morph Pipeline](docs/ML_MORPH_PIPELINE.md)
+- [Step-by-Step Experiments](docs/RUN_EXPERIMENTS_STEP_BY_STEP.md)
+
+## Resources
+
+- [PACE Documentation](https://gatech.service-now.com/home?id=kb_article_view&sysparm_article=KB0042096)
+- [Ultralytics YOLO](https://www.ultralytics.com/yolo)
