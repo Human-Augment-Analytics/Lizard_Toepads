@@ -11,3 +11,5 @@ opencv-python
 albumentations
 scikit-learn
 matplotlib
+
+timm
