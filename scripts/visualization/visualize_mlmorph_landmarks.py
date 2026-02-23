@@ -18,9 +18,6 @@ import cv2
 import numpy as np
 import dlib
 from pathlib import Path
-from PIL import Image
-
-Image.MAX_IMAGE_PIXELS = None
 
 COLOR_GT   = (0, 255, 0)      # green  — ground truth
 COLOR_PRED = (0, 0, 255)      # red    — prediction
@@ -67,15 +64,13 @@ def draw_error_lines(img, gt_pts, pred_pts):
 
 def visualize_record(record, predictor, pad_ratio=0.5, dot_radius=4):
     """Load image, run prediction, return cropped annotated image."""
-    # Load via PIL and force uint8 RGB (handles 16-bit JPEGs dlib can't read)
-    try:
-        pil_img = Image.open(record["file"]).convert("RGB")
-        img_rgb = np.ascontiguousarray(np.array(pil_img, dtype=np.uint8))
-    except Exception as e:
-        print(f"  Could not read: {record['file']} ({e})")
+    # Load with cv2 (uint8, no re-encoding artifacts)
+    img_bgr = cv2.imread(record["file"])
+    if img_bgr is None:
+        print(f"  Could not read: {record['file']}")
         return None
-
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    # dlib requires RGB
+    img_rgb = np.ascontiguousarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
     box = record["box"]
     gt_pts = record["gt"]
 
@@ -142,7 +137,7 @@ def main():
     parser.add_argument("--output-dir",
                         default=f"{project_root}/data/visualizations/mlmorph_landmarks",
                         help="Output directory")
-    parser.add_argument("--width", type=int, default=600,
+    parser.add_argument("--width", type=int, default=1200,
                         help="Output crop width in pixels")
     parser.add_argument("--dot-radius", type=int, default=3,
                         help="Landmark dot radius in pixels (before scaling)")
@@ -171,10 +166,14 @@ def main():
             crop = visualize_record(record, predictor, dot_radius=args.dot_radius)
             if crop is None:
                 continue
-            scale = args.width / crop.shape[1]
-            out = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            # Only upscale if crop is smaller than requested width
+            if crop.shape[1] < args.width:
+                scale = args.width / crop.shape[1]
+                out = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            else:
+                out = crop
             out_path = out_dir / f"{stem}_{dtype}_gt_vs_pred.jpg"
-            cv2.imwrite(str(out_path), out, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            cv2.imwrite(str(out_path), out, [cv2.IMWRITE_JPEG_QUALITY, 98])
             print(f"Saved: {out_path}")
 
 
