@@ -1,0 +1,14 @@
+# YOLO-OBB 6-Class Dataset (full 6-class OBB dataset with ruler and id)
+# Includes all six classes: up_finger, up_toe, bot_finger, bot_toe, ruler, id
+path: /home/hice1/yloh30/scratch/Lizard_Toepads/data/dataset_obb_6class_active
+train: images/train
+val: images/val
+test:  # Optional
+
+names:
+  0: up_finger
+  1: up_toe
+  2: bot_finger
+  3: bot_toe
+  4: ruler
+  5: id
