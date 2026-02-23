@@ -7,12 +7,12 @@ import numpy as np
 from ultralytics import YOLO
 import sys
 
-# Class Definitions for 2-class model
-# Model Output Classes (0-1): 0: bot_finger, 1: bot_toe
-# Standard pass: keep bot_finger(0) and bot_toe(1)
-# Flipped pass: bot_finger(0) -> up_finger, bot_toe(1) -> up_toe
-CLASSES = {0: 'bot_finger', 1: 'bot_toe', 2: 'up_finger', 3: 'up_toe'}
-COLORS = {0: (255,0,255), 1: (0,255,0), 2: (255,165,0), 3: (0,255,255)}
+# Class Definitions for 6-class model
+# Model Output Classes (0-5): 0: up_finger, 1: up_toe, 2: bot_finger, 3: bot_toe, 4: ruler, 5: id
+# Standard pass: keep bot_finger(2), bot_toe(3), ruler(4), id(5)
+# Flipped pass: bot_finger(2) -> up_finger(0), bot_toe(3) -> up_toe(1)
+CLASSES = {0: 'up_finger', 1: 'up_toe', 2: 'bot_finger', 3: 'bot_toe', 4: 'ruler', 5: 'id'}
+COLORS = {0: (255,165,0), 1: (0,255,255), 2: (255,0,255), 3: (0,255,0), 4: (0,0,255), 5: (255,255,0)}
 
 def flip_point(pt, h):
     return [pt[0], h - 1 - pt[1]]
@@ -37,7 +37,7 @@ def run_flip_inference(model, img, conf=0.25, iou=0.4):
             conf_score = float(results_orig.obb.conf[i])
             corners = results_orig.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
             
-            if cls_id in [0, 1]:  # bot_finger, bot_toe
+            if cls_id in [2, 3, 4, 5]:  # bot_finger, bot_toe, ruler, id
                 final_detections.append({
                     'cls': cls_id,
                     'conf': conf_score,
@@ -56,10 +56,10 @@ def run_flip_inference(model, img, conf=0.25, iou=0.4):
             
             # Map flipped bot -> original up
             target_cls = None
-            if cls_id == 0:  # bot_finger -> up_finger
-                target_cls = 2
-            elif cls_id == 1:  # bot_toe -> up_toe
-                target_cls = 3
+            if cls_id == 2:  # bot_finger -> up_finger
+                target_cls = 0
+            elif cls_id == 3:  # bot_toe -> up_toe
+                target_cls = 1
             
             if target_cls is not None:
                 # Get corners in flipped space
@@ -99,7 +99,7 @@ def draw_detections(img, detections):
 def main():
     parser = argparse.ArgumentParser(description="Run inference with flip strategy")
     project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
-    parser.add_argument('--model', default=f'{project_root}/runs/obb/H1_obb_2class2/weights/best.pt', help="Path to model")
+    parser.add_argument('--model', default=f'{project_root}/runs/obb/H5_obb_6class/weights/best.pt', help="Path to model")
     parser.add_argument('--source', required=True, help="Image file or directory")
     parser.add_argument('--output-dir', default='inference_outputs', help="Output directory")
     parser.add_argument('--conf', type=float, default=0.25, help="Confidence threshold")
