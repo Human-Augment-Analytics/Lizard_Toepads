@@ -1,166 +1,181 @@
 #!/usr/bin/env python3
-"""Visualize ml-morph TPS landmarks on lizard images.
+"""Visualize ml-morph TPS landmarks with ground truth and model predictions.
 
-Draws the 9 biological landmarks (skipping the first 2 ruler points) for
-finger and/or toe TPS files. Optionally also draws the ruler points.
-
-TPS format (bottom-left origin):
-  LM=11
-  x y   <- landmark 0 (ruler pt 1)
-  x y   <- landmark 1 (ruler pt 2)
-  x y   <- landmark 2  (bio pt 1)
-  ...
-  x y   <- landmark 10 (bio pt 9)
-  IMAGE=<stem>.jpg
+Draws both ground truth (green) and predicted (red) landmarks cropped tightly
+around the bounding box from the test XML. Uses the best obb_aligned model
+for each digit type.
 
 Usage:
-    python scripts/visualization/visualize_mlmorph_landmarks.py --stems 1001 1003
-    python scripts/visualization/visualize_mlmorph_landmarks.py --stems 1001 --show-ruler
-    python scripts/visualization/visualize_mlmorph_landmarks.py --stems 1001 --type finger
+    python scripts/visualization/visualize_mlmorph_landmarks.py
+    python scripts/visualization/visualize_mlmorph_landmarks.py --type finger --n 4
+    python scripts/visualization/visualize_mlmorph_landmarks.py --type toe --stems 1359 1362
 """
 import argparse
 import os
+import random
+import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
+import dlib
 from pathlib import Path
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
 
-# Colors (BGR)
-COLOR_FINGER  = (255, 0, 255)   # magenta
-COLOR_TOE     = (0, 255, 0)     # green
-COLOR_RULER   = (0, 165, 255)   # orange
-COLOR_INDEX   = (255, 255, 255) # white  (landmark index labels)
+COLOR_GT   = (0, 255, 0)      # green  — ground truth
+COLOR_PRED = (0, 0, 255)      # red    — prediction
+COLOR_LINE = (255, 255, 255)  # white  — error lines
 
 
-def parse_tps(tps_path: Path):
-    """Parse a TPS file. Returns list of (x, y) in TPS coords (bottom-left origin)."""
-    pts = []
-    with open(tps_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("LM=") or line.startswith("IMAGE="):
-                continue
-            parts = line.split()
-            if len(parts) >= 2:
-                try:
-                    pts.append((float(parts[0]), float(parts[1])))
-                except ValueError:
-                    continue
-    return pts
+def load_xml(xml_path):
+    """Parse dlib XML. Returns list of (img_path, box, gt_pts) dicts."""
+    tree = ET.parse(xml_path)
+    records = []
+    for img_el in tree.findall(".//image"):
+        img_file = img_el.attrib["file"]
+        box_el = img_el.find("box")
+        if box_el is None:
+            continue
+        box = dlib.rectangle(
+            left=int(box_el.attrib["left"]),
+            top=int(box_el.attrib["top"]),
+            right=int(box_el.attrib["left"]) + int(box_el.attrib["width"]),
+            bottom=int(box_el.attrib["top"]) + int(box_el.attrib["height"]),
+        )
+        parts = sorted(box_el.findall("part"), key=lambda p: int(p.attrib["name"]))
+        gt_pts = [(int(p.attrib["x"]), int(p.attrib["y"])) for p in parts]
+        records.append({"file": img_file, "box": box, "gt": gt_pts})
+    return records
 
 
-def tps_to_img(pts, img_height):
-    """Convert TPS (bottom-left origin) → image (top-left origin) coords."""
-    return [(x, img_height - y) for x, y in pts]
+def draw_landmarks(img, pts, color, radius=4, draw_line=True):
+    """Draw small filled dots and a connecting polyline."""
+    thickness = max(1, radius // 3)
+    if draw_line and len(pts) > 1:
+        poly = np.array([[x, y] for x, y in pts], dtype=np.int32)
+        cv2.polylines(img, [poly], False, color, thickness)
+    for i, (x, y) in enumerate(pts):
+        cv2.circle(img, (int(x), int(y)), radius, color, -1)
+        cv2.circle(img, (int(x), int(y)), radius + 1, (0, 0, 0), 1)
 
 
-def draw_landmarks(img, points_img, color, label_prefix="", show_index=True, radius=None):
-    """Draw filled circles and optional index labels for each landmark."""
-    h, w = img.shape[:2]
-    r = radius or max(8, w // 400)
-    font_scale = max(0.6, w / 4000)
-    for i, (x, y) in enumerate(points_img):
-        ix, iy = int(round(x)), int(round(y))
-        cv2.circle(img, (ix, iy), r, color, -1)
-        cv2.circle(img, (ix, iy), r + 2, (0, 0, 0), 2)  # black outline
-        if show_index:
-            txt = f"{label_prefix}{i}"
-            cv2.putText(img, txt, (ix + r + 4, iy + 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_INDEX, 2)
-    # Connect bio landmarks with a line to show order
-    if len(points_img) > 1:
-        poly = np.array([[int(x), int(y)] for x, y in points_img], dtype=np.int32)
-        cv2.polylines(img, [poly], False, color, max(2, w // 1000))
+def draw_error_lines(img, gt_pts, pred_pts):
+    """Draw white lines between each GT and predicted landmark."""
+    for (gx, gy), (px, py) in zip(gt_pts, pred_pts):
+        cv2.line(img, (int(gx), int(gy)), (int(px), int(py)), COLOR_LINE, 1)
 
 
-def process_stem(stem, tps_dir, image_dir, show_ruler, digit_type):
-    """Load image + TPS files for a stem, return annotated image."""
-    img_path = None
-    for ext in (".jpg", ".jpeg", ".png"):
-        p = Path(image_dir) / f"{stem}{ext}"
-        if p.exists():
-            img_path = p
-            break
-    if img_path is None:
-        print(f"  Image not found for stem: {stem}")
+def visualize_record(record, predictor, pad_ratio=0.5, dot_radius=4):
+    """Load image, run prediction, return cropped annotated image."""
+    # Load via PIL and force uint8 RGB (handles 16-bit JPEGs dlib can't read)
+    try:
+        pil_img = Image.open(record["file"]).convert("RGB")
+        img_rgb = np.ascontiguousarray(np.array(pil_img, dtype=np.uint8))
+    except Exception as e:
+        print(f"  Could not read: {record['file']} ({e})")
         return None
 
-    img = cv2.imread(str(img_path))
-    if img is None:
-        print(f"  Could not read: {img_path}")
-        return None
-    h, w = img.shape[:2]
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    box = record["box"]
+    gt_pts = record["gt"]
 
-    types_to_draw = []
-    if digit_type in ("finger", "both"):
-        types_to_draw.append(("finger", COLOR_FINGER))
-    if digit_type in ("toe", "both"):
-        types_to_draw.append(("toe", COLOR_TOE))
+    # Run dlib predictor on RGB image
+    shape = predictor(img_rgb, box)
+    pred_pts = [(shape.part(i).x, shape.part(i).y) for i in range(shape.num_parts)]
 
-    for dtype, color in types_to_draw:
-        tps_path = Path(tps_dir) / f"{stem}_{dtype}.TPS"
-        if not tps_path.exists():
-            print(f"  TPS not found: {tps_path}")
-            continue
-        pts_tps = parse_tps(tps_path)
-        if len(pts_tps) < 3:
-            print(f"  Too few landmarks in {tps_path}")
-            continue
+    # Compute per-landmark pixel errors
+    errors = [np.sqrt((gx-px)**2 + (gy-py)**2) for (gx,gy),(px,py) in zip(gt_pts, pred_pts)]
+    mean_err = np.mean(errors)
 
-        pts_img = tps_to_img(pts_tps, h)
-        ruler_pts = pts_img[:2]
-        bio_pts   = pts_img[2:]
+    # Crop with padding around the bounding box
+    h, w = img_bgr.shape[:2]
+    bw = box.right() - box.left()
+    bh = box.bottom() - box.top()
+    pad = int(max(bw, bh) * pad_ratio)
+    x1 = max(0, box.left() - pad)
+    y1 = max(0, box.top() - pad)
+    x2 = min(w, box.right() + pad)
+    y2 = min(h, box.bottom() + pad)
+    crop = img_bgr[y1:y2, x1:x2].copy()
 
-        if show_ruler:
-            draw_landmarks(img, ruler_pts, COLOR_RULER, label_prefix="r", show_index=True)
+    # Shift points to crop coords
+    gt_crop   = [(x - x1, y - y1) for x, y in gt_pts]
+    pred_crop = [(x - x1, y - y1) for x, y in pred_pts]
 
-        draw_landmarks(img, bio_pts, color, label_prefix="", show_index=True)
+    draw_error_lines(crop, gt_crop, pred_crop)
+    draw_landmarks(crop, gt_crop,   COLOR_GT,   radius=dot_radius)
+    draw_landmarks(crop, pred_crop, COLOR_PRED, radius=dot_radius)
 
-        # Label the digit type in the image near the first bio point
-        fx, fy = int(bio_pts[0][0]), int(bio_pts[0][1])
-        cv2.putText(img, dtype, (fx + 20, fy - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, max(1.5, w / 2000), color, 3)
+    # Legend + mean error
+    ch, cw = crop.shape[:2]
+    fs = max(0.5, cw / 800)
+    th = max(1, int(fs * 1.5))
+    stem = Path(record["file"]).stem
+    cv2.putText(crop, f"{stem}  mean err: {mean_err:.1f}px",
+                (8, 22), cv2.FONT_HERSHEY_SIMPLEX, fs, (255,255,255), th)
+    cv2.putText(crop, "GT",   (8, 44), cv2.FONT_HERSHEY_SIMPLEX, fs, COLOR_GT,   th)
+    cv2.putText(crop, "Pred", (8, 66), cv2.FONT_HERSHEY_SIMPLEX, fs, COLOR_PRED, th)
 
-    return img
+    return crop
 
 
 def main():
     project_root = os.environ.get("PROJECT_ROOT", "/home/hice1/YOUR_USERNAME/scratch/Lizard_Toepads")
-    parser = argparse.ArgumentParser(description="Visualize ml-morph TPS landmarks")
-    parser.add_argument("--tps-dir", default="/storage/ice-shared/cs8903onl/tps_files",
-                        help="Directory containing per-image _finger.TPS and _toe.TPS files")
-    parser.add_argument("--image-dir", default="/storage/ice-shared/cs8903onl/miami_fall_24_jpgs",
-                        help="Directory containing original images")
-    parser.add_argument("--stems", nargs="+", default=["1001", "1003"],
-                        help="Image stems to visualize")
+    ml_morph = f"{project_root}/ml-morph"
+
+    BEST_MODELS = {
+        "finger": f"{ml_morph}/hyperparam_results_finger_obb_aligned/depth3_cascade25_nu0.1_trees500_over30_fp500_splits20_tj0.dat",
+        "toe":    f"{ml_morph}/hyperparam_results_toe/depth3_cascade12_nu0.1_trees500_over30_fp500_splits20_tj0.dat",
+    }
+    TEST_XMLS = {
+        "finger": f"{ml_morph}/finger_test_yolo_obb_aligned.xml",
+        "toe":    f"{ml_morph}/toe_test_yolo_obb_aligned.xml",
+    }
+
+    parser = argparse.ArgumentParser(description="Visualize ml-morph GT vs predicted landmarks")
     parser.add_argument("--type", dest="digit_type", default="both",
-                        choices=["finger", "toe", "both"],
-                        help="Which digit type to show")
-    parser.add_argument("--show-ruler", action="store_true",
-                        help="Also draw the 2 ruler/scale landmarks (orange)")
+                        choices=["finger", "toe", "both"])
+    parser.add_argument("--stems", nargs="+", default=None,
+                        help="Specific image stems to visualize (default: random)")
+    parser.add_argument("--n", type=int, default=2,
+                        help="Number of random images per digit type (if --stems not given)")
     parser.add_argument("--output-dir",
                         default=f"{project_root}/data/visualizations/mlmorph_landmarks",
                         help="Output directory")
-    parser.add_argument("--width", type=int, default=1500,
-                        help="Output image width in pixels")
+    parser.add_argument("--width", type=int, default=600,
+                        help="Output crop width in pixels")
+    parser.add_argument("--dot-radius", type=int, default=3,
+                        help="Landmark dot radius in pixels (before scaling)")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for stem in args.stems:
-        vis = process_stem(stem, args.tps_dir, args.image_dir,
-                           args.show_ruler, args.digit_type)
-        if vis is None:
-            continue
+    types = ["finger", "toe"] if args.digit_type == "both" else [args.digit_type]
+    random.seed(args.seed)
 
-        scale = args.width / vis.shape[1]
-        out = cv2.resize(vis, None, fx=scale, fy=scale)
-        out_path = out_dir / f"{stem}_{args.digit_type}.jpg"
-        cv2.imwrite(str(out_path), out, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        print(f"Saved: {out_path}")
+    for dtype in types:
+        print(f"\n--- {dtype} ---")
+        predictor = dlib.shape_predictor(BEST_MODELS[dtype])
+        records = load_xml(TEST_XMLS[dtype])
+
+        if args.stems:
+            stem_set = set(args.stems)
+            selected = [r for r in records if Path(r["file"]).stem in stem_set]
+        else:
+            selected = random.sample(records, min(args.n, len(records)))
+
+        for record in selected:
+            stem = Path(record["file"]).stem
+            crop = visualize_record(record, predictor, dot_radius=args.dot_radius)
+            if crop is None:
+                continue
+            scale = args.width / crop.shape[1]
+            out = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            out_path = out_dir / f"{stem}_{dtype}_gt_vs_pred.jpg"
+            cv2.imwrite(str(out_path), out, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            print(f"Saved: {out_path}")
 
 
 if __name__ == "__main__":
