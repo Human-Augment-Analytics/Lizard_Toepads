@@ -27,7 +27,7 @@ An attempt was made to crop and rotate images so the OBB becomes upright with 10
 
 * **ml-morph framework**: `dlib` shape predictor training with TPS → XML → YOLO bbox pipeline
 * **Preprocessing scripts**: located in `ml-morph/scripts/preprocessing/` (e.g., `tps_to_xml.py`, `generate_yolo_bbox_xml.py`)
-* **Inference script**: `ml-morph/scripts/inference/predict_landmarks_flip.py` — End-to-end OBB detection + landmark prediction with flip strategy
+* **Inference script**: `scripts/inference/predict_landmarks_flip.py` — End-to-end OBB detection + landmark prediction with flip strategy
 * **Hyperparameter search**: 144-config grid search over `tree_depth`, `cascade_depth`, `nu`, `num_trees`
 * **SLURM sbatch files**: For preprocessing, training, and hyperparameter search (baseline, OBB, OBB-aligned)
 * **Documentation**:
@@ -79,7 +79,7 @@ sbatch sbatch/hyperparam_search_finger_obb.sbatch
 To run the complete pipeline on new images (YOLO-OBB Detection + dlib Landmark Prediction), use the flip inference strategy script:
 
 ```bash
-uv run python ml-morph/scripts/inference/predict_landmarks_flip.py \
+uv run python scripts/inference/predict_landmarks_flip.py \
     --input-dir <path_to_images> \
     --output-dir <path_to_output_dir> \
     --yolo-model models/best_obb.pt \
