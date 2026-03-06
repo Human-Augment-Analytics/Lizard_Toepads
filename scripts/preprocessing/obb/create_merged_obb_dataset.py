@@ -192,91 +192,73 @@ def parse_upper_bbox_labels(label_path, bot_info=None):
     return lines
 
 
-def parse_split_file(split_path):
-    """Parse a split file to extract image stem names."""
-    stems = []
-    with open(split_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            # Lines are full paths like /path/to/images/1234.jpg
-            stem = Path(line).stem
-            stems.append(stem)
-    return stems
-
 
 def create_dataset(args):
     bottom_labels_dir = Path(args.bottom_labels_dir)
     upper_labels_dir = Path(args.upper_labels_dir)
     images_dir = Path(args.images_dir)
-    splits_dir = Path(args.splits_dir)
     output_dir = Path(args.output_dir)
 
-    # Parse train/val splits
-    train_stems = parse_split_file(splits_dir / "train.txt")
-    val_stems = parse_split_file(splits_dir / "val.txt")
+    img_out = output_dir / "images"
+    lbl_out = output_dir / "labels"
+    img_out.mkdir(parents=True, exist_ok=True)
+    lbl_out.mkdir(parents=True, exist_ok=True)
 
-    print(f"Train images: {len(train_stems)}, Val images: {len(val_stems)}")
+    # Collect all image stems from bottom labels (primary source)
+    stems = sorted({f.stem for f in bottom_labels_dir.glob("*.txt")})
+    print(f"Found {len(stems)} bottom-view label files")
 
-    for split_name, stems in [("train", train_stems), ("val", val_stems)]:
-        img_out = output_dir / "images" / split_name
-        lbl_out = output_dir / "labels" / split_name
-        img_out.mkdir(parents=True, exist_ok=True)
-        lbl_out.mkdir(parents=True, exist_ok=True)
+    skipped = 0
+    written = 0
 
-        skipped = 0
-        written = 0
+    for stem in stems:
+        # Find image file
+        img_src = None
+        for ext in (".jpg", ".jpeg", ".png"):
+            candidate = images_dir / f"{stem}{ext}"
+            if candidate.exists():
+                img_src = candidate
+                break
 
-        for stem in stems:
-            # Find image file (try common extensions)
-            img_src = None
-            for ext in (".jpg", ".jpeg", ".png"):
-                candidate = images_dir / f"{stem}{ext}"
-                if candidate.exists():
-                    img_src = candidate
-                    break
+        if img_src is None:
+            skipped += 1
+            continue
 
-            if img_src is None:
-                skipped += 1
-                continue
+        # Symlink image
+        img_dst = img_out / img_src.name
+        if img_dst.exists() or img_dst.is_symlink():
+            img_dst.unlink()
+        img_dst.symlink_to(img_src.resolve())
 
-            # Symlink image
-            img_dst = img_out / img_src.name
-            if not img_dst.exists():
-                img_dst.symlink_to(img_src.resolve())
+        # Merge labels
+        merged_lines = []
 
-            # Merge labels
-            merged_lines = []
+        # Bottom-view OBB labels
+        bottom_file = bottom_labels_dir / f"{stem}.txt"
 
-            # Bottom-view OBB labels
-            bottom_file = bottom_labels_dir / f"{stem}.txt"
-            
-            # Extract info for transfer FIRST
-            bot_info = {}
-            if bottom_file.exists():
-                bot_info = extract_bot_info(bottom_file)
-                # Also append bottom labels to merged
-                merged_lines.extend(parse_bottom_obb_labels(bottom_file))
+        # Extract info for transfer FIRST
+        bot_info = {}
+        if bottom_file.exists():
+            bot_info = extract_bot_info(bottom_file)
+            merged_lines.extend(parse_bottom_obb_labels(bottom_file))
 
-            # Upper-view labels (converted bbox -> OBB using bot info)
-            upper_file = upper_labels_dir / f"{stem}.txt"
-            if upper_file.exists():
-                merged_lines.extend(parse_upper_bbox_labels(upper_file, bot_info))
+        # Upper-view labels (converted bbox -> OBB using bot info)
+        upper_file = upper_labels_dir / f"{stem}.txt"
+        if upper_file.exists():
+            merged_lines.extend(parse_upper_bbox_labels(upper_file, bot_info))
 
-            # Write merged label file
-            lbl_dst = lbl_out / f"{stem}.txt"
-            with open(lbl_dst, "w") as f:
-                f.write("\n".join(merged_lines) + "\n" if merged_lines else "")
+        # Write merged label file
+        lbl_dst = lbl_out / f"{stem}.txt"
+        with open(lbl_dst, "w") as f:
+            f.write("\n".join(merged_lines) + "\n" if merged_lines else "")
 
-            written += 1
+        written += 1
 
-        print(f"  {split_name}: {written} written, {skipped} skipped (image not found)")
+    print(f"  {written} written, {skipped} skipped (image not found)")
 
     # Summary: check a sample label
-    sample_stem = train_stems[0] if train_stems else val_stems[0]
-    sample_file = output_dir / "labels" / "train" / f"{sample_stem}.txt"
-    if sample_file.exists():
+    sample_file = next(lbl_out.glob("*.txt"), None)
+    if sample_file:
         print(f"\nSample label ({sample_file.name}):")
         with open(sample_file) as f:
             for line in f:
@@ -295,8 +277,6 @@ def main():
                         help="Directory with upper-view standard bbox label files")
     parser.add_argument("--images-dir",
                         help="Directory with source images")
-    parser.add_argument("--splits-dir",
-                        help="Directory with train.txt and val.txt split files")
     parser.add_argument("--output-dir",
                         help="Output directory for merged dataset")
     args = parser.parse_args()
@@ -312,14 +292,12 @@ def main():
     args.bottom_labels_dir = args.bottom_labels_dir or prep.get("bottom-labels-dir", "data/processed_obb/labels")
     args.upper_labels_dir = args.upper_labels_dir or prep.get("upper-labels-dir", "/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels")
     args.images_dir = args.images_dir or prep.get("images-dir", "data/processed_obb/images")
-    args.splits_dir = args.splits_dir or prep.get("splits-dir", "data/dataset_obb/splits")
     args.output_dir = args.output_dir or prep.get("merged-output-dir", prep.get("output-dir", "data/obb/dataset_6class"))
 
     print(f"Config: {args.config}")
     print(f"  bottom-labels-dir: {args.bottom_labels_dir}")
     print(f"  upper-labels-dir:  {args.upper_labels_dir}")
     print(f"  images-dir:        {args.images_dir}")
-    print(f"  splits-dir:        {args.splits_dir}")
     print(f"  output-dir:        {args.output_dir}")
 
     create_dataset(args)
