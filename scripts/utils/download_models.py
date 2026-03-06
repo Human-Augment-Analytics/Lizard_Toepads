@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download YOLO pre-trained models (YOLOv11 detect + YOLO26 OBB) to models/base_models/
+Download YOLO pre-trained models (YOLOv11 detect + YOLO11 OBB) to models/base_models/
 """
 
 import os
@@ -8,23 +8,23 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Tuple
 
-# Model configurations: (filename, size_mb)
-MODELS: Dict[str, Tuple[str, float]] = {
-    # Detection models
-    "yolov11n.pt": ("yolo11n.pt", 5.4),
-    "yolov11s.pt": ("yolo11s.pt", 18.5),
-    "yolov11m.pt": ("yolo11m.pt", 40.2),
-    "yolov11l.pt": ("yolo11l.pt", 49.7),
-    "yolov11x.pt": ("yolo11x.pt", 109.3),
-    # YOLO26 OBB (Oriented Bounding Box) models
-    "yolo26n-obb.pt": ("yolo26n-obb.pt", 5.0),
-    "yolo26s-obb.pt": ("yolo26s-obb.pt", 18.0),
-    "yolo26m-obb.pt": ("yolo26m-obb.pt", 38.0),
-    "yolo26l-obb.pt": ("yolo26l-obb.pt", 48.0),
-    "yolo26x-obb.pt": ("yolo26x-obb.pt", 110.0),
+# Model configurations: (remote_name, size_mb, release_tag)
+MODELS: Dict[str, Tuple[str, float, str]] = {
+    # Detection models (v8.3.0)
+    "yolov11n.pt": ("yolo11n.pt", 5.4, "v8.3.0"),
+    "yolov11s.pt": ("yolo11s.pt", 18.5, "v8.3.0"),
+    "yolov11m.pt": ("yolo11m.pt", 40.2, "v8.3.0"),
+    "yolov11l.pt": ("yolo11l.pt", 49.7, "v8.3.0"),
+    "yolov11x.pt": ("yolo11x.pt", 109.3, "v8.3.0"),
+    # YOLO11 OBB (Oriented Bounding Box) models (v8.3.0)
+    "yolo11n-obb.pt": ("yolo11n-obb.pt", 5.4, "v8.3.0"),
+    "yolo11s-obb.pt": ("yolo11s-obb.pt", 18.5, "v8.3.0"),
+    "yolo11m-obb.pt": ("yolo11m-obb.pt", 40.2, "v8.3.0"),
+    "yolo11l-obb.pt": ("yolo11l-obb.pt", 49.7, "v8.3.0"),
+    "yolo11x-obb.pt": ("yolo11x-obb.pt", 109.3, "v8.3.0"),
 }
 
-BASE_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
+BASE_URL = "https://github.com/ultralytics/assets/releases/download/"
 
 
 def download_file(url: str, dest_path: Path, expected_size_mb: float) -> bool:
@@ -69,7 +69,7 @@ def main():
 
     # Check existing models
     existing = []
-    for local_name, (remote_name, size_mb) in MODELS.items():
+    for local_name, (remote_name, size_mb, tag) in MODELS.items():
         local_path = models_dir / local_name
         if local_path.exists():
             actual_size_mb = local_path.stat().st_size / (1024 * 1024)
@@ -86,7 +86,7 @@ def main():
     skipped = []
     failed = []
 
-    for local_name, (remote_name, size_mb) in MODELS.items():
+    for local_name, (remote_name, size_mb, tag) in MODELS.items():
         local_path = models_dir / local_name
 
         if local_path.exists():
@@ -95,7 +95,7 @@ def main():
             skipped.append(local_name)
             continue
 
-        url = BASE_URL + remote_name
+        url = BASE_URL + tag + "/" + remote_name
         if download_file(url, local_path, size_mb):
             downloaded.append(local_name)
         else:
