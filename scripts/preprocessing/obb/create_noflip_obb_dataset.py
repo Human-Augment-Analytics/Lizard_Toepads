@@ -14,14 +14,17 @@ This dataset is used to train YOLO-OBB for fair comparison against the
 H5 baseline detect model (which also doesn't use flip strategy).
 
 Usage:
-    python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_noflip.yaml
+    python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_botonly.yaml
 """
 
 import argparse
 import os
+import random
 import shutil
 from pathlib import Path
 
+import cv2
+import numpy as np
 import yaml
 
 
@@ -78,11 +81,13 @@ def main():
         description="Create 6-class OBB dataset without upper-view annotations"
     )
     parser.add_argument("--config", required=True,
-                        help="Path to project YAML config (e.g. configs/H8_obb_noflip.yaml)")
+                        help="Path to project YAML config (e.g. configs/H8_obb_botonly.yaml)")
     parser.add_argument("--source-obb-dataset",
                         help="Path to 6-class OBB dataset (input)")
     parser.add_argument("--output-dir",
                         help="Output directory for noflip dataset")
+    parser.add_argument("--visualize", type=int, default=0,
+                        help="Number of images to visualize (0=none)")
     args = parser.parse_args()
 
     # Load config
@@ -104,13 +109,66 @@ def main():
         print(f"Removing existing dataset at {dst_dataset}")
         shutil.rmtree(dst_dataset)
 
-    for split in ["train", "val"]:
-        print(f"\nProcessing {split}:")
-        filter_labels(src_6class / "labels" / split, dst_dataset / "labels" / split)
-        symlink_images(src_6class / "images" / split, dst_dataset / "images" / split)
+    # Flat directory structure (train/val split happens later)
+    print("\nFiltering labels:")
+    filter_labels(src_6class / "labels", dst_dataset / "labels")
+    print("Symlinking images:")
+    symlink_images(src_6class / "images", dst_dataset / "images")
 
     print(f"\nDataset created at {dst_dataset}")
     print("Classes: 0=up_finger (empty), 1=up_toe (empty), 2=bot_finger, 3=bot_toe, 4=ruler, 5=id")
+
+    # Optional visualization
+    if args.visualize > 0:
+        vis_dir = dst_dataset / "visualizations"
+        vis_dir.mkdir(parents=True, exist_ok=True)
+
+        cls_colors = {
+            2: ((255, 0, 255), "bot_finger"),
+            3: ((0, 255, 0), "bot_toe"),
+            4: ((255, 0, 0), "ruler"),
+            5: ((0, 165, 255), "id"),
+        }
+
+        # Collect label files that have annotations
+        label_files = [f for f in sorted((dst_dataset / "labels").glob("*.txt")) if f.stat().st_size > 0]
+        random.seed(42)
+        samples = random.sample(label_files, min(args.visualize, len(label_files)))
+
+        for lf in samples:
+            stem = lf.stem
+            img_path = dst_dataset / "images" / f"{stem}.jpg"
+            if not img_path.exists():
+                continue
+
+            img_bgr = cv2.imread(str(img_path.resolve()))
+            h, w = img_bgr.shape[:2]
+            scale_factor = max(h, w) / 1000
+            line_thick = max(2, int(4 * scale_factor))
+            font_scale = max(0.8, 1.2 * scale_factor)
+            font_thick = max(2, int(3 * scale_factor))
+
+            with open(lf) as f:
+                for line in f:
+                    parts = line.strip().split()
+                    cls_id = int(parts[0])
+                    coords = [float(x) for x in parts[1:]]
+                    corners = np.array([
+                        [coords[0] * w, coords[1] * h],
+                        [coords[2] * w, coords[3] * h],
+                        [coords[4] * w, coords[5] * h],
+                        [coords[6] * w, coords[7] * h],
+                    ], dtype=np.int32)
+                    color, label = cls_colors.get(cls_id, ((255, 255, 255), f"cls_{cls_id}"))
+                    cv2.polylines(img_bgr, [corners], True, color, thickness=line_thick)
+                    cx_vis = int(np.mean(corners[:, 0]))
+                    cy_vis = int(np.min(corners[:, 1])) - int(20 * scale_factor)
+                    cv2.putText(img_bgr, label, (cx_vis - int(60 * scale_factor), cy_vis),
+                                cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, font_thick)
+
+            vis_path = vis_dir / f"{stem}_botonly.jpg"
+            cv2.imwrite(str(vis_path), img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            print(f"  Visualization: {vis_path}")
 
 
 if __name__ == "__main__":
