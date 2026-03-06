@@ -2,6 +2,7 @@
 
 **Authors**: Dylan Herbig, Junling Zhuang, Leyang Shen
 **Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
+**Last Updated**: Junling Zhuang, 2026-03-06
 
 ## Overview
 
