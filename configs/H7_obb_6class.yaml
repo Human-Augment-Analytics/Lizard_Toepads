@@ -3,23 +3,30 @@
 # Uses the same 6-class scheme as H5/H6 detect, but with OBB labels
 
 preprocessing:
-  # Step 1: generate_obb_from_tps.py — TPS → OBB labels
+  # Step 1: generate_obb_from_tps.py — TPS → OBB labels + resized images
   tps-dir: /storage/ice-shared/cs8903onl/tps_files
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
-  obb-output-dir: data/obb/processed_obb/labels
+  obb-output-dir: data/obb/processed_obb
+  target-size: 1280  # resize longest side to match train.imgsz
 
   # Step 2: create_merged_obb_dataset.py — merge bottom OBB + upper bbox → 6-class
   bottom-labels-dir: data/obb/processed_obb/labels
   upper-labels-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels
   images-dir: data/obb/processed_obb/images
-  splits-dir: data/obb/dataset_obb/splits
   merged-output-dir: data/obb/dataset_6class
+
+split:
+  images-dir: data/obb/dataset_6class/images
+  labels-dir: data/obb/dataset_6class/labels
+  output-dir: data/obb/dataset_6class_split
+  train-ratio: 0.8
+  seed: 42
 
 train:
   # Task and model
   task: obb
   data: null  # Use dataset section below instead
-  model: yolo26m-obb.pt
+  model: models/base_models/yolo11m-obb.pt
 
   # Training parameters
   epochs: 200
@@ -56,7 +63,7 @@ train:
   close_mosaic: 10
 
 dataset:
-  path: data/obb/dataset_6class
+  path: data/obb/dataset_6class_split
   train: images/train
   val: images/val
 

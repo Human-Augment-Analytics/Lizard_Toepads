@@ -1,40 +1,47 @@
-# H8 OBB No-Flip Configuration
+# H8 OBB Bottom-Only Configuration
 # YOLO-OBB training with bottom-only views (fair comparison against H5 detect baseline)
 # Same 6-class scheme but upper-view classes have no annotations
 
 preprocessing:
-  # Step 1: generate_obb_from_tps.py — TPS → OBB labels
+  # Step 1: generate_obb_from_tps.py — TPS → OBB labels + resized images
   tps-dir: /storage/ice-shared/cs8903onl/tps_files
   image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
-  obb-output-dir: data/obb/processed_obb/labels
+  obb-output-dir: data/obb/processed_obb
+  target-size: 1280  # resize longest side to match train.imgsz
 
-  # Step 2: create_merged_obb_dataset.py — merge bottom OBB + upper bbox → 6-class
+  # Step 2: create_merged_obb_dataset.py — remap raw class IDs to 6-class scheme
   bottom-labels-dir: data/obb/processed_obb/labels
   upper-labels-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels
   images-dir: data/obb/processed_obb/images
-  splits-dir: data/obb/dataset_obb/splits
   merged-output-dir: data/obb/dataset_6class
 
-  # Step 3: create_noflip_obb_dataset.py — filter to bottom-only
+  # Step 3: create_noflip_obb_dataset.py — filter to bottom-only classes
   source-obb-dataset: data/obb/dataset_6class
   output-dir: data/obb/dataset_noflip
+
+split:
+  images-dir: data/obb/dataset_noflip/images
+  labels-dir: data/obb/dataset_noflip/labels
+  output-dir: data/obb/dataset_noflip_split
+  train-ratio: 0.8
+  seed: 42
 
 train:
   # Task and model
   task: obb
   data: null  # Use dataset section below instead
-  model: yolo26m-obb.pt
+  model: models/base_models/yolo11m-obb.pt
 
   # Training parameters
   epochs: 200
-  batch: 16
+  batch: 32
   imgsz: 1280
-  workers: 2
+  workers: 4
   patience: 100
-  name: H8_obb_noflip
+  name: H8_obb_botonly
   device: 0
   amp: true
-  cache: false
+  cache: true
   save_period: 10
 
   # Geometric augmentations (conservative for OBB)
@@ -50,17 +57,17 @@ train:
   hsv_v: 0.4
 
   # Mosaic & advanced augmentations
-  mosaic: 1.0
+  mosaic: 0.5
   fliplr: 0.5
-  mixup: 0.2
-  copy_paste: 0.3
+  mixup: 0.0
+  copy_paste: 0.0
 
   # Training strategies
   cos_lr: true
   close_mosaic: 10
 
 dataset:
-  path: data/obb/dataset_noflip
+  path: data/obb/dataset_noflip_split
   train: images/train
   val: images/val
 
