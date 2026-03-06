@@ -115,23 +115,29 @@ uv run python scripts/inference/predict.py --config configs/H5.yaml --quick-test
 ### YOLO OBB Pipeline
 
 ```bash
-# 3b. Generate OBB labels from TPS
-uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H8_obb_noflip.yaml
+# 3b. Generate OBB labels + resized images from TPS (--visualize N to verify)
+uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H8_obb_botonly.yaml --visualize 10
 
-# 4b. Create merged OBB dataset (bbox → OBB conversion)
-uv run python scripts/preprocessing/obb/create_merged_obb_dataset.py --config configs/H8_obb_noflip.yaml
+# 4b.  Merge bottom OBB + upper bbox → 6-class
+uv run python scripts/preprocessing/obb/create_merged_obb_dataset.py --config configs/H8_obb_botonly.yaml
 
-# 5b. Create no-flip OBB dataset (bottom-only, fair comparison against detect baseline)
-uv run python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_noflip.yaml
+# 5b. Create bottom-only OBB dataset (--visualize N to verify)
+uv run python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_botonly.yaml --visualize 10
 
-# 6b. Allocate GPU and train
+# 6b. Create train/val split (on the final dataset)
+uv run python scripts/preprocessing/create_train_val_split.py --config configs/H8_obb_botonly.yaml
+
+# 7b. Allocate GPU and train
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 srun --pty bash
 
-uv run --no-sync python scripts/training/train_yolo.py --config configs/H8_obb_noflip.yaml
+uv run python scripts/training/train_yolo.py --config configs/H8_obb_botonly.yaml
 
-# 7b. Inference (flip strategy for upper-view detection)
-uv run --no-sync python scripts/inference/inference_with_flip.py --config configs/H8_obb_noflip.yaml --source data/images/
+# 8b. Inference — normal (single pass)
+uv run python scripts/inference/predict.py --config configs/H8_obb_botonly.yaml --source data/images/
+
+# 8b-alt. Inference — flip strategy (normal + flipped pass for upper-view detection)
+uv run python scripts/inference/inference_with_flip.py --config configs/H8_obb_botonly.yaml --source data/images/
 ```
 
 ### Hyperparameter Tuning (either pipeline)
@@ -141,7 +147,7 @@ uv run --no-sync python scripts/inference/inference_with_flip.py --config config
 uv run python scripts/tuning/tune_hyperparams.py --config configs/H5.yaml --num-samples 50
 
 # OBB tuning
-uv run python scripts/tuning/tune_hyperparams.py --config configs/H8_obb_noflip.yaml --num-samples 50
+uv run python scripts/tuning/tune_hyperparams.py --config configs/H8_obb_botonly.yaml --num-samples 50
 ```
 
 ### Stage 2: ml-morph (Landmark Prediction)
@@ -165,7 +171,7 @@ All training parameters live in YAML configs under `configs/`. The training scri
 | `H5.yaml` | detect | Bilateral detection with augmentation |
 | `H6.yaml` | detect | H5 + Ray Tune best hyperparameters |
 | `H7_obb_6class.yaml` | obb | OBB with merged upper+bottom views |
-| `H8_obb_noflip.yaml` | obb | OBB bottom-only (fair baseline comparison) |
+| `H8_obb_botonly.yaml` | obb | OBB bottom-only (fair baseline comparison) |
 
 ### Config Structure
 
@@ -196,8 +202,7 @@ inference:
 
 This project uses two model families from [Ultralytics](https://docs.ultralytics.com/):
 
-- **[YOLOv11](https://docs.ultralytics.com/models/yolo11/) (detect)** — standard axis-aligned bounding boxes. Good when objects are roughly upright.
-- **[YOLO26](https://docs.ultralytics.com/models/yolo26/) (OBB)** — oriented (rotated) bounding boxes with the latest architecture. NMS-free end-to-end inference, ~43% faster CPU speed vs YOLO11.
+- **[YOLOv11](https://docs.ultralytics.com/models/yolo11/)** — used for both detect and OBB tasks. Proven architecture with strong results on our dataset.
 
 ### YOLOv11 Detection Models (`task: detect`)
 
@@ -211,20 +216,18 @@ Used by configs: `H5.yaml`, `H6.yaml`
 | YOLOv11l | yolov11l.pt | 25.3M | Slow | High accuracy |
 | YOLOv11x | yolov11x.pt | 56.9M | Slowest | Maximum accuracy |
 
-### YOLO26-OBB Models (`task: obb`)
+### YOLOv11-OBB Models (`task: obb`)
 
-Used by configs: `H7_obb_6class.yaml`, `H8_obb_noflip.yaml`
+Used by configs: `H7_obb_6class.yaml`, `H8_obb_botonly.yaml`
 
 | Model | Filename | Params | Speed | Use Case |
 |-------|----------|--------|-------|----------|
-| YOLO26n-OBB | yolo26n-obb.pt | 2.5M | Fastest | Quick experiments |
-| YOLO26s-OBB | yolo26s-obb.pt | 9.0M | Fast | Good balance |
-| **YOLO26m-OBB** | **yolo26m-obb.pt** | 19.3M | Medium | **Recommended** |
-| YOLO26l-OBB | yolo26l-obb.pt | 24.4M | Slow | High accuracy |
-| YOLO26x-OBB | yolo26x-obb.pt | 57.6M | Slowest | Maximum accuracy |
+| YOLOv11n-OBB | yolo11n-obb.pt | 2.7M | Fastest | Quick experiments |
+| YOLOv11s-OBB | yolo11s-obb.pt | 9.6M | Fast | Good balance |
+| **YOLOv11m-OBB** | **yolo11m-obb.pt** | 20.4M | Medium | **Recommended** |
+| YOLOv11l-OBB | yolo11l-obb.pt | 25.5M | Slow | High accuracy |
+| YOLOv11x-OBB | yolo11x-obb.pt | 57.5M | Slowest | Maximum accuracy |
 
-> **Why different versions?** YOLO26 is the latest Ultralytics architecture with NMS-free inference and improved speed. We use it for OBB where the new rotation head benefits most. Detect stays on YOLOv11 which has proven results on our dataset. Both are swappable via config — just change `model:` in the YAML.
->
 > **When to use OBB?** If toepad specimens are scanned at various angles, OBB produces tighter bounding boxes and cleaner crops for downstream landmark prediction. See [docs/COMPARISON_BASELINE_VS_OBB.md](docs/COMPARISON_BASELINE_VS_OBB.md) for a quantitative comparison.
 
 ---
