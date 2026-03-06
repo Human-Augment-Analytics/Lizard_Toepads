@@ -8,8 +8,8 @@ The flip strategy detects upper-view limbs by:
 3. Run inference again → map flipped detections back as up_finger, up_toe
 
 Usage:
-    python scripts/inference/inference_with_flip.py --config configs/H8_obb_noflip.yaml --source data/images/
-    python scripts/inference/inference_with_flip.py --model runs/obb/H8_obb_noflip/weights/best.pt --source img.jpg
+    python scripts/inference/inference_with_flip.py --config configs/H8_obb_botonly.yaml --source data/images/
+    python scripts/inference/inference_with_flip.py --model runs/obb/H8_obb_botonly/weights/best.pt --source img.jpg
 """
 
 import argparse
@@ -22,12 +22,17 @@ import yaml
 from ultralytics import YOLO
 
 
-# Class definitions for flip inference output (4-class result)
-# Standard pass: keep bot_finger(0) and bot_toe(1) from 2-class model,
-# or bot_finger(2) and bot_toe(3) from 6-class model
-# Flipped pass: bot → up mapping
-CLASSES = {0: 'bot_finger', 1: 'bot_toe', 2: 'up_finger', 3: 'up_toe'}
-COLORS = {0: (255, 0, 255), 1: (0, 255, 0), 2: (255, 165, 0), 3: (0, 255, 255)}
+# 6-class scheme (matches dataset names order)
+CLASSES = {
+    0: 'up_finger', 1: 'up_toe',
+    2: 'bot_finger', 3: 'bot_toe',
+    4: 'ruler', 5: 'id',
+}
+COLORS = {
+    0: (255, 165, 0), 1: (0, 255, 255),     # up: orange, cyan
+    2: (255, 0, 255), 3: (0, 255, 0),       # bot: magenta, green
+    4: (255, 0, 0), 5: (0, 165, 255),       # ruler: blue, id: orange
+}
 
 
 def flip_point(pt, h):
@@ -46,13 +51,14 @@ def run_flip_inference(model, img, conf=0.25, iou=0.4, imgsz=1280):
 
     final_detections = []
 
+    # 1a. Keep all bottom-view detections: bot_finger(2), bot_toe(3), ruler(4), id(5)
     if results_orig.obb is not None:
         for i in range(len(results_orig.obb)):
             cls_id = int(results_orig.obb.cls[i])
             conf_score = float(results_orig.obb.conf[i])
             corners = results_orig.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
 
-            if cls_id in [0, 1]:  # bot_finger, bot_toe
+            if cls_id in [2, 3, 4, 5]:  # bot_finger, bot_toe, ruler, id
                 final_detections.append({
                     'cls': cls_id,
                     'conf': conf_score,
@@ -60,7 +66,8 @@ def run_flip_inference(model, img, conf=0.25, iou=0.4, imgsz=1280):
                     'source': 'original'
                 })
 
-    # 2. Flipped Inference — map bot → up
+    # 2. Flipped Inference — only remap bot_finger/bot_toe → up_finger/up_toe
+    #    Discard ruler(4) and id(5) from flipped pass (they'd be false positives)
     flipped_img = cv2.flip(img, 0)
     results_flipped = model.predict(flipped_img, imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
 
@@ -69,12 +76,12 @@ def run_flip_inference(model, img, conf=0.25, iou=0.4, imgsz=1280):
             cls_id = int(results_flipped.obb.cls[i])
             conf_score = float(results_flipped.obb.conf[i])
 
-            # Map flipped bot -> original up
+            # Only remap finger/toe, discard ruler/id from flipped pass
             target_cls = None
-            if cls_id == 0:    # bot_finger -> up_finger
-                target_cls = 2
-            elif cls_id == 1:  # bot_toe -> up_toe
-                target_cls = 3
+            if cls_id == 2:    # bot_finger -> up_finger
+                target_cls = 0
+            elif cls_id == 3:  # bot_toe -> up_toe
+                target_cls = 1
 
             if target_cls is not None:
                 corners_flipped = results_flipped.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
@@ -112,8 +119,8 @@ def draw_detections(img, detections):
 
 def main():
     parser = argparse.ArgumentParser(description="Run OBB inference with flip strategy")
-    parser.add_argument('--config', default='configs/H8_obb_noflip.yaml',
-                        help='Path to project YAML config (default: configs/H8_obb_noflip.yaml)')
+    parser.add_argument('--config', default='configs/H8_obb_botonly.yaml',
+                        help='Path to project YAML config (default: configs/H8_obb_botonly.yaml)')
     parser.add_argument('--model', help="Path to model weights (overrides config)")
     parser.add_argument('--source', required=True, help="Image file or directory")
     parser.add_argument('--output-dir', help="Output directory (default: results/<name>_flip_inference)")
@@ -136,7 +143,7 @@ def main():
         model_path = args.model
     else:
         task = train_cfg.get('task', 'obb')
-        name = train_cfg.get('name', 'H8_obb_noflip')
+        name = train_cfg.get('name', 'H8_obb_botonly')
         model_path = f"runs/{task}/{name}/weights/best.pt"
 
     # Resolve inference parameters: CLI > config > defaults
