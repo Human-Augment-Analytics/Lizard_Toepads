@@ -281,8 +281,9 @@ salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 
 ## Landmark Prediction (ml-morph) Experiments
 
-For details on the `ml-morph` landmark prediction experiments (Baseline vs. OBB detection) and step-by-step instructions to train the shape predictors, please see:
-* **[ML_MORPH_PIPELINE.md](docs/ML_MORPH_PIPELINE.md)** - Main guide and instructions for running the pipeline.
+For details on the `ml-morph` landmark prediction pipeline (YOLO detection + dlib shape prediction), please see:
+* **[ml-morph/README.md](ml-morph/README.md)** - Setup, usage, and configuration for the landmark prediction module.
+* **[ML_MORPH_PACE_EXPERIMENTS.md](docs/ML_MORPH_PACE_EXPERIMENTS.md)** - PACE-specific experiment instructions, sbatch jobs, and results.
 * [COMPARISON_BASELINE_VS_OBB.md](docs/COMPARISON_BASELINE_VS_OBB.md) - Detailed analysis of baseline vs OBB bounding boxes.
 * [EXPERIMENT_CROP_ROTATE_OBB.md](docs/EXPERIMENT_CROP_ROTATE_OBB.md) - Analysis of crop & rotate experiments.
 
