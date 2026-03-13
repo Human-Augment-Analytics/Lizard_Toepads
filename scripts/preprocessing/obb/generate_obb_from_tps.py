@@ -105,8 +105,11 @@ def compute_ruler_obb(ruler_pts_img, img_width, img_height, padding_ratio=0.1):
     y_coords = [p[1] for p in ruler_pts_img]
     rw = max(x_coords) - min(x_coords)
     rh = max(y_coords) - min(y_coords)
-    pad_x = max(5, rw * padding_ratio)
-    pad_y = max(5, rh * padding_ratio)
+    # Ensure minimum height proportional to ruler length (rulers are thin horizontal lines)
+    ruler_len = max(rw, rh)
+    min_dim = max(20, ruler_len * 0.15)  # at least 15% of ruler length or 20px
+    pad_x = max(min_dim / 2, rw * padding_ratio)
+    pad_y = max(min_dim / 2, rh * padding_ratio)
     x_min = max(0, min(x_coords) - pad_x)
     x_max = min(img_width, max(x_coords) + pad_x)
     y_min = max(0, min(y_coords) - pad_y)

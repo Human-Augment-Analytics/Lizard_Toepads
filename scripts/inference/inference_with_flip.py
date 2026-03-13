@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Run OBB inference with vertical flip strategy.
+Run OBB inference with flip strategy (no image splitting).
 
-The flip strategy detects upper-view limbs by:
-1. Standard pass → detect bot_finger, bot_toe (oriented bounding boxes)
-2. Flip image vertically → upper limbs now look like bottom limbs
-3. Run inference again → map flipped detections back as up_finger, up_toe
+Two-pass approach:
+1. Normal pass: run inference on original image → keep all classes
+2. Flip pass: flip image vertically → run inference → keep finger/toe only
+   → un-flip OBB coordinates back to original image space
+3. Combine both passes with NMS (normal pass has priority)
 
 Usage:
-    python scripts/inference/inference_with_flip.py --config configs/H8_obb_botonly.yaml --source data/images/
-    python scripts/inference/inference_with_flip.py --model runs/obb/H8_obb_botonly/weights/best.pt --source img.jpg
+    python scripts/inference/inference_with_flip.py --config configs/H10_obb.yaml --quick-test
+    python scripts/inference/inference_with_flip.py --config configs/H10_obb.yaml --source data/images/
 """
 
 import argparse
-import os
 from pathlib import Path
 
 import cv2
@@ -22,89 +22,125 @@ import yaml
 from ultralytics import YOLO
 
 
-# 6-class scheme (matches dataset names order)
-CLASSES = {
-    0: 'up_finger', 1: 'up_toe',
-    2: 'bot_finger', 3: 'bot_toe',
-    4: 'ruler', 5: 'id',
-}
-COLORS = {
-    0: (255, 165, 0), 1: (0, 255, 255),     # up: orange, cyan
-    2: (255, 0, 255), 3: (0, 255, 0),       # bot: magenta, green
-    4: (255, 0, 0), 5: (0, 165, 255),       # ruler: blue, id: orange
+CLASS_COLORS = {
+    'finger': (255, 0, 255),
+    'toe': (0, 255, 0),
+    'ruler': (255, 0, 0),
+    'id': (0, 165, 255),
 }
 
 
-def flip_point(pt, h):
-    return [pt[0], h - 1 - pt[1]]
+def obb_iou(corners1, corners2):
+    """Compute IoU between two OBBs using polygon intersection."""
+    from shapely.geometry import Polygon
+    p1 = Polygon(corners1)
+    p2 = Polygon(corners2)
+    if not p1.is_valid or not p2.is_valid:
+        return 0.0
+    inter = p1.intersection(p2).area
+    union = p1.area + p2.area - inter
+    return inter / union if union > 0 else 0.0
 
 
-def run_flip_inference(model, img, conf=0.25, iou=0.4, imgsz=1280):
+def cross_pass_nms(normal_dets, flip_dets, iou_threshold=0.3):
+    """Normal pass has priority. Flip pass only adds non-overlapping detections."""
+    keep = list(normal_dets)
+    for fd in flip_dets:
+        suppressed = False
+        for kd in keep:
+            if obb_iou(fd['corners'], kd['corners']) > iou_threshold:
+                suppressed = True
+                break
+        if not suppressed:
+            keep.append(fd)
+    return keep
+
+
+def build_class_config(dataset_cfg):
+    """Build class mapping. Returns (class_names, finger/toe IDs for flip pass)."""
+    names = dataset_cfg.get('names', [])
+
+    flip_keep_ids = set()
+    for i, name in enumerate(names):
+        if 'finger' in name.lower() or 'toe' in name.lower():
+            flip_keep_ids.add(i)
+
+    return names, flip_keep_ids
+
+
+def run_flip_inference(model, img, conf=0.25, iou=0.4, imgsz=1280,
+                       flip_keep_ids=None):
     """
-    Run inference with flip strategy.
-    Returns a list of detections: {'cls': int, 'conf': float, 'corners': np.array}
+    Two-pass inference on full image (no splitting):
+    1. Normal pass: inference on original image, keep all classes
+    2. Flip pass: flip vertically, inference, un-flip coords, keep finger/toe only
+    3. Combine with NMS (normal pass has priority)
     """
     h, w = img.shape[:2]
 
-    # 1. Standard Inference — keep bot_finger and bot_toe
-    results_orig = model.predict(img, imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
+    if flip_keep_ids is None:
+        flip_keep_ids = {0, 1}
 
-    final_detections = []
+    normal_dets = []
+    flip_dets = []
 
-    # 1a. Keep all bottom-view detections: bot_finger(2), bot_toe(3), ruler(4), id(5)
-    if results_orig.obb is not None:
-        for i in range(len(results_orig.obb)):
-            cls_id = int(results_orig.obb.cls[i])
-            conf_score = float(results_orig.obb.conf[i])
-            corners = results_orig.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
+    # --- Pass 1: Normal inference on original image — keep all classes ---
+    results_normal = model.predict(img, imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
+    if results_normal.obb is not None:
+        for i in range(len(results_normal.obb)):
+            corners = results_normal.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
+            normal_dets.append({
+                'cls': int(results_normal.obb.cls[i]),
+                'conf': float(results_normal.obb.conf[i]),
+                'corners': corners,
+                'source': 'normal'
+            })
 
-            if cls_id in [2, 3, 4, 5]:  # bot_finger, bot_toe, ruler, id
-                final_detections.append({
-                    'cls': cls_id,
-                    'conf': conf_score,
-                    'corners': corners,
-                    'source': 'original'
-                })
+    # --- Pass 2: Flip vertically → inference → un-flip — keep finger/toe only ---
+    img_flipped = cv2.flip(img, 0)  # vertical flip
 
-    # 2. Flipped Inference — only remap bot_finger/bot_toe → up_finger/up_toe
-    #    Discard ruler(4) and id(5) from flipped pass (they'd be false positives)
-    flipped_img = cv2.flip(img, 0)
-    results_flipped = model.predict(flipped_img, imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
+    results_flip = model.predict(img_flipped, imgsz=imgsz, conf=conf, iou=iou, verbose=False)[0]
+    n_flip_raw = len(results_flip.obb) if results_flip.obb is not None else 0
+    n_flip_kept = 0
+    if results_flip.obb is not None:
+        for i in range(len(results_flip.obb)):
+            cls_id = int(results_flip.obb.cls[i])
+            conf_i = float(results_flip.obb.conf[i])
+            if cls_id not in flip_keep_ids:
+                continue  # discard ruler/id from flipped pass
+            n_flip_kept += 1
 
-    if results_flipped.obb is not None:
-        for i in range(len(results_flipped.obb)):
-            cls_id = int(results_flipped.obb.cls[i])
-            conf_score = float(results_flipped.obb.conf[i])
+            corners_flipped = results_flip.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
+            # Un-flip y: y_original = (h - 1) - y_flipped
+            corners = corners_flipped.copy()
+            corners[:, 1] = (h - 1) - corners_flipped[:, 1]
 
-            # Only remap finger/toe, discard ruler/id from flipped pass
-            target_cls = None
-            if cls_id == 2:    # bot_finger -> up_finger
-                target_cls = 0
-            elif cls_id == 3:  # bot_toe -> up_toe
-                target_cls = 1
+            flip_dets.append({
+                'cls': cls_id,
+                'conf': conf_i,
+                'corners': corners,
+                'source': 'flip'
+            })
+    print(f"    [debug] flip raw:{n_flip_raw} kept(finger/toe):{n_flip_kept} after_nms:", end="")
 
-            if target_cls is not None:
-                corners_flipped = results_flipped.obb.xyxyxyxy[i].cpu().numpy().astype(np.float32)
-                corners_orig = np.array([flip_point(p, h) for p in corners_flipped], dtype=np.float32)
-
-                final_detections.append({
-                    'cls': target_cls,
-                    'conf': conf_score,
-                    'corners': corners_orig,
-                    'source': 'flipped'
-                })
+    # --- Combine with NMS (normal pass has priority) ---
+    final_detections = cross_pass_nms(normal_dets, flip_dets, iou_threshold=iou)
+    n_flip_final = sum(1 for d in final_detections if d['source'] == 'flip')
+    print(f"{n_flip_final}")
 
     return final_detections
 
 
-def draw_detections(img, detections):
+def draw_detections(img, detections, class_names):
     vis_img = img.copy()
     for d in detections:
         cls_id = d['cls']
         corners = d['corners'].astype(np.int32)
         conf = d['conf']
-        color = COLORS.get(cls_id, (255, 255, 255))
-        label = f"{CLASSES.get(cls_id, str(cls_id))} {conf:.2f}"
+        name = class_names[cls_id] if cls_id < len(class_names) else str(cls_id)
+        color = CLASS_COLORS.get(name, (255, 255, 255))
+        source_tag = " [flip]" if d['source'] == 'flip' else ""
+        label = f"{name}{source_tag} {conf:.2f}"
 
         cv2.polylines(vis_img, [corners], True, color, 4)
 
@@ -119,14 +155,16 @@ def draw_detections(img, detections):
 
 def main():
     parser = argparse.ArgumentParser(description="Run OBB inference with flip strategy")
-    parser.add_argument('--config', default='configs/H8_obb_botonly.yaml',
-                        help='Path to project YAML config (default: configs/H8_obb_botonly.yaml)')
+    parser.add_argument('--config', default='configs/H10_obb.yaml',
+                        help='Path to project YAML config')
     parser.add_argument('--model', help="Path to model weights (overrides config)")
-    parser.add_argument('--source', required=True, help="Image file or directory")
-    parser.add_argument('--output-dir', help="Output directory (default: results/<name>_flip_inference)")
-    parser.add_argument('--conf', type=float, help="Confidence threshold (overrides config)")
-    parser.add_argument('--iou', type=float, help="NMS IoU threshold (overrides config)")
-    parser.add_argument('--imgsz', type=int, help="Image size (overrides config)")
+    parser.add_argument('--source', help="Image file or directory (default: val set from config)")
+    parser.add_argument('--output-dir', help="Output directory")
+    parser.add_argument('--conf', type=float, help="Confidence threshold")
+    parser.add_argument('--iou', type=float, help="NMS IoU threshold")
+    parser.add_argument('--imgsz', type=int, help="Image size")
+    parser.add_argument('--quick-test', action='store_true',
+                        help="Quick test with 50 random images from val set")
     args = parser.parse_args()
 
     # Load config
@@ -137,16 +175,21 @@ def main():
 
     train_cfg = cfg.get('train', {})
     inference_cfg = cfg.get('inference', {})
+    dataset_cfg = cfg.get('dataset', {})
 
-    # Resolve model path: CLI > runs/{task}/{name}/weights/best.pt
+    class_names, flip_keep_ids = build_class_config(dataset_cfg)
+    print(f"Classes: {class_names}")
+    print(f"Flip pass keeps: {[class_names[i] for i in sorted(flip_keep_ids)]}")
+
+    # Resolve model path
     if args.model:
         model_path = args.model
     else:
         task = train_cfg.get('task', 'obb')
-        name = train_cfg.get('name', 'H8_obb_botonly')
+        name = train_cfg.get('name', 'H10_obb')
         model_path = f"runs/{task}/{name}/weights/best.pt"
 
-    # Resolve inference parameters: CLI > config > defaults
+    # Resolve inference parameters
     conf = args.conf if args.conf is not None else inference_cfg.get('conf', 0.25)
     iou = args.iou if args.iou is not None else inference_cfg.get('iou', 0.4)
     imgsz = args.imgsz if args.imgsz is not None else inference_cfg.get('imgsz', 1280)
@@ -163,25 +206,61 @@ def main():
     model = YOLO(model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    source_path = Path(args.source)
+    # Resolve source
+    if args.source:
+        source_path = Path(args.source)
+    else:
+        val_rel = dataset_cfg.get('val', 'images/val')
+        source_path = Path(dataset_cfg.get('path', 'data')) / val_rel
+        print(f"Using val set: {source_path}")
+
     if source_path.is_dir():
         image_files = sorted(list(source_path.glob('*.jpg')) + list(source_path.glob('*.png')))
     else:
         image_files = [source_path]
 
+    if args.quick_test:
+        import random
+        random.seed(42)
+        n = min(50, len(image_files))
+        image_files = sorted(random.sample(image_files, n))
+        print(f"Quick test: {n} images")
+
     print(f"Processing {len(image_files)} images...")
 
-    for img_file in image_files:
-        img = cv2.imread(str(img_file))
-        if img is None:
-            continue
+    # Single results file
+    results_file = output_dir / "results.txt"
+    with open(results_file, 'w') as rf:
+        rf.write("image class class_name x1 y1 x2 y2 x3 y3 x4 y4 conf source\n")
 
-        detections = run_flip_inference(model, img, conf=conf, iou=iou, imgsz=imgsz)
+        for img_file in image_files:
+            img = cv2.imread(str(img_file))
+            if img is None:
+                continue
 
-        vis_img = draw_detections(img, detections)
-        out_path = output_dir / f"{img_file.stem}_flip_inf.jpg"
-        cv2.imwrite(str(out_path), vis_img)
-        print(f"  {img_file.name}: {len(detections)} detections -> {out_path}")
+            h, w = img.shape[:2]
+            detections = run_flip_inference(model, img, conf=conf, iou=iou, imgsz=imgsz,
+                                            flip_keep_ids=flip_keep_ids)
+
+            # Save visualization
+            vis_img = draw_detections(img, detections, class_names)
+            out_path = output_dir / f"{img_file.stem}_flip_inf.jpg"
+            cv2.imwrite(str(out_path), vis_img)
+
+            # Append to results file (normalized coordinates)
+            for d in detections:
+                corners_norm = d['corners'].copy()
+                corners_norm[:, 0] /= w
+                corners_norm[:, 1] /= h
+                coords = ' '.join(f"{c:.6f}" for c in corners_norm.flatten())
+                cname = class_names[d['cls']] if d['cls'] < len(class_names) else str(d['cls'])
+                rf.write(f"{img_file.stem} {d['cls']} {cname} {coords} {d['conf']:.4f} {d['source']}\n")
+
+            n_normal = sum(1 for d in detections if d['source'] == 'normal')
+            n_flip = sum(1 for d in detections if d['source'] == 'flip')
+            print(f"  {img_file.name}: {len(detections)} detections (normal:{n_normal} flip:{n_flip})")
+
+    print(f"\nResults saved to {results_file}")
 
 
 if __name__ == '__main__':

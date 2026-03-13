@@ -11,7 +11,18 @@ A two-stage pipeline for lizard toepad analysis:
 1. **Stage 1 — YOLO Detection**: Detect toepad regions (fingers, toes, ruler, ID) using YOLOv11, with support for both standard bounding boxes (`detect`) and oriented bounding boxes (`obb`).
 2. **Stage 2 — ml-morph Landmark Prediction**: Crop detected regions and predict anatomical landmarks using dlib shape predictors. See [docs/ML_MORPH_PIPELINE.md](docs/ML_MORPH_PIPELINE.md).
 
-### Class Mapping (6 classes, shared across detect and OBB)
+### Class Mapping
+
+**OBB pipeline (H10+) — 4 classes:**
+
+| ID | Class   | Source             |
+|----|---------|--------------------|
+| 0  | finger  | TPS landmark files |
+| 1  | toe     | TPS landmark files |
+| 2  | ruler   | TPS landmark files |
+| 3  | id      | TPS landmark files |
+
+**Detect pipeline (H5) — 6 classes (legacy):**
 
 | ID | Class      | Source              |
 |----|------------|---------------------|
@@ -113,33 +124,38 @@ uv run python scripts/training/train_yolo.py --config configs/H5.yaml
 uv run python scripts/inference/predict.py --config configs/H5.yaml --quick-test
 ```
 
-### YOLO OBB Pipeline
+### YOLO OBB Pipeline (4-class)
 
 ```bash
 # 3b. Generate OBB labels + resized images from TPS (--visualize N to verify)
-uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H8_obb_botonly.yaml --visualize 10
+uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H10_obb.yaml --visualize 10
 
-# 4b.  Merge bottom OBB + upper bbox → 6-class
-uv run python scripts/preprocessing/obb/create_merged_obb_dataset.py --config configs/H8_obb_botonly.yaml
+# 4b. Create train/val split
+uv run python scripts/preprocessing/create_train_val_split.py --config configs/H10_obb.yaml
 
-# 5b. Create bottom-only OBB dataset (--visualize N to verify)
-uv run python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_botonly.yaml --visualize 10
-
-# 6b. Create train/val split (on the final dataset)
-uv run python scripts/preprocessing/create_train_val_split.py --config configs/H8_obb_botonly.yaml
-
-# 7b. Allocate GPU and train
+# 5b. Allocate GPU and train
 salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
 srun --pty bash
 
-uv run python scripts/training/train_yolo.py --config configs/H8_obb_botonly.yaml
+uv run python scripts/training/train_yolo.py --config configs/H10_obb.yaml
 
-# 8b. Inference — normal (single pass)
-uv run python scripts/inference/predict.py --config configs/H8_obb_botonly.yaml --source data/images/
-
-# 8b-alt. Inference — flip strategy (normal + flipped pass for upper-view detection)
-uv run python scripts/inference/inference_with_flip.py --config configs/H8_obb_botonly.yaml --source data/images/
+# 6b. Inference
+uv run python scripts/inference/predict.py --config configs/H10_obb.yaml --quick-test
 ```
+
+<details>
+<summary>Legacy OBB Pipeline (6-class, H8/H9)</summary>
+
+```bash
+uv run python scripts/preprocessing/obb/generate_obb_from_tps.py --config configs/H8_obb_botonly.yaml --visualize 10
+uv run python scripts/preprocessing/obb/create_merged_obb_dataset.py --config configs/H8_obb_botonly.yaml
+uv run python scripts/preprocessing/obb/create_noflip_obb_dataset.py --config configs/H8_obb_botonly.yaml --visualize 10
+uv run python scripts/preprocessing/create_train_val_split.py --config configs/H8_obb_botonly.yaml
+uv run python scripts/training/train_yolo.py --config configs/H8_obb_botonly.yaml
+uv run python scripts/inference/inference_with_flip.py --config configs/H8_obb_botonly.yaml --quick-test
+```
+
+</details>
 
 ### Hyperparameter Tuning (either pipeline)
 
@@ -167,12 +183,14 @@ All training parameters live in YAML configs under `configs/`. The training scri
 
 ### Available Configs
 
-| Config | Task | Description |
-|--------|------|-------------|
-| `H5.yaml` | detect | Bilateral detection with augmentation |
-| `H6.yaml` | detect | H5 + Ray Tune best hyperparameters |
-| `H7_obb_6class.yaml` | obb | OBB with merged upper+bottom views |
-| `H8_obb_botonly.yaml` | obb | OBB bottom-only (fair baseline comparison) |
+| Config | Task | Classes | Description |
+|--------|------|---------|-------------|
+| **`H10_obb.yaml`** | **obb** | **4** | **OBB 4-class (finger, toe, ruler, id)** |
+| `H5.yaml` | detect | 6 | Bilateral detection with augmentation |
+| `H6.yaml` | detect | 6 | H5 + Ray Tune best hyperparameters |
+| `H7_obb_6class.yaml` | obb | 6 | OBB with merged upper+bottom views |
+| `H8_obb_botonly.yaml` | obb | 6 | OBB bottom-only (legacy) |
+| `H9_obb_botonly.yaml` | obb | 6 | H8 + stronger augmentation (legacy) |
 
 ### Config Structure
 
@@ -186,11 +204,11 @@ train:
   # ... any YOLO train() parameter works here
 
 dataset:
-  path: data/dataset
+  path: data/obb/dataset_4class_split
   train: images/train
   val: images/val
-  nc: 6
-  names: ["up_finger", "up_toe", "bot_finger", "bot_toe", "ruler", "id"]
+  nc: 4
+  names: ["finger", "toe", "ruler", "id"]
 
 inference:
   conf: 0.2
@@ -219,7 +237,7 @@ Used by configs: `H5.yaml`, `H6.yaml`
 
 ### YOLOv11-OBB Models (`task: obb`)
 
-Used by configs: `H7_obb_6class.yaml`, `H8_obb_botonly.yaml`
+Used by configs: `H10_obb.yaml`, `H7_obb_6class.yaml`, `H8_obb_botonly.yaml`
 
 | Model | Filename | Params | Speed | Use Case |
 |-------|----------|--------|-------|----------|

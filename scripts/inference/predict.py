@@ -222,25 +222,29 @@ def main():
 
     # Determine source path
     if args.quick_test:
-        # Quick test mode: use first 50 images from dataset/images/val
-        val_dir = "data/dataset/images/val"
+        # Quick test mode: use 50 random images from val set (read from config)
+        dataset_cfg = cfg.get('dataset', {})
+        val_rel = dataset_cfg.get('val', 'images/val')
+        val_dir = os.path.join(dataset_cfg.get('path', 'data/dataset'), val_rel)
         if not os.path.exists(val_dir):
             print(f"Error: Validation images directory not found: {val_dir}")
             return
 
-        # Get first 50 images
         image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
         all_images = []
         for ext in image_exts:
             all_images.extend(glob.glob(os.path.join(val_dir, f"*{ext}")))
             all_images.extend(glob.glob(os.path.join(val_dir, f"*{ext.upper()}")))
 
+        import random
+        random.seed(42)
         all_images.sort()
-        source_path = all_images[:50]  # First 50 images
+        source_path = random.sample(all_images, min(50, len(all_images)))
+        source_path.sort()
         if not source_path:
             print(f"No images found in {val_dir}")
             return
-        print(f"Quick test mode: Testing with {len(source_path)} validation images from {val_dir}")
+        print(f"Quick test mode: {len(source_path)} of {len(all_images)} images from {val_dir}")
 
     elif args.source:
         source_path = args.source

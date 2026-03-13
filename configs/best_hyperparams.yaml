@@ -1,0 +1,41 @@
+tune_results:
+  best_config:
+    batch_size: 16
+    box: 7.1020563008920305
+    cls: 0.6633533378972778
+    degrees: 4.315490665406855
+    dfl: 1.049696334126689
+    fliplr: 0.07145703627201416
+    hsv_h: 0.034210197553401954
+    hsv_s: 0.8243463095864088
+    hsv_v: 0.5676456694880815
+    lr0: 0.0005248949893363896
+    lrf: 0.3017112759192476
+    mixup: 0.032899821409129226
+    momentum: 0.8005554226184551
+    mosaic: 0.7414278015889362
+    scale: 0.2968613807860112
+    translate: 0.21237092141883046
+    warmup_epochs: 3.0127431561787765
+    weight_decay: 6.081809706161908e-05
+  best_metrics:
+    done: 1.0
+    epoch: 300.0
+    iterations_since_restore: 300.0
+    metrics/mAP50(B): 0.97392
+    metrics/mAP50-95(B): 0.76524
+    metrics/precision(B): 0.9668
+    metrics/recall(B): 0.95961
+    pid: 3577178.0
+    time_since_restore: 3234.9958424568176
+    time_this_iter_s: 10.229506492614746
+    time_total_s: 3234.9958424568176
+    timestamp: 1771611902.0
+    training_iteration: 300.0
+    val/box_loss: 0.75519
+    val/cls_loss: 0.50051
+    val/dfl_loss: 0.73933
+  best_model_path: null
+  ray_trial_dir: /home/hice1/jzhuang48/scratch/lizard_toepads/ray_tune/4095009/ray_results/yolo_tune_20260220_121908/train_yolo_trial_148ee389_7_batch_size=16,box=7.1021,cls=0.6634,degrees=4.3155,dfl=1.0497,fliplr=0.0715,hsv_h=0.0342,hsv_s=0.8243,_2026-02-20_12-26-41
+  timestamp: '2026-02-20T14:07:28.543935'
+  yolo_save_dir: null

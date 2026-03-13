@@ -84,11 +84,71 @@ def main() -> None:
     print(f"Train args: {train_args}")
 
     model = YOLO(model_path, task=task)
-    model.train(**train_args)
+    results = model.train(**train_args)
 
-    # Final validation with plots
-    print("\nRunning final validation...")
-    model.val(data=train_args["data"], plots=True)
+    # Determine save directory and best weights
+    save_dir = Path(results.save_dir) if results and hasattr(results, "save_dir") else None
+    best_weights = save_dir / "weights" / "best.pt" if save_dir else None
+
+    # Generate results.png from results.csv (no GPU needed, works even if
+    # early stopping skipped plot generation — ultralytics bug in v8.3.201
+    # where validator.py line 155 disables plots on early stop epochs)
+    if save_dir:
+        from ultralytics.utils.plotting import plot_results
+        csv_file = save_dir / "results.csv"
+        if csv_file.exists():
+            print(f"\nGenerating results.png from {csv_file}...")
+            plot_results(file=csv_file, on_plot=None)
+
+    # Final validation with plots (confusion matrix, F1, PR, P, R curves)
+    if best_weights and best_weights.exists():
+        print(f"\nRunning final validation with {best_weights}...")
+        val_model = YOLO(str(best_weights), task=task)
+        val_model.val(data=train_args["data"], plots=True, save_dir=save_dir)
+
+        # Export ONNX in multiple precisions
+        imgsz = train_args.get("imgsz", 1280)
+        weights_dir = save_dir / "weights"
+        export_onnx(str(best_weights), task, imgsz, weights_dir)
+    else:
+        print("\nRunning final validation...")
+        model.val(data=train_args["data"], plots=True)
+
+
+def export_onnx(best_pt: str, task: str, imgsz: int, weights_dir: Path) -> None:
+    """Export best.pt to ONNX in FP32 and FP16."""
+    import shutil
+
+    # Step 1: Export FP32 ONNX
+    print("\nExporting ONNX (fp32)...")
+    try:
+        m = YOLO(best_pt, task=task)
+        onnx_path = m.export(format="onnx", imgsz=imgsz, simplify=True, opset=17)
+        dst_fp32 = weights_dir / "best_fp32.onnx"
+        shutil.move(onnx_path, dst_fp32)
+        size_mb = dst_fp32.stat().st_size / 1e6
+        print(f"  Saved: {dst_fp32} ({size_mb:.1f} MB)")
+    except Exception as e:
+        print(f"  Failed to export fp32: {e}")
+        return
+
+    # Step 2: Convert FP32 -> FP16 via onnxruntime (reliable regardless of device)
+    print("\nConverting ONNX fp32 -> fp16...")
+    try:
+        import onnx
+        from onnxruntime.transformers import float16
+
+        model_fp32 = onnx.load(str(dst_fp32))
+        model_fp16 = float16.convert_float_to_float16(model_fp32, keep_io_types=True)
+        dst_fp16 = weights_dir / "best_fp16.onnx"
+        onnx.save(model_fp16, str(dst_fp16))
+        size_mb = dst_fp16.stat().st_size / 1e6
+        print(f"  Saved: {dst_fp16} ({size_mb:.1f} MB)")
+    except Exception as e:
+        print(f"  Failed to convert fp16: {e}")
+
+    print(f"\nAll exports saved to {weights_dir}/")
+    print(f"  Original: best.pt (preserved)")
 
 
 if __name__ == "__main__":
