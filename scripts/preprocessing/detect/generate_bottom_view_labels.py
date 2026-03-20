@@ -1,15 +1,16 @@
+import sys
+print("Script loaded", flush=True)
 import os
+import argparse
+import multiprocessing
+from multiprocessing import Pool, cpu_count
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import re
-import argparse
 from tqdm import tqdm
 import yaml
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
-import functools
 
-# Increase maximum image size limit
 Image.MAX_IMAGE_PIXELS = None  # Remove size limit - instead we prob want to resize image beforehand
 
 def read_tps_file(tps_path):
@@ -95,9 +96,49 @@ def create_ruler_label(ruler_points, img_width, img_height, output_dir, image_na
 
     return x_min, y_min, x_max, y_max
 
+def create_id_label(id_points, img_width, img_height, output_dir, image_name, class_id,
+                     padding_ratio_x=0.05, padding_ratio_y=0.05):
+    """Create YOLO label from ID box (2 points: top-left and bottom-right)."""
+    # ID format: point 0 = top-left, point 1 = bottom-right
+    top_left_x, top_left_y = id_points[0]
+    bottom_right_x, bottom_right_y = id_points[1]
+
+    # Convert Y coordinates (TPS uses bottom-left origin)
+    top_left_y = img_height - top_left_y
+    bottom_right_y = img_height - bottom_right_y
+
+    # Calculate box dimensions
+    box_width_px = abs(bottom_right_x - top_left_x)
+    box_height_px = abs(top_left_y - bottom_right_y)
+
+    # Add padding
+    padding_x = max(5, box_width_px * padding_ratio_x)
+    padding_y = max(5, box_height_px * padding_ratio_y)
+
+    x_min = max(0, min(top_left_x, bottom_right_x) - padding_x)
+    x_max = min(img_width, max(top_left_x, bottom_right_x) + padding_x)
+    y_min = max(0, min(top_left_y, bottom_right_y) - padding_y)
+    y_max = min(img_height, max(top_left_y, bottom_right_y) + padding_y)
+
+    # Convert to YOLO format (normalized center x, center y, width, height)
+    box_width = (x_max - x_min) / img_width
+    box_height = (y_max - y_min) / img_height
+    center_x = (x_min + x_max) / (2 * img_width)
+    center_y = (y_min + y_max) / (2 * img_height)
+
+    labels_dir = os.path.join(output_dir, 'labels')
+    os.makedirs(labels_dir, exist_ok=True)
+
+    label_path = os.path.join(labels_dir, f"{os.path.splitext(image_name)[0]}.txt")
+    mode = 'a' if os.path.exists(label_path) else 'w'
+    with open(label_path, mode) as f:
+        f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {box_width:.6f} {box_height:.6f}\n")
+
+    return x_min, y_min, x_max, y_max
+
 def write_classes_txt(output_dir):
     """Write YOLO class names to classes.txt."""
-    class_list = ['Finger', 'Toe', 'Ruler']
+    class_list = ['Finger', 'Toe', 'Ruler', 'ID']
     with open(os.path.join(output_dir, 'labels/classes.txt'), 'w') as f:
         for c in class_list:
             f.write(f"{c}\n")
@@ -132,11 +173,17 @@ def grayscale_image_if_needed(image):
     else:
         return image.convert('L')
 
-def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='output', point_size=10, add_points=False, target_size=1024):
-    """Process an image with both finger and toe TPS files."""
+def process_single_image(finger_tps_path, toe_tps_path, jpg_path, id_tps_path=None, output_dir='output', point_size=10, add_points=False, target_size=1024):
+    """Process an image with finger, toe, and optional ID TPS files."""
     os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'visualizations'), exist_ok=True)
+    
+    # Clean up existing label file to prevent duplicates
+    label_filename = f"{os.path.splitext(os.path.basename(jpg_path))[0]}.txt"
+    label_path = os.path.join(output_dir, 'labels', label_filename)
+    if os.path.exists(label_path):
+        os.remove(label_path)
     
     if not os.path.exists(finger_tps_path):
         raise FileNotFoundError(f"Finger TPS file not found: {finger_tps_path}")
@@ -149,10 +196,23 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
         # Resize image and scale landmarks
         finger_landmarks = read_tps_file(finger_tps_path)
         toe_landmarks = read_tps_file(toe_tps_path)
-        
-        resized_img, [finger_landmarks, toe_landmarks], img_width, img_height = resize_image_and_landmarks(
-            img, [finger_landmarks, toe_landmarks], target_size
+
+        # Read ID landmarks if available
+        landmarks_to_resize = [finger_landmarks, toe_landmarks]
+        if id_tps_path and os.path.exists(id_tps_path):
+            id_landmarks = read_tps_file(id_tps_path)
+            landmarks_to_resize.append(id_landmarks)
+        else:
+            id_landmarks = None
+
+        resized_img, resized_landmarks, img_width, img_height = resize_image_and_landmarks(
+            img, landmarks_to_resize, target_size
         )
+
+        finger_landmarks = resized_landmarks[0]
+        toe_landmarks = resized_landmarks[1]
+        if id_landmarks is not None:
+            id_landmarks = resized_landmarks[2]
         
         img_gray = grayscale_image_if_needed(resized_img)        # For YOLO input
         img_copy = img_gray.convert('RGB')
@@ -194,6 +254,17 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
                        outline='purple', width=2)
         draw.text((ruler_box[0], ruler_box[1] - 20), "Ruler", fill='purple', font=font)
 
+        # --- ID Box (if available) ---
+        if id_landmarks is not None:
+            id_box = create_id_label(
+                id_landmarks, img_width, img_height,
+                output_dir, os.path.basename(jpg_path),
+                class_id=3, padding_ratio_x=0.05, padding_ratio_y=0.05
+            )
+            draw.rectangle([id_box[0], id_box[1], id_box[2], id_box[3]],
+                           outline='green', width=2)
+            draw.text((id_box[0], id_box[1] - 10), "ID", fill='green', font=font)
+
         # TPS point visualization (optional based on --add-points flag)
         if add_points:
             # Draw finger landmarks
@@ -220,26 +291,52 @@ def process_single_image(finger_tps_path, toe_tps_path, jpg_path, output_dir='ou
         vis_path = os.path.join(output_dir, 'visualizations', f'marked_{os.path.basename(jpg_path)}')
         img_copy.save(vis_path)
 
-        # Write classes.txt
-        write_classes_txt(output_dir)
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
+
+    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
+
+    # Batch mode
+    parser.add_argument('--image-dir', help='Directory containing JPG images')
+    parser.add_argument('--tps-dir', help='Directory containing TPS files')
+
+    # Shared
+    parser.add_argument('--output-dir', help='Output directory')
+    parser.add_argument('--point-size', type=int, help='Size of landmark points')
+    parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
+    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
+    parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
+
+    return parser.parse_args()
 
 
 def process_single_image_wrapper(args):
     """Wrapper function for multiprocessing - unpacks arguments"""
-    return process_single_image(*args)
+    try:
+        return process_single_image(*args)
+    except Exception as e:
+        print(f"Error processing {args[2]}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', point_size=10, add_points=False, target_size=1024, num_workers=None):
     """
     Process all images in image_dir with corresponding TPS files in tps_dir.
-    Matches by base filename (e.g., 001.jpg ↔ 001_finger.tps & 001_toe.tps)
+    Matches by base filename (e.g., 001.jpg ↔ 001_finger.tps & 001_toe.tps & 001_id.tps)
 
     Args:
+        image_dir: Directory containing JPG images
+        tps_dir: Directory containing finger, toe, and ID TPS files
         num_workers: Number of parallel workers. If None, uses cpu_count()
     """
+    print(f"Processing to output directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
 
-    jpg_files = [f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')]
+    jpg_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith('.jpg')])
+    print(f"Found {len(jpg_files)} JPG files in {image_dir}")
 
     # Count valid files first and prepare arguments
     valid_args = []
@@ -247,12 +344,14 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
         base_name = os.path.splitext(jpg_file)[0]
         finger_tps = os.path.join(tps_dir, f"{base_name}_finger.TPS")
         toe_tps = os.path.join(tps_dir, f"{base_name}_toe.TPS")
+        id_tps = os.path.join(tps_dir, f"{base_name}_id.TPS")
         jpg_path = os.path.join(image_dir, jpg_file)
 
-        if os.path.exists(finger_tps) and os.path.exists(toe_tps):
-            valid_args.append((finger_tps, toe_tps, jpg_path, output_dir, point_size, add_points, target_size))
+        # Only process images that have all three TPS files: finger, toe, and ID
+        if os.path.exists(finger_tps) and os.path.exists(toe_tps) and os.path.exists(id_tps):
+            valid_args.append((finger_tps, toe_tps, jpg_path, id_tps, output_dir, point_size, add_points, target_size))
 
-    print(f"Found {len(valid_args)} images with matching TPS files out of {len(jpg_files)} total images")
+    print(f"Found {len(valid_args)} images with all three TPS files (finger + toe + ID) out of {len(jpg_files)} total images")
 
     if num_workers is None:
         num_workers = min(cpu_count(), len(valid_args))
@@ -276,26 +375,8 @@ def batch_process_directory(image_dir, tps_dir, output_dir='data/processed', poi
             ))
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Process TPS and JPG image data.')
-
-    parser.add_argument('--config', default='configs/H1.yaml', help='Path to YAML config file (default: configs/H1.yaml). CLI flags override config.')
-
-    # Batch mode
-    parser.add_argument('--image-dir', help='Directory containing JPG images')
-    parser.add_argument('--tps-dir', help='Directory containing TPS files')
-
-    # Shared
-    parser.add_argument('--output-dir', help='Output directory')
-    parser.add_argument('--point-size', type=int, help='Size of landmark points')
-    parser.add_argument('--add-points', action='store_true', help='Add TPS landmark points to output images')
-    parser.add_argument('--target-size', type=int, help='Target size for resizing images')
-    parser.add_argument('--num-workers', type=int, help='Number of parallel workers (default: auto-detect CPU cores)')
-
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
+    print("Script starting...", flush=True)
     args = parse_args()
 
     # Load YAML config if provided
@@ -322,7 +403,7 @@ if __name__ == "__main__":
 
     image_dir = get_opt('image-dir', None)
     tps_dir = get_opt('tps-dir', None)
-    output_dir = get_opt('output-dir', 'data/processed')
+    output_dir = get_opt('bottom-view-processed-dir', 'data/processed')
     point_size = int(get_opt('point-size', 10))
     add_points = bool(get_opt('add-points', False))
     target_size = int(get_opt('target-size', 1024))

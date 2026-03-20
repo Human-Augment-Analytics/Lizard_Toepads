@@ -8,7 +8,7 @@ with upper-view standard bbox labels (converted to axis-aligned OBB format).
   2: bot_finger  (from bottom OBB class 0)
   3: bot_toe     (from bottom OBB class 1)
   4: ruler       (from bottom OBB class 2)
-  5: id          (no annotations)
+  5: id          (from bottom OBB class 3)
 
 Bottom OBB labels: 9-value lines (class x1 y1 x2 y2 x3 y3 x4 y4)
 Upper bbox labels: 5-value lines (class cx cy w h) -> converted to 9-value OBB
@@ -20,11 +20,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 import math
+import yaml
 
 
 # Class remapping
-BOTTOM_REMAP = {0: 2, 1: 3, 2: 4}  # finger->bot_finger, toe->bot_toe, ruler->ruler
-UPPER_REMAP = {0: 0, 1: 1}          # up_finger->up_finger, up_toe->up_toe
+BOTTOM_REMAP = {0: 2, 1: 3, 2: 4, 3: 5}  # finger->bot_finger, toe->bot_toe, ruler->ruler, id->id
+UPPER_REMAP = {0: 0, 1: 1}                # up_finger->up_finger, up_toe->up_toe
 
 
 def rotate_bbox_to_obb(cx, cy, w, h, angle_deg):
@@ -191,91 +192,73 @@ def parse_upper_bbox_labels(label_path, bot_info=None):
     return lines
 
 
-def parse_split_file(split_path):
-    """Parse a split file to extract image stem names."""
-    stems = []
-    with open(split_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            # Lines are full paths like /path/to/images/1234.jpg
-            stem = Path(line).stem
-            stems.append(stem)
-    return stems
-
 
 def create_dataset(args):
     bottom_labels_dir = Path(args.bottom_labels_dir)
     upper_labels_dir = Path(args.upper_labels_dir)
     images_dir = Path(args.images_dir)
-    splits_dir = Path(args.splits_dir)
     output_dir = Path(args.output_dir)
 
-    # Parse train/val splits
-    train_stems = parse_split_file(splits_dir / "train.txt")
-    val_stems = parse_split_file(splits_dir / "val.txt")
+    img_out = output_dir / "images"
+    lbl_out = output_dir / "labels"
+    img_out.mkdir(parents=True, exist_ok=True)
+    lbl_out.mkdir(parents=True, exist_ok=True)
 
-    print(f"Train images: {len(train_stems)}, Val images: {len(val_stems)}")
+    # Collect all image stems from bottom labels (primary source)
+    stems = sorted({f.stem for f in bottom_labels_dir.glob("*.txt")})
+    print(f"Found {len(stems)} bottom-view label files")
 
-    for split_name, stems in [("train", train_stems), ("val", val_stems)]:
-        img_out = output_dir / "images" / split_name
-        lbl_out = output_dir / "labels" / split_name
-        img_out.mkdir(parents=True, exist_ok=True)
-        lbl_out.mkdir(parents=True, exist_ok=True)
+    skipped = 0
+    written = 0
 
-        skipped = 0
-        written = 0
+    for stem in stems:
+        # Find image file
+        img_src = None
+        for ext in (".jpg", ".jpeg", ".png"):
+            candidate = images_dir / f"{stem}{ext}"
+            if candidate.exists():
+                img_src = candidate
+                break
 
-        for stem in stems:
-            # Find image file (try common extensions)
-            img_src = None
-            for ext in (".jpg", ".jpeg", ".png"):
-                candidate = images_dir / f"{stem}{ext}"
-                if candidate.exists():
-                    img_src = candidate
-                    break
+        if img_src is None:
+            skipped += 1
+            continue
 
-            if img_src is None:
-                skipped += 1
-                continue
+        # Symlink image
+        img_dst = img_out / img_src.name
+        if img_dst.exists() or img_dst.is_symlink():
+            img_dst.unlink()
+        img_dst.symlink_to(img_src.resolve())
 
-            # Symlink image
-            img_dst = img_out / img_src.name
-            if not img_dst.exists():
-                img_dst.symlink_to(img_src.resolve())
+        # Merge labels
+        merged_lines = []
 
-            # Merge labels
-            merged_lines = []
+        # Bottom-view OBB labels
+        bottom_file = bottom_labels_dir / f"{stem}.txt"
 
-            # Bottom-view OBB labels
-            bottom_file = bottom_labels_dir / f"{stem}.txt"
-            
-            # Extract info for transfer FIRST
-            bot_info = {}
-            if bottom_file.exists():
-                bot_info = extract_bot_info(bottom_file)
-                # Also append bottom labels to merged
-                merged_lines.extend(parse_bottom_obb_labels(bottom_file))
+        # Extract info for transfer FIRST
+        bot_info = {}
+        if bottom_file.exists():
+            bot_info = extract_bot_info(bottom_file)
+            merged_lines.extend(parse_bottom_obb_labels(bottom_file))
 
-            # Upper-view labels (converted bbox -> OBB using bot info)
-            upper_file = upper_labels_dir / f"{stem}.txt"
-            if upper_file.exists():
-                merged_lines.extend(parse_upper_bbox_labels(upper_file, bot_info))
+        # Upper-view labels (converted bbox -> OBB using bot info)
+        upper_file = upper_labels_dir / f"{stem}.txt"
+        if upper_file.exists():
+            merged_lines.extend(parse_upper_bbox_labels(upper_file, bot_info))
 
-            # Write merged label file
-            lbl_dst = lbl_out / f"{stem}.txt"
-            with open(lbl_dst, "w") as f:
-                f.write("\n".join(merged_lines) + "\n" if merged_lines else "")
+        # Write merged label file
+        lbl_dst = lbl_out / f"{stem}.txt"
+        with open(lbl_dst, "w") as f:
+            f.write("\n".join(merged_lines) + "\n" if merged_lines else "")
 
-            written += 1
+        written += 1
 
-        print(f"  {split_name}: {written} written, {skipped} skipped (image not found)")
+    print(f"  {written} written, {skipped} skipped (image not found)")
 
     # Summary: check a sample label
-    sample_stem = train_stems[0] if train_stems else val_stems[0]
-    sample_file = output_dir / "labels" / "train" / f"{sample_stem}.txt"
-    if sample_file.exists():
+    sample_file = next(lbl_out.glob("*.txt"), None)
+    if sample_file:
         print(f"\nSample label ({sample_file.name}):")
         with open(sample_file) as f:
             for line in f:
@@ -286,32 +269,37 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create 6-class merged OBB dataset from bottom OBB + upper bbox labels"
     )
-    parser.add_argument(
-        "--bottom-labels-dir",
-        default="data/processed_obb/labels",
-        help="Directory with bottom-view OBB label files (default: data/processed_obb/labels)",
-    )
-    parser.add_argument(
-        "--upper-labels-dir",
-        default="/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels",
-        help="Directory with upper-view standard bbox label files",
-    )
-    parser.add_argument(
-        "--images-dir",
-        default="data/processed_obb/images",
-        help="Directory with source images (default: data/processed_obb/images)",
-    )
-    parser.add_argument(
-        "--splits-dir",
-        default="data/dataset_obb/splits",
-        help="Directory with train.txt and val.txt split files",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="data/dataset_obb_6class",
-        help="Output directory for merged dataset (default: data/dataset_obb_6class)",
-    )
+    parser.add_argument("--config", required=True,
+                        help="Path to project YAML config (e.g. configs/H7_obb_6class.yaml)")
+    parser.add_argument("--bottom-labels-dir",
+                        help="Directory with bottom-view OBB label files")
+    parser.add_argument("--upper-labels-dir",
+                        help="Directory with upper-view standard bbox label files")
+    parser.add_argument("--images-dir",
+                        help="Directory with source images")
+    parser.add_argument("--output-dir",
+                        help="Output directory for merged dataset")
     args = parser.parse_args()
+
+    # Load config
+    cfg = {}
+    if args.config and Path(args.config).exists():
+        with open(args.config, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+    prep = cfg.get("preprocessing", {})
+
+    # CLI overrides > config > defaults
+    args.bottom_labels_dir = args.bottom_labels_dir or prep.get("bottom-labels-dir", "data/processed_obb/labels")
+    args.upper_labels_dir = args.upper_labels_dir or prep.get("upper-labels-dir", "/storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels")
+    args.images_dir = args.images_dir or prep.get("images-dir", "data/processed_obb/images")
+    args.output_dir = args.output_dir or prep.get("merged-output-dir", prep.get("output-dir", "data/obb/dataset_6class"))
+
+    print(f"Config: {args.config}")
+    print(f"  bottom-labels-dir: {args.bottom_labels_dir}")
+    print(f"  upper-labels-dir:  {args.upper_labels_dir}")
+    print(f"  images-dir:        {args.images_dir}")
+    print(f"  output-dir:        {args.output_dir}")
+
     create_dataset(args)
 
 
