@@ -157,6 +157,18 @@ uv run python scripts/inference/inference_with_flip.py --config configs/H8_obb_b
 
 </details>
 
+### Publish Model to GitHub Releases
+
+```bash
+# Dry run (preview release notes and assets)
+uv run python scripts/deployment/publish_release.py --config configs/H11_obb.yaml --version v1.0.0-obb --dry-run
+
+# Publish (uploads best.pt, best_fp16.onnx, best_fp32.onnx, metadata.json)
+uv run python scripts/deployment/publish_release.py --config configs/H11_obb.yaml --version v1.0.0-obb
+```
+
+Versioning: `v{MAJOR}.{MINOR}.{PATCH}-{task}` — MAJOR for architecture changes, MINOR for training improvements, PATCH for export changes.
+
 ### Hyperparameter Tuning (either pipeline)
 
 ```bash

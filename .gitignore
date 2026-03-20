@@ -1,3 +1,6 @@
+# Secrets
+.env
+
 # Data folders
 /data/*
 !/data/data.yaml
