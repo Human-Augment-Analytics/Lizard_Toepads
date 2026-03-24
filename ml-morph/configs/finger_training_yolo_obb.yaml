@@ -1,0 +1,33 @@
+# dlib shape predictor training for FINGER with YOLO-OBB bounding boxes
+# Uses H1_obb_2class2 OBB model - only bot_finger detections (no flip needed)
+
+preprocessing:
+  image_dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  tps_file: consolidated_finger.tps
+  train_ratio: 0.8
+  output_train: finger_train.xml
+  output_test: finger_test.xml
+
+shape:
+  dataset: finger_train_yolo_obb.xml
+  test: finger_test_yolo_obb.xml
+  output: finger_predictor_yolo_obb
+  threads: 8
+  tree_depth: 4
+  cascade_depth: 15
+  nu: 0.1
+  oversampling: 20
+  test_splits: 20
+  feature_pool_size: 500
+  num_trees: 500
+
+yolo_bbox:
+  yolo_model: /home/hice1/yloh30/scratch/Lizard_Toepads/runs/obb/H5_obb_noflip/weights/best.pt
+  padding_ratio: 0.3
+  fallback_padding_ratio: 0.5
+  conf_threshold: 0.25
+  target_class: finger
+
+inference:
+  predictor: finger_predictor_yolo_obb.dat
+  output: finger_predictions_yolo_obb.xml

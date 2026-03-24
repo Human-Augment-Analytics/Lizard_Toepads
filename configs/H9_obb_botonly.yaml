@@ -1,0 +1,92 @@
+# H9 OBB Bottom-Only Configuration
+# Tuned from H8: stronger augmentation for small dataset (679 train images)
+# Key changes: +flipud, +mixup, +copy_paste, more rotation, higher box loss weight
+
+preprocessing:
+  # Step 1: generate_obb_from_tps.py — TPS → OBB labels + resized images
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  obb-output-dir: data/obb/processed_obb
+  target-size: 1280
+
+  # Step 2: create_merged_obb_dataset.py — remap raw class IDs to 6-class scheme
+  bottom-labels-dir: data/obb/processed_obb/labels
+  upper-labels-dir: /storage/ice-shared/cs8903onl/miami_fall_24_upper_dataset_roboflow/train/labels
+  images-dir: data/obb/processed_obb/images
+  merged-output-dir: data/obb/dataset_6class
+
+  # Step 3: create_noflip_obb_dataset.py — filter to bottom-only classes
+  source-obb-dataset: data/obb/dataset_6class
+  output-dir: data/obb/dataset_noflip
+
+split:
+  images-dir: data/obb/dataset_noflip/images
+  labels-dir: data/obb/dataset_noflip/labels
+  output-dir: data/obb/dataset_noflip_split
+  train-ratio: 0.8
+  seed: 42
+
+train:
+  # Task and model
+  task: obb
+  data: null  # Use dataset section below instead
+  model: models/base_models/yolo11m-obb.pt
+
+  # Training parameters
+  epochs: 300
+  batch: 32
+  imgsz: 1280
+  workers: 4
+  patience: 100
+  name: H9_obb_botonly
+  device: 0
+  amp: true
+  cache: true
+  save_period: 10
+
+  # Geometric augmentations (more aggressive for small dataset)
+  degrees: 20.0      # H8: 10.0 — OBB handles rotation natively
+  translate: 0.15     # H8: 0.1
+  scale: 0.5          # H8: 0.3 — more multi-scale variation
+  shear: 2.0          # H8: 0.0 — slight shear for robustness
+  perspective: 0.0
+
+  # Flip augmentations
+  fliplr: 0.5
+  flipud: 0.5         # H8: 0.0 — toepads have no fixed orientation
+
+  # Color augmentations
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+
+  # Mosaic & advanced augmentations
+  mosaic: 0.8          # H8: 0.5 — stronger mosaic for small dataset
+  mixup: 0.15          # H8: 0.0 — regularization
+  copy_paste: 0.15     # H8: 0.0 — increase target density
+  erasing: 0.4
+
+  # Loss weights (stabilize dfl_loss)
+  box: 10.0            # H8: 7.5 — stronger bbox regression
+  cls: 0.5
+  dfl: 2.0             # H8: 1.5 — stabilize OBB shape prediction
+
+  # Training strategies
+  cos_lr: true
+  close_mosaic: 15     # H8: 10 — longer clean training at end
+
+dataset:
+  path: data/obb/dataset_noflip_split
+  train: images/train
+  val: images/val
+
+  nc: 6
+  names: ["up_finger", "up_toe", "bot_finger", "bot_toe", "ruler", "id"]
+
+inference:
+  conf: 0.15           # H8: 0.2 — lower to improve recall
+  iou: 0.2
+  imgsz: 1280
+  save: true
+  save_txt: false
+  project: results

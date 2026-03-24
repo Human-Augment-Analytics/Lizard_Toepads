@@ -1,0 +1,40 @@
+# Classic dlib ml-morph workflow configuration for toe dataset
+
+preprocessing:
+  input_dir: images  # Directory containing toe images
+  tps_file: consolidated_toe.tps
+  train_ratio: 0.8
+  output_train: train.xml
+  output_test: test.xml
+
+detector:
+  dataset: train.xml
+  test: test.xml
+  output: toe_detector.svm
+  n_threads: 7
+  symmetrical: false
+  epsilon: 0.01
+  c_param: 5
+  upsample: 1
+  # window_size: 50000  # Optional: adjust based on toe image size
+
+shape:
+  dataset: train.xml
+  test: test.xml
+  output: toe_predictor
+  threads: 7
+  tree_depth: 4
+  cascade_depth: 15
+  nu: 0.1
+  oversampling: 20  # Increased for better accuracy
+  test_splits: 20
+  feature_pool_size: 500
+  num_trees: 500
+
+inference:
+  input_dir: test_images  # Directory for predictions
+  detector: toe_detector.svm
+  predictor: toe_predictor.dat
+  output: toe_predictions.xml
+  upsample_limit: 0
+  threshold: 0
