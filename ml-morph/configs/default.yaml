@@ -1,0 +1,42 @@
+# ml-morph Default Configuration
+# This config follows the main project's unified config pattern
+
+preprocessing:
+  input_dir: image-examples
+  tps_file: landmark-examples/tps-example.tps
+  train_ratio: 0.8
+  output_train: train.xml
+  output_test: test.xml
+
+detector:
+  dataset: train.xml
+  test: test.xml
+  output: detector.svm
+  n_threads: 7
+  symmetrical: false
+  epsilon: 0.01
+  c_param: 5
+  upsample: 0
+  # window_size: 79000  # Optional: detection window size
+
+shape:
+  dataset: train.xml
+  test: test.xml
+  output: predictor.dat
+  threads: 7
+  tree_depth: 4
+  cascade_depth: 15
+  nu: 0.1
+  oversampling: 10
+  test_splits: 20
+  feature_pool_size: 500
+  num_trees: 500
+
+inference:
+  input_dir: pred
+  detector: detector.svm
+  predictor: predictor.dat
+  output: output.xml
+  upsample_limit: 0
+  threshold: 0
+  # ignore_list: []  # Optional: landmarks to exclude from output

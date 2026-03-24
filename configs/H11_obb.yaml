@@ -1,0 +1,85 @@
+# H11 OBB Configuration
+# Same as H10 but WITHOUT flipud augmentation
+# This enables flip inference to detect upper-view toepads:
+#   - Model only learns bottom orientation → flip inference catches upper
+#   - Use inference_with_flip.py for dual-pass detection
+
+preprocessing:
+  # Step 1: generate_obb_from_tps.py — TPS → OBB labels + resized images
+  tps-dir: /storage/ice-shared/cs8903onl/tps_files
+  image-dir: /storage/ice-shared/cs8903onl/miami_fall_24_jpgs
+  obb-output-dir: data/obb/processed_obb
+  target-size: 1280
+
+split:
+  # Directly split raw output (already 4-class: 0=finger, 1=toe, 2=ruler, 3=id)
+  images-dir: data/obb/processed_obb/images
+  labels-dir: data/obb/processed_obb/labels
+  output-dir: data/obb/dataset_4class_split
+  train-ratio: 0.8
+  seed: 42
+
+train:
+  # Task and model
+  task: obb
+  data: null
+  model: models/base_models/yolo11m-obb.pt
+
+  # Training parameters
+  epochs: 300
+  batch: 32
+  imgsz: 1280
+  workers: 4
+  patience: 50
+  name: H11_obb
+  device: 0
+  amp: true
+  cache: true
+  save_period: 10
+
+  # Geometric augmentations (H8-based, conservative)
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.35
+  shear: 0.0
+  perspective: 0.0
+
+  # Flip augmentations
+  fliplr: 0.5
+  flipud: 0.0         # disabled: flip inference needs orientation-dependent model
+
+  # Color augmentations
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+
+  # Mosaic & advanced augmentations
+  mosaic: 0.5
+  mixup: 0.0
+  copy_paste: 0.0
+  erasing: 0.3
+
+  # Loss weights (defaults, ruler fix should stabilize dfl)
+  box: 7.5
+  cls: 0.5
+  dfl: 1.5
+
+  # Training strategies
+  cos_lr: true
+  close_mosaic: 10
+
+dataset:
+  path: data/obb/dataset_4class_split
+  train: images/train
+  val: images/val
+
+  nc: 4
+  names: ["finger", "toe", "ruler", "id"]
+
+inference:
+  conf: 0.2
+  iou: 0.3
+  imgsz: 1280
+  save: true
+  save_txt: false
+  project: results
