@@ -126,19 +126,9 @@ def main():
         mlflow.log_metrics(metrics)
         mlflow.set_tag("github_release_tag", f"model/{args.version}")
 
-        # Log the model and register it
-        model_uri = f"runs:/{run.info.run_id}/model"
-        mlflow.pyfunc.log_model(
-            artifact_path="model",
-            artifacts={"weights": str(weights_path)},
-            python_model=mlflow.pyfunc.PythonModel(),
-        )
-        mv = mlflow.register_model(model_uri, name)
-
         print(f"\nLogged to MLflow:")
         print(f"  Run ID:        {run.info.run_id}")
         print(f"  Experiment:    {experiment_name}")
-        print(f"  Model:         {name} version {mv.version}")
         print(f"  Tracking URI:  {args.tracking_uri}")
 
     print("\nDone.")
