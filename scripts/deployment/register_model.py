@@ -125,11 +125,24 @@ def main():
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
         mlflow.set_tag("github_release_tag", f"model/{args.version}")
+        run_id = run.info.run_id
 
-        print(f"\nLogged to MLflow:")
-        print(f"  Run ID:        {run.info.run_id}")
-        print(f"  Experiment:    {experiment_name}")
-        print(f"  Tracking URI:  {args.tracking_uri}")
+    # Register in Model Registry — source points to GitHub Release, no artifact upload
+    client = mlflow.MlflowClient()
+    try:
+        client.create_registered_model(name)
+    except mlflow.exceptions.MlflowException:
+        pass  # already exists
+
+    release_url = f"https://github.com/Human-Augment-Analytics/Lizard_Toepads/releases/tag/model/{args.version}"
+    mv = client.create_model_version(name=name, source=release_url, run_id=run_id)
+
+    print(f"\nLogged to MLflow:")
+    print(f"  Run ID:        {run_id}")
+    print(f"  Experiment:    {experiment_name}")
+    print(f"  Model:         {name} version {mv.version}")
+    print(f"  Source:        {release_url}")
+    print(f"  Tracking URI:  {args.tracking_uri}")
 
     print("\nDone.")
 
