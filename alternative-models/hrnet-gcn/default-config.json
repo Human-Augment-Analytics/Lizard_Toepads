@@ -1,0 +1,17 @@
+{
+    "training_data_path": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/hrnet/heatmaps/",
+    "visualization_path": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/visualization",
+    "yolo_obb_path": "../yolo/obb.pt",
+    "imgdir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/miami_fall_24_jpgs",
+    "tps_data_dir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/tps_files",
+    "num_landmarks": 9,
+    "feat_dim": 1024,
+    "gnn_hidden": 128,
+    "num_layers": 3,
+    "num_iters": 6,
+    "input_size": 512,
+    "epochs": 80,
+    "batch_size": 32,
+    "lr": 1e-4,
+    "train_val_split": 0.8
+}

@@ -1,0 +1,16 @@
+{
+    "name": "default",
+    "num_landmarks": 9,
+    "backbone_lr": 1e-5,
+    "head_lr": 1e-3,
+    "momentum": 0.9,
+    "batch_size": 16,
+    "epochs": 10,
+    "val_fraction": 0.1,
+    "grad_clip_max_norm": 1.0,
+    "yolo_path": "../yolo/yolo_h5.pt",
+    "yolo_obb_path": "../yolo/obb.pt",
+    "imgdir": "../data/miami_fall_24_jpgs",
+    "tps_data_dir": "../data/tps_files",
+    "training_data_dir": "../data/training_data"
+}

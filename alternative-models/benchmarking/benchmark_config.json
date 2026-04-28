@@ -1,0 +1,8 @@
+{
+    "split_seed": 42,
+    "train_val_ratio": 0.8,
+    "stacked_hourglass_data_dir": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/training_data/heatmaps",
+    "vit_data_dir": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/training_data/vit",
+    "hrnet_data_dir": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/hrnet/heatmaps",
+    "hrnet_gcn_data_dir": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/hrnet/heatmaps"
+}

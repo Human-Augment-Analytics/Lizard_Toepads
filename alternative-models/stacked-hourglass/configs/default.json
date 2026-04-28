@@ -1,0 +1,18 @@
+{
+    "name": "default",
+    "augmentationFactor": 8,
+    "epochs": 200,
+    "trainTestSplit": 0.8,
+    "initialLR": 0.001,
+    "scheduler": {
+        "factor": 0.5,
+        "patience": 5
+    },
+    "batchSize": 16,
+    "randomState": 42,
+    "yolo_path": "./yolo/yolo_h5.pt",
+    "yolo_obb_path": "../yolo/obb.pt",
+    "imgdir": "./data/miami_fall_24_jpgs",
+    "tps_data_dir": "./data/tps_files",
+    "training_data_dir": "./data/training_data"
+}
