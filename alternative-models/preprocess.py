@@ -4,16 +4,17 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import json
 import argparse
+import shutil
 import numpy as np
 import cv2
 import torch
 from pathlib import Path
+import albumentations as A
 from sklearn.model_selection import train_test_split
 from ultralytics import YOLO
 
 from common.tps_utils import get_tps_coords
 from common.obb_utils import crop_toe_boxes_obb
-from common.obb_utils import reversible_rescale
 from common.heatmap_utils import tps_to_heatmap
 
 
@@ -46,8 +47,29 @@ def collect_image_ids(imgdir):
     return sorted(ids)
 
 
-BASE_TRANSFORM = None  # No longer used — replaced by reversible_rescale
-BASE_TRANSFORM_NO_KPS = None  # No longer used — replaced by reversible_rescale
+def resize_and_pad(crop, keypoints=None, max_size=512):
+    """Resize crop to fit in max_size x max_size with center padding.
+    
+    Returns uint8 image and transformed keypoints, plus scale/pad info
+    for reversibility.
+    """
+    h, w = crop.shape[:2]
+    scale = min(max_size / h, max_size / w)
+    new_h, new_w = int(h * scale), int(w * scale)
+    resized = cv2.resize(crop, (new_w, new_h))
+
+    pad_x = (max_size - new_w) // 2
+    pad_y = (max_size - new_h) // 2
+    padded = np.zeros((max_size, max_size, 3), dtype=np.uint8)
+    padded[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+
+    if keypoints is not None:
+        kps = np.array(keypoints, dtype=np.float32).copy()
+        kps[:, 0] = kps[:, 0] * scale + pad_x
+        kps[:, 1] = kps[:, 1] * scale + pad_y
+        return padded, kps, scale, pad_x, pad_y
+
+    return padded, scale, pad_x, pad_y
 
 
 def process_image_annotated(imgid, model, config, output_dir):
@@ -65,7 +87,6 @@ def process_image_annotated(imgid, model, config, output_dir):
 
     crops, tps_local, stats, Ms = crop_toe_boxes_obb(results[0], img, tps, imgid)
 
-    # Determine class for each kept crop by re-examining detections
     from common.obb_utils import CLASSMAP, TRAIN_CLASSES, crop_obb_from_corners, transform_keypoints
     crop_classes = []
     if results[0].obb is not None:
@@ -98,24 +119,20 @@ def process_image_annotated(imgid, model, config, output_dir):
         class_name = crop_classes[i] if i < len(crop_classes) else "unknown"
         orig_h, orig_w = crop.shape[:2]
 
-        # Use reversible_rescale: center-pad + ImageNet normalize
-        img_aug, kps_aug, scale, pad_x, pad_y = reversible_rescale(crop, kps)
+        img_aug, kps_aug, scale, pad_x, pad_y = resize_and_pad(crop, kps)
 
         if kps_aug.shape[0] != 9:
             print(f"\n[{imgid}_{i}] WARNING: keypoint count {kps_aug.shape[0]} != 9, skipping")
             skipped += 1
             continue
 
-        # Generate heatmap from the transformed keypoints on a 512x512 canvas
-        # Need uint8 image for heatmap generation — reconstruct from normalized
-        img_uint8 = ((img_aug * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255).clip(0, 255).astype(np.uint8)
-        heatmap = tps_to_heatmap(kps_aug, img_uint8, sigma=6)
+        heatmap = tps_to_heatmap(kps_aug, img_aug, sigma=6)
         heatmap_chw = np.transpose(heatmap, (2, 0, 1))
 
         out_path = os.path.join(output_dir, f"{imgid}_{i}.pt")
         torch.save(
             {
-                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.float32),
+                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
                 "tps": torch.from_numpy(kps_aug).to(torch.float32),
                 "heatmap": torch.from_numpy(heatmap_chw).to(torch.float32),
                 "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
@@ -134,7 +151,7 @@ def process_image_annotated(imgid, model, config, output_dir):
 def process_image_unannotated(imgid, model, config, output_dir):
     """Flip image horizontally, run YOLO OBB to get RHS crops (no annotation).
     
-    Crops are stored in flipped orientation, pre-normalized with reversible_rescale.
+    Crops are stored in flipped orientation as uint8.
     During evaluation, predictions are flipped back for visualization.
     """
     img = cv2.imread(f"{config['imgdir']}/{imgid}.jpg")
@@ -153,7 +170,7 @@ def process_image_unannotated(imgid, model, config, output_dir):
     obb_corners = results[0].obb.xyxyxyxy.cpu().numpy()
     cls_ids = results[0].obb.cls.cpu().numpy()
 
-    from common.obb_utils import crop_obb_from_corners, TRAIN_CLASSES, CLASSMAP
+    from common.obb_utils import crop_obb_from_corners, TRAIN_CLASSES
 
     written = 0
     crop_idx = 0
@@ -168,13 +185,12 @@ def process_image_unannotated(imgid, model, config, output_dir):
         crop, M = crop_obb_from_corners(img_flipped, corners)
         orig_h, orig_w = crop.shape[:2]
 
-        # Use reversible_rescale without keypoints
-        img_aug, scale, pad_x, pad_y = reversible_rescale(crop)
+        img_aug, scale, pad_x, pad_y = resize_and_pad(crop)
 
         out_path = os.path.join(output_dir, f"{imgid}_flip_{crop_idx}.pt")
         torch.save(
             {
-                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.float32),
+                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
                 "tps": torch.zeros(9, 2, dtype=torch.float32),
                 "heatmap": torch.zeros(9, 512, 512, dtype=torch.float32),
                 "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
@@ -206,7 +222,6 @@ def main():
     unannotated_dir = os.path.join(data_dir, "unannotated")
 
     # Wipe existing data in output directories
-    import shutil
     for d in [train_dir, test_dir, unannotated_dir]:
         if os.path.exists(d):
             shutil.rmtree(d)

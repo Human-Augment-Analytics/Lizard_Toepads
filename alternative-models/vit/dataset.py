@@ -1,8 +1,31 @@
 import torch
 import numpy as np
+import cv2
 from torch.utils.data import Dataset
 from pathlib import Path
-import torch.nn.functional as F
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+IMAGENORMALIZE = A.Compose(
+    [
+        A.LongestMaxSize(max_size=224),
+        A.PadIfNeeded(
+            min_height=224,
+            min_width=224,
+            border_mode=cv2.BORDER_CONSTANT,
+            value=0,
+        ),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+        ),
+        ToTensorV2(),
+    ],
+    keypoint_params=A.KeypointParams(
+        format="xy",
+        remove_invisible=False
+    )
+)
 
 
 class ViTDataset(Dataset):
@@ -18,14 +41,11 @@ class ViTDataset(Dataset):
 
     def __getitem__(self, idx):
         data = torch.load(self.files[idx])
-        img = data["image"]  # (3, 512, 512) float32, pre-normalized
+        img = data["image"].permute(1, 2, 0).numpy()  # CHW uint8 → HWC
+        keypoints = data["tps"].numpy()  # (9, 2) in 512-space
 
-        # Resize from 512 to 224 (bilinear, keeps normalization intact)
-        img_224 = F.interpolate(
-            img.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False
-        ).squeeze(0)
+        aug = IMAGENORMALIZE(image=img, keypoints=keypoints.tolist())
+        img_tensor = aug["image"]
+        kps = np.array(aug["keypoints"], dtype=np.float32) / 224.0
 
-        # Keypoints are in 512-space pixel coords, normalize to [0,1]
-        keypoints = data["tps"].float() / 512.0
-
-        return img_224, keypoints
+        return img_tensor, torch.tensor(kps, dtype=torch.float32)

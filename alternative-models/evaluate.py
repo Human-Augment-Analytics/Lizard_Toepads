@@ -108,8 +108,7 @@ def run_stacked_hourglass(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            # Image is pre-normalized float32 CHW. SHG model expects (B, H, W, C) float.
-            img = data["image"].permute(1, 2, 0)  # CHW → HWC, already normalized
+            img = data["image"].permute(1, 2, 0).float() / 255.0  # uint8 CHW → HWC float
             img_batch = img.unsqueeze(0)
 
             with torch.no_grad():
@@ -139,19 +138,26 @@ def run_vit(model_dir, ckpt_path, test_files):
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
     model.eval()
 
+    import albumentations as A
+    from albumentations.pytorch import ToTensorV2
+
+    vit_transform = A.Compose([
+        A.LongestMaxSize(max_size=224),
+        A.PadIfNeeded(224, 224, border_mode=cv2.BORDER_CONSTANT, value=0),
+        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ToTensorV2(),
+    ])
+
     predictions = []
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            # Image is pre-normalized float32 CHW (512x512). ViT needs 224x224.
-            img = data["image"]  # (3, 512, 512) float32 normalized
-            # Resize to 224x224 using interpolate (keeps normalization intact)
-            img_224 = torch.nn.functional.interpolate(
-                img.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False
-            )
+            img = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
+            aug = vit_transform(image=img)
+            img_tensor = aug["image"].unsqueeze(0).float()
 
             with torch.no_grad():
-                out = model(img_224)
+                out = model(img_tensor)
 
             coords_224 = out[0].reshape(9, 2).numpy() * 224
             coords_512 = coords_224 * (512.0 / 224.0)
@@ -177,7 +183,9 @@ def run_hrnet(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img_tensor = data["image"].unsqueeze(0).float()  # already normalized
+            img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
+            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
+            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
 
             with torch.no_grad():
                 out = model(img_tensor)
@@ -214,7 +222,9 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img_tensor = data["image"].unsqueeze(0).float()  # already normalized
+            img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
+            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
+            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
             initial_coords = mean_shape.unsqueeze(0)
 
             with torch.no_grad():
@@ -341,10 +351,8 @@ def generate_overlays(predictions, test_files, overlay_dir, model_name, max_over
             break
 
         data = torch.load(f, map_location="cpu")
-        img = data["image"].permute(1, 2, 0).numpy()  # CHW → HWC, normalized float
-        # Denormalize for display
-        img_display = (img * IMAGENET_STD + IMAGENET_MEAN) * 255
-        img_bgr = np.clip(img_display, 0, 255).astype(np.uint8)
+        img = data["image"].permute(1, 2, 0).numpy()  # CHW uint8 → HWC
+        img_bgr = img.astype(np.uint8)
 
         overlay = draw_overlay(img_bgr, pred.astype(np.float32))
 
@@ -371,12 +379,9 @@ def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, m
             break
 
         data = torch.load(f, map_location="cpu")
-        img = data["image"].permute(1, 2, 0).numpy()  # normalized float
-        # Denormalize for display
-        img_display = (img * IMAGENET_STD + IMAGENET_MEAN) * 255
-        img_bgr = np.clip(img_display, 0, 255).astype(np.uint8)
+        img = data["image"].permute(1, 2, 0).numpy().astype(np.uint8)  # uint8 HWC
 
-        img_unflipped = cv2.flip(img_bgr, 1)
+        img_unflipped = cv2.flip(img, 1)
 
         pred_unflipped = pred.copy()
         pred_unflipped[:, 0] = 512.0 - pred[:, 0]

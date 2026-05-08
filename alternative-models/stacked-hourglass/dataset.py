@@ -21,7 +21,7 @@ class LizardDataset(torch.utils.data.Dataset):
         heatmaps = data["heatmap"].permute(1, 2, 0).numpy()
         img, heatmaps = apply_augmentation(img, heatmaps)
 
-        img_tensor = torch.from_numpy(img).float()
+        img_tensor = torch.from_numpy(img).float() / 255.0
         heatmaps_tensor = torch.from_numpy(heatmaps).permute(2,0,1).float()
         heatmaps_tensor = F.interpolate(
             heatmaps_tensor.unsqueeze(0),
