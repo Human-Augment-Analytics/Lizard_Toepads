@@ -16,9 +16,9 @@ class LizardDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         true_idx = idx % len(self.paths)
-        data = np.load(self.paths[true_idx])
-        img = data['image']
-        heatmaps = data['heatmap']
+        data = torch.load(self.paths[true_idx])
+        img = data["image"].permute(1, 2, 0).numpy()
+        heatmaps = data["heatmap"].permute(1, 2, 0).numpy()
         img, heatmaps = apply_base_transform(img, heatmaps)
         img, heatmaps = apply_augmentation(img, heatmaps)
 

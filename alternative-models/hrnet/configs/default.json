@@ -15,7 +15,7 @@
     "grad_clip_max_norm": 1.0,
     "yolo_path": "../yolo/yoloobb.pt",
     "yolo_obb_path": "../yolo/obb.pt",
-    "training_data_dir": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/hrnet",
+    "training_data_dir": "/storage/ice-shared/cs8903onl/alternative-models/data",
     "test_data_dir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/test_data",
     "imgdir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/miami_fall_24_jpgs",
     "tps_data_dir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/tps_files"

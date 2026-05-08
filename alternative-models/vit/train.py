@@ -56,7 +56,7 @@ def main(args):
     ], momentum=config["momentum"])
 
     criterion = nn.SmoothL1Loss()
-    dataset = ViTDataset(f"{data_dir}/vit")
+    dataset = ViTDataset(f"{data_dir}/train")
     val_fraction = config["val_fraction"]
     val_len = int(len(dataset) * val_fraction)
     train_len = len(dataset) - val_len

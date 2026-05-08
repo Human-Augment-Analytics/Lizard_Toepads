@@ -39,8 +39,11 @@ def main(args):
     logging.info(config)
     initEnvironment()
 
-    npz_dir = Path(f"{training_data_dir}/heatmaps")
-    npz_paths = list(npz_dir.glob("*.npz"))
+    npz_dir = Path(f"{training_data_dir}/train")
+    npz_paths = list(npz_dir.glob("*.pt"))
+    if not npz_paths:
+        npz_dir = Path(training_data_dir)
+        npz_paths = list(npz_dir.glob("*.pt"))
     logging.info(f"Found {len(npz_paths)} training samples at location {npz_dir}")
 
     if args.split:

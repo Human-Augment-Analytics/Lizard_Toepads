@@ -12,5 +12,5 @@
     "yolo_obb_path": "../yolo/obb.pt",
     "imgdir": "../data/miami_fall_24_jpgs",
     "tps_data_dir": "../data/tps_files",
-    "training_data_dir": "../data/training_data"
+    "training_data_dir": "/storage/ice-shared/cs8903onl/alternative-models/data"
 }

@@ -8,32 +8,7 @@ from sklearn.model_selection import train_test_split
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-REQUIRED_FIELDS = [
-    "split_seed",
-    "train_val_ratio",
-    "stacked_hourglass_data_dir",
-    "vit_data_dir",
-    "hrnet_data_dir",
-    "hrnet_gcn_data_dir",
-]
-
-
-def load_config(path: str) -> dict:
-    p = Path(path)
-    if not p.exists():
-        print(f"ERROR: benchmark_config.json not found at {path}", file=sys.stderr)
-        sys.exit(1)
-    with open(p) as f:
-        try:
-            config = json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"ERROR: malformed JSON in {path}: {e}", file=sys.stderr)
-            sys.exit(1)
-    for field in REQUIRED_FIELDS:
-        if field not in config:
-            print(f"ERROR: required field '{field}' missing from {path}", file=sys.stderr)
-            sys.exit(1)
-    return config
+SHARED_DATA_DIR = "/storage/ice-shared/cs8903onl/alternative-models/data"
 
 
 def generate_split(file_paths: list, seed: int, ratio: float) -> dict:
@@ -53,35 +28,29 @@ def write_split(split: dict, out_path: str) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate shared train/val split files")
-    parser.add_argument("--config", type=str, default="benchmark_config.json")
+    parser = argparse.ArgumentParser(description="Generate shared train/val split file")
+    parser.add_argument("--data-dir", type=str, default=SHARED_DATA_DIR)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--ratio", type=float, default=0.8)
     args = parser.parse_args()
 
-    config = load_config(args.config)
-    seed = config["split_seed"]
-    ratio = config["train_val_ratio"]
+    train_dir = Path(args.data_dir) / "train"
+    if not train_dir.exists():
+        print(f"ERROR: train directory not found: {train_dir}", file=sys.stderr)
+        sys.exit(1)
 
-    splits_dir = Path(args.config).parent / "splits"
+    files = [str(p.resolve()) for p in train_dir.glob("*.pt")]
+    if not files:
+        print(f"ERROR: no .pt files found in {train_dir}", file=sys.stderr)
+        sys.exit(1)
 
-    models = [
-        ("stacked_hourglass", config["stacked_hourglass_data_dir"], "*.npz"),
-        ("vit",               config["vit_data_dir"],               "*.pt"),
-        ("hrnet",             config["hrnet_data_dir"],             "*.pt"),
-        ("hrnet_gcn",         config["hrnet_gcn_data_dir"],         "*.pt"),
-    ]
+    logging.info(f"Found {len(files)} .pt files in {train_dir}")
 
-    for name, data_dir, pattern in models:
-        d = Path(data_dir)
-        if not d.exists():
-            logging.error(f"[{name}] Data directory not found: {data_dir} — skipping")
-            continue
-        files = [str(p.resolve()) for p in d.glob(pattern)]
-        if not files:
-            logging.error(f"[{name}] No {pattern} files found in {data_dir} — skipping")
-            continue
-        split = generate_split(files, seed, ratio)
-        out_path = splits_dir / f"{name}_split.json"
-        write_split(split, str(out_path))
+    split = generate_split(files, args.seed, args.ratio)
+
+    splits_dir = Path(__file__).parent / "splits"
+    out_path = splits_dir / "split.json"
+    write_split(split, str(out_path))
 
 
 if __name__ == "__main__":

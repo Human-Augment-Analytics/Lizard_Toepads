@@ -1,5 +1,5 @@
 {
-    "training_data_path": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/data/hrnet/heatmaps/",
+    "training_data_path": "/storage/ice-shared/cs8903onl/alternative-models/data",
     "visualization_path": "/home/hice1/axu39/lizard/Lizard_Toepads/stacked-hourglass/visualization",
     "yolo_obb_path": "../yolo/obb.pt",
     "imgdir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/miami_fall_24_jpgs",
