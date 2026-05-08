@@ -34,6 +34,11 @@ MODELS = [
         "dir": ALT_MODELS_DIR / "hrnet-gcn",
         "train_script": "train.py",
     },
+    {
+        "name": "ml_morph",
+        "dir": ALT_MODELS_DIR / "ml-morph",
+        "train_script": "train.py",
+    },
 ]
 
 

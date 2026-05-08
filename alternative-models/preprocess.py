@@ -204,7 +204,7 @@ def process_image_unannotated(imgid, model, config, output_dir):
 def main():
     parser = argparse.ArgumentParser(description="Unified preprocessing for all alternative models")
     parser.add_argument("--config", type=str, default="preprocess_config.json")
-    parser.add_argument("--test-ratio", type=float, default=0.15)
+    parser.add_argument("--test-ratio", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 

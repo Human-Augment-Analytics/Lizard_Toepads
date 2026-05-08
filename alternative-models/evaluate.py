@@ -18,6 +18,12 @@ import matplotlib.pyplot as plt
 
 from common.tps_utils import get_tps_coords
 
+try:
+    import dlib
+    _DLIB_AVAILABLE = True
+except ImportError:
+    _DLIB_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
 SHARED_DATA_DIR = "/storage/ice-shared/cs8903onl/alternative-models/data"
@@ -31,6 +37,7 @@ MODELS = [
     {"name": "vit",               "dir": ALT_MODELS_DIR / "vit"},
     {"name": "hrnet",             "dir": ALT_MODELS_DIR / "hrnet"},
     {"name": "hrnet_gcn",         "dir": ALT_MODELS_DIR / "hrnet-gcn"},
+    {"name": "ml_morph",          "dir": ALT_MODELS_DIR / "ml-morph"},
 ]
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
@@ -53,6 +60,7 @@ def discover_checkpoint(model_info):
     name = model_info["name"]
     # Check multiple naming conventions
     candidates = [
+        model_info["dir"] / "checkpoints" / f"{name}_best.dat",
         model_info["dir"] / "checkpoints" / f"{name}_best.pth",
         model_info["dir"] / "checkpoints" / f"best_{name}.pth",
     ]
@@ -231,11 +239,43 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     return predictions
 
 
+def run_ml_morph(model_dir, ckpt_path, test_files):
+    if not _DLIB_AVAILABLE:
+        logging.warning("[ml_morph] dlib not installed, skipping")
+        return [None] * len(test_files)
+
+    predictor = dlib.shape_predictor(str(ckpt_path))
+    rect = dlib.rectangle(0, 0, 512, 512)
+
+    predictions = []
+    for f in test_files:
+        try:
+            data = torch.load(f, map_location="cpu")
+            img = data["image"].permute(1, 2, 0).numpy()
+
+            shape = predictor(img, rect)
+            if shape.num_parts != 9:
+                logging.warning(f"[ml_morph] {f.name}: expected 9 parts, got {shape.num_parts}")
+                predictions.append(None)
+                continue
+
+            coords = np.array(
+                [(shape.part(i).x, shape.part(i).y) for i in range(shape.num_parts)],
+                dtype=np.float64
+            )
+            predictions.append(coords)
+        except Exception as e:
+            logging.error(f"[ml_morph] Error on {f.name}: {e}")
+            predictions.append(None)
+    return predictions
+
+
 RUNNERS = {
     "stacked_hourglass": run_stacked_hourglass,
     "vit": run_vit,
     "hrnet": run_hrnet,
     "hrnet_gcn": run_hrnet_gcn,
+    "ml_morph": run_ml_morph,
 }
 
 
