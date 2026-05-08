@@ -5,7 +5,7 @@
     "head_lr": 1e-3,
     "momentum": 0.9,
     "batch_size": 16,
-    "epochs": 100,
+    "epochs": 150,
     "val_fraction": 0.1,
     "grad_clip_max_norm": 1.0,
     "yolo_path": "../yolo/yolo_h5.pt",

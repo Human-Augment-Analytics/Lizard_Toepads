@@ -84,16 +84,6 @@ def main(args):
     Path(OVERLAY_DIR).mkdir(parents=True, exist_ok=True)
     Path("checkpoints").mkdir(parents=True, exist_ok=True)
 
-    heatmaps_dir = os.path.join(DATA_PATH, "heatmaps")
-    if not os.path.isdir(heatmaps_dir):
-        raise FileNotFoundError(f"Heatmaps directory not found: {heatmaps_dir}")
-    pt_files = [os.path.join(heatmaps_dir, f) for f in os.listdir(heatmaps_dir) if f.endswith(".pt")]
-
-    dataset = LizardDataset(pt_files, input_size=INPUT_SIZE)
-
-    val_len = int(len(dataset) * VALIDATION_FRACTION)
-    train_len = len(dataset) - val_len
-
     if args.split:
         if not Path(args.split).exists():
             print(f"ERROR: split file not found: {args.split}", file=sys.stderr)
@@ -103,6 +93,17 @@ def main(args):
         train_dataset = LizardDataset(split_data["train"], input_size=INPUT_SIZE)
         val_dataset = LizardDataset(split_data["val"], input_size=INPUT_SIZE)
     else:
+        heatmaps_dir = os.path.join(DATA_PATH, "train")
+        if not os.path.isdir(heatmaps_dir):
+            heatmaps_dir = os.path.join(DATA_PATH, "heatmaps")
+        if not os.path.isdir(heatmaps_dir):
+            raise FileNotFoundError(f"Data directory not found. Tried {DATA_PATH}/train and {DATA_PATH}/heatmaps")
+        pt_files = [os.path.join(heatmaps_dir, f) for f in os.listdir(heatmaps_dir) if f.endswith(".pt")]
+
+        dataset = LizardDataset(pt_files, input_size=INPUT_SIZE)
+
+        val_len = int(len(dataset) * VALIDATION_FRACTION)
+        train_len = len(dataset) - val_len
         train_dataset, val_dataset = random_split(dataset, [train_len, val_len])
 
     train_loader = DataLoader(
