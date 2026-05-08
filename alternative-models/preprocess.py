@@ -204,6 +204,14 @@ def main():
     train_dir = os.path.join(data_dir, "train")
     test_dir = os.path.join(data_dir, "test")
     unannotated_dir = os.path.join(data_dir, "unannotated")
+
+    # Wipe existing data in output directories
+    import shutil
+    for d in [train_dir, test_dir, unannotated_dir]:
+        if os.path.exists(d):
+            shutil.rmtree(d)
+            print(f"Cleared existing directory: {d}")
+
     Path(train_dir).mkdir(parents=True, exist_ok=True)
     Path(test_dir).mkdir(parents=True, exist_ok=True)
     Path(unannotated_dir).mkdir(parents=True, exist_ok=True)
