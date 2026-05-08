@@ -46,7 +46,24 @@ def collect_image_ids(imgdir):
     return sorted(ids)
 
 
-def process_image(imgid, model, config, output_dir):
+BASE_TRANSFORM = A.Compose(
+    [
+        A.LongestMaxSize(max_size=512),
+        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT),
+    ],
+    keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
+)
+
+BASE_TRANSFORM_NO_KPS = A.Compose(
+    [
+        A.LongestMaxSize(max_size=512),
+        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT),
+    ],
+)
+
+
+def process_image_annotated(imgid, model, config, output_dir):
+    """Process LHS crops from original image (annotated with TPS ground truth)."""
     img = cv2.imread(f"{config['imgdir']}/{imgid}.jpg")
     if img is None:
         print(f"[{imgid}] WARNING: could not read image, skipping")
@@ -60,13 +77,32 @@ def process_image(imgid, model, config, output_dir):
 
     crops, tps_local, stats, Ms = crop_toe_boxes_obb(results[0], img, tps, imgid)
 
-    base_transform = A.Compose(
-        [
-            A.LongestMaxSize(max_size=512),
-            A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT),
-        ],
-        keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
-    )
+    # Determine class for each kept crop by re-examining detections
+    # crop_toe_boxes_obb keeps crops in detection order, filtering by:
+    # 1. cls_id in TRAIN_CLASSES, 2. global_kps exists and count==9, 3. all kps in bounds
+    # We replicate this logic to track class names
+    from common.obb_utils import CLASSMAP, TRAIN_CLASSES, crop_obb_from_corners, transform_keypoints
+    crop_classes = []
+    if results[0].obb is not None:
+        cls_ids = results[0].obb.cls.cpu().numpy()
+        obb_corners = results[0].obb.xyxyxyxy.cpu().numpy()
+        for corners, cls_id in zip(obb_corners, cls_ids):
+            cls_id = int(cls_id)
+            if cls_id not in TRAIN_CLASSES:
+                continue
+            class_name = CLASSMAP[cls_id]
+            global_kps = tps.get(class_name, [])
+            if len(global_kps) == 0 or len(global_kps) != 9:
+                continue
+            # Replicate bounds check
+            crop_check, M_check = crop_obb_from_corners(img, corners)
+            local_kps = transform_keypoints(global_kps, M_check)
+            h_c, w_c = crop_check.shape[:2]
+            in_bounds = (local_kps[:, 0] >= 0) & (local_kps[:, 0] < w_c) & \
+                        (local_kps[:, 1] >= 0) & (local_kps[:, 1] < h_c)
+            if not np.all(in_bounds):
+                continue
+            crop_classes.append(class_name)
 
     written = 0
     skipped = 0
@@ -75,9 +111,10 @@ def process_image(imgid, model, config, output_dir):
         if i > 1:
             break
 
+        class_name = crop_classes[i] if i < len(crop_classes) else "unknown"
         orig_h, orig_w = crop.shape[:2]
 
-        aug = base_transform(image=crop, keypoints=kps.tolist())
+        aug = BASE_TRANSFORM(image=crop, keypoints=kps.tolist())
         img_aug = aug["image"]
         kps_aug = np.array(aug["keypoints"], dtype=np.float32)
 
@@ -97,12 +134,71 @@ def process_image(imgid, model, config, output_dir):
                 "heatmap": torch.from_numpy(heatmap_chw).to(torch.float32),
                 "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
                 "M": torch.from_numpy(M).to(torch.float64),
+                "class_name": class_name,
             },
             out_path,
         )
         written += 1
 
     return written, skipped
+
+
+def process_image_unannotated(imgid, model, config, output_dir):
+    """Flip image horizontally, run YOLO OBB to get RHS crops (no annotation).
+    
+    Crops are stored in flipped orientation. During evaluation, predictions
+    are flipped back for visualization.
+    """
+    img = cv2.imread(f"{config['imgdir']}/{imgid}.jpg")
+    if img is None:
+        return 0, 0
+
+    img_flipped = cv2.flip(img, 1)
+
+    results = model(img_flipped, verbose=False)
+    if results[0].obb is None:
+        return 0, 0
+
+    if results[0].obb.xyxyxyxy is None:
+        return 0, 0
+
+    obb_corners = results[0].obb.xyxyxyxy.cpu().numpy()
+    cls_ids = results[0].obb.cls.cpu().numpy()
+
+    from common.obb_utils import crop_obb_from_corners, TRAIN_CLASSES, CLASSMAP
+
+    written = 0
+    crop_idx = 0
+
+    for corners, cls_id in zip(obb_corners, cls_ids):
+        cls_id = int(cls_id)
+        if cls_id not in TRAIN_CLASSES:
+            continue
+        if crop_idx > 1:
+            break
+
+        crop, M = crop_obb_from_corners(img_flipped, corners)
+        orig_h, orig_w = crop.shape[:2]
+
+        aug = BASE_TRANSFORM_NO_KPS(image=crop)
+        img_aug = aug["image"]
+
+        out_path = os.path.join(output_dir, f"{imgid}_flip_{crop_idx}.pt")
+        torch.save(
+            {
+                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
+                "tps": torch.zeros(9, 2, dtype=torch.float32),
+                "heatmap": torch.zeros(9, 512, 512, dtype=torch.float32),
+                "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
+                "M": torch.from_numpy(M).to(torch.float64),
+                "flipped": torch.tensor(True),
+            },
+            out_path,
+        )
+        written += 1
+        crop_idx += 1
+
+    return written, 0
 
 
 def main():
@@ -117,8 +213,10 @@ def main():
 
     train_dir = os.path.join(data_dir, "train")
     test_dir = os.path.join(data_dir, "test")
+    unannotated_dir = os.path.join(data_dir, "unannotated")
     Path(train_dir).mkdir(parents=True, exist_ok=True)
     Path(test_dir).mkdir(parents=True, exist_ok=True)
+    Path(unannotated_dir).mkdir(parents=True, exist_ok=True)
 
     image_ids = collect_image_ids(config["imgdir"])
     print(f"Found {len(image_ids)} valid images (id > 1000)")
@@ -134,27 +232,38 @@ def main():
     total_skipped = 0
     train_count = 0
     test_count = 0
+    unannotated_count = 0
 
+    print("\n--- Processing LHS (annotated) crops ---")
     for imgid in train_ids:
         print(f"Processing train image {imgid}", end="\r", flush=True)
-        w, s = process_image(imgid, model, config, train_dir)
+        w, s = process_image_annotated(imgid, model, config, train_dir)
         total_written += w
         total_skipped += s
         train_count += w
 
     for imgid in test_ids:
         print(f"Processing test image {imgid}", end="\r", flush=True)
-        w, s = process_image(imgid, model, config, test_dir)
+        w, s = process_image_annotated(imgid, model, config, test_dir)
         total_written += w
         total_skipped += s
         test_count += w
 
+    print("\n--- Processing RHS (unannotated) crops via flip ---")
+    all_ids = train_ids + test_ids
+    for imgid in all_ids:
+        print(f"Processing unannotated image {imgid}", end="\r", flush=True)
+        w, _ = process_image_unannotated(imgid, model, config, unannotated_dir)
+        total_written += w
+        unannotated_count += w
+
     print()
     print("=" * 50)
-    print(f"Total crops written: {total_written}")
-    print(f"Total crops skipped: {total_skipped}")
-    print(f"Train crops: {train_count}")
-    print(f"Test crops:  {test_count}")
+    print(f"Total crops written:  {total_written}")
+    print(f"Total crops skipped:  {total_skipped}")
+    print(f"Train crops:          {train_count}")
+    print(f"Test crops:           {test_count}")
+    print(f"Unannotated crops:    {unannotated_count}")
     print("=" * 50)
 
 

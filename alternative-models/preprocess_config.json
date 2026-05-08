@@ -1,5 +1,5 @@
 {
-    "yolo_obb_path": "/storage/ice-shared/cs8903onl/alternative-models/yolo/obb.pt",
+    "yolo_obb_path": "/home/hice1/axu39/lizard/Lizard_Toepads/alternative-models/yolo/obb.pt",
     "imgdir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/miami_fall_24_jpgs",
     "tps_data_dir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/tps_files",
     "data_dir": "/storage/ice-shared/cs8903onl/alternative-models/data"

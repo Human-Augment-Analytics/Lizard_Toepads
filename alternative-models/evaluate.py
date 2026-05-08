@@ -259,9 +259,13 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
             continue
 
         gt_coords = get_tps_coords(imgid, img, tps_data_dir)
-        gt_finger = gt_coords.get("finger", [])
-        gt_toe = gt_coords.get("toe", [])
-        gt_all = gt_finger + gt_toe
+        class_name = data.get("class_name", None)
+        if class_name is None:
+            gt_finger = gt_coords.get("finger", [])
+            gt_toe = gt_coords.get("toe", [])
+            gt_all = gt_finger + gt_toe
+        else:
+            gt_all = gt_coords.get(class_name, [])
 
         if len(gt_all) != 9:
             continue
@@ -305,10 +309,41 @@ def generate_overlays(predictions, test_files, overlay_dir, model_name, max_over
         img = data["image"].permute(1, 2, 0).numpy()
         img_bgr = img.astype(np.uint8)
 
-        tps_512 = data["tps"].numpy()
         overlay = draw_overlay(img_bgr, pred.astype(np.float32))
 
         out_path = overlay_dir / f"{model_name}_{count}.png"
+        cv2.imwrite(str(out_path), overlay)
+        saved.append(str(out_path))
+        count += 1
+
+    return saved
+
+
+def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, model_name, max_overlays=5):
+    """Generate overlays for unannotated (flipped RHS) crops.
+    
+    Predictions are flipped back horizontally before drawing so the
+    visualization shows the original (unflipped) orientation.
+    """
+    saved = []
+    count = 0
+    for pred, f in zip(predictions, unannotated_files):
+        if pred is None:
+            continue
+        if count >= max_overlays:
+            break
+
+        data = torch.load(f, map_location="cpu")
+        img = data["image"].permute(1, 2, 0).numpy().astype(np.uint8)
+
+        img_unflipped = cv2.flip(img, 1)
+
+        pred_unflipped = pred.copy()
+        pred_unflipped[:, 0] = 512.0 - pred[:, 0]
+
+        overlay = draw_overlay(img_unflipped, pred_unflipped.astype(np.float32))
+
+        out_path = overlay_dir / f"{model_name}_unannotated_{count}.png"
         cv2.imwrite(str(out_path), overlay)
         saved.append(str(out_path))
         count += 1
@@ -329,7 +364,7 @@ def _img_to_base64(path):
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def build_html_report(all_metrics, all_overlays, output_dir):
+def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir):
     sections = []
 
     sections.append("<h2>Per-Model Pixel Error (Global Image Space)</h2>")
@@ -353,11 +388,21 @@ def build_html_report(all_metrics, all_overlays, output_dir):
         sections.append(row)
     sections.append("</table>")
 
-    sections.append("<h2>Landmark Overlays (Test Set)</h2>")
+    sections.append("<h2>Landmark Overlays (Test Set — Annotated)</h2>")
     for name, paths in all_overlays.items():
         sections.append(f"<h3>{name}</h3>")
         if not paths:
             sections.append("<p><em>No overlays (checkpoint missing or inference failed)</em></p>")
+        else:
+            for p in paths:
+                b64 = _img_to_base64(p)
+                sections.append(f'<img src="data:image/png;base64,{b64}" style="max-width:300px;margin:4px"/>')
+
+    sections.append("<h2>Landmark Overlays (Unannotated — RHS Flipped Back)</h2>")
+    for name, paths in all_unannotated_overlays.items():
+        sections.append(f"<h3>{name}</h3>")
+        if not paths:
+            sections.append("<p><em>No unannotated overlays available</em></p>")
         else:
             for p in paths:
                 b64 = _img_to_base64(p)
@@ -397,6 +442,15 @@ def build_markdown_summary(all_metrics):
     return "\n".join(lines) + "\n"
 
 
+def load_unannotated_files(data_dir):
+    unannotated_dir = Path(data_dir) / "unannotated"
+    if not unannotated_dir.exists():
+        logging.warning(f"Unannotated directory not found: {unannotated_dir}")
+        return []
+    files = sorted(unannotated_dir.glob("*.pt"))
+    return files
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate all models on held-out test set")
     parser.add_argument("--data-dir", type=str, default=SHARED_DATA_DIR)
@@ -413,8 +467,12 @@ def main():
     test_files = load_test_files(args.data_dir)
     logging.info(f"Loaded {len(test_files)} test crops")
 
+    unannotated_files = load_unannotated_files(args.data_dir)
+    logging.info(f"Loaded {len(unannotated_files)} unannotated crops")
+
     all_metrics = {}
     all_overlays = {}
+    all_unannotated_overlays = {}
 
     for model_info in MODELS:
         name = model_info["name"]
@@ -423,6 +481,7 @@ def main():
             logging.warning(f"[{name}] No checkpoint found, skipping")
             all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9}
             all_overlays[name] = []
+            all_unannotated_overlays[name] = []
             continue
 
         logging.info(f"[{name}] Running inference on {len(test_files)} test crops...")
@@ -436,12 +495,21 @@ def main():
         if metrics["mean"] is not None:
             logging.info(f"[{name}] Mean pixel error: {metrics['mean']:.2f}, Median: {metrics['median']:.2f}")
 
-        logging.info(f"[{name}] Generating overlays...")
+        logging.info(f"[{name}] Generating test overlays...")
         overlays = generate_overlays(predictions, test_files, overlay_dir, name)
         all_overlays[name] = overlays
 
+        if unannotated_files:
+            logging.info(f"[{name}] Running inference on {len(unannotated_files)} unannotated crops...")
+            unannotated_preds = runner(model_info["dir"], ckpt, unannotated_files)
+            logging.info(f"[{name}] Generating unannotated overlays...")
+            u_overlays = generate_unannotated_overlays(unannotated_preds, unannotated_files, overlay_dir, name)
+            all_unannotated_overlays[name] = u_overlays
+        else:
+            all_unannotated_overlays[name] = []
+
     logging.info("Writing report...")
-    html = build_html_report(all_metrics, all_overlays, output_dir)
+    html = build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir)
     md = build_markdown_summary(all_metrics)
 
     html_path = output_dir / "benchmark_report.html"
