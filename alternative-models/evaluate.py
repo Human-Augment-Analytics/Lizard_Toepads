@@ -51,9 +51,14 @@ def load_test_files(data_dir):
 
 def discover_checkpoint(model_info):
     name = model_info["name"]
-    ckpt = model_info["dir"] / "checkpoints" / f"{name}_best.pth"
-    if ckpt.exists():
-        return ckpt
+    # Check multiple naming conventions
+    candidates = [
+        model_info["dir"] / "checkpoints" / f"{name}_best.pth",
+        model_info["dir"] / "checkpoints" / f"best_{name}.pth",
+    ]
+    for ckpt in candidates:
+        if ckpt.exists():
+            return ckpt
     return None
 
 
