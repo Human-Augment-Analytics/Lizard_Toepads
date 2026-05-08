@@ -198,8 +198,8 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     finally:
         sys.path.pop(0)
 
-    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=1024, gnn_hidden=128,
-                     num_layers=3, num_landmarks=9, num_iters=6)
+    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=64, gnn_hidden=128,
+                     num_layers=2, num_landmarks=9, num_iters=3)
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
     model.eval()
 

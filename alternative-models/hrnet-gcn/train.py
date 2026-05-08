@@ -38,8 +38,8 @@ def main():
     else:
         train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=1024, gnn_hidden=128,
-                    num_layers=3, num_landmarks=9, num_iters=6)
+    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=64, gnn_hidden=128,
+                    num_layers=2, num_landmarks=9, num_iters=3)
 
     trained_model = train(model, train_dataset, val_dataset=val_dataset,
                         device='cuda' if torch.cuda.is_available() else 'cpu',
