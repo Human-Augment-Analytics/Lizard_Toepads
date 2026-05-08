@@ -43,6 +43,8 @@ MODELS = [
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
 IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 
 def load_test_files(data_dir):
     test_dir = Path(data_dir) / "test"
@@ -211,15 +213,16 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
 
     model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=config.feat_dim, gnn_hidden=config.gnn_hidden,
                      num_layers=config.num_layers, num_landmarks=config.num_landmarks, num_iters=config.num_iters)
-    model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
+    model.load_state_dict(torch.load(str(ckpt_path), map_location=DEVICE))
+    model.to(DEVICE)
     model.eval()
 
     mean_shape = torch.tensor([
         [0.3, 0.9], [0.4, 0.8], [0.5, 0.7],
         [0.6, 0.6], [0.7, 0.5], [0.8, 0.4],
         [0.7, 0.3], [0.6, 0.2], [0.5, 0.1],
-    ], dtype=torch.float)
-    edge_index = make_chain_edge_index(num_landmarks=config.num_landmarks)
+    ], dtype=torch.float).to(DEVICE)
+    edge_index = make_chain_edge_index(num_landmarks=config.num_landmarks).to(DEVICE)
 
     predictions = []
     for f in test_files:
@@ -227,13 +230,13 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
             data = torch.load(f, map_location="cpu")
             img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
             img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
-            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
+            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(DEVICE)
             initial_coords = mean_shape.unsqueeze(0)
 
             with torch.no_grad():
                 out = model(img_tensor, initial_coords, edge_index)
 
-            coords_512 = out[0].numpy() * 512
+            coords_512 = out[0].cpu().numpy() * 512
             predictions.append(coords_512.astype(np.float64))
         except Exception as e:
             logging.error(f"[hrnet_gcn] Error on {f.name}: {e}")
@@ -344,7 +347,7 @@ def draw_overlay(image_bgr, coords_px):
     return out
 
 
-def generate_overlays(predictions, test_files, overlay_dir, model_name, max_overlays=5):
+def generate_overlays(predictions, test_files, overlay_dir, model_name, max_overlays=10):
     saved = []
     count = 0
     for pred, f in zip(predictions, test_files):
@@ -367,7 +370,7 @@ def generate_overlays(predictions, test_files, overlay_dir, model_name, max_over
     return saved
 
 
-def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, model_name, max_overlays=5):
+def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, model_name, max_overlays=10):
     """Generate overlays for unannotated (flipped RHS) crops.
     
     Predictions are flipped back horizontally before drawing so the
