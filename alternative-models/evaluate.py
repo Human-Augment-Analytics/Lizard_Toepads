@@ -387,10 +387,10 @@ def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, m
         data = torch.load(f, map_location="cpu")
         img = data["image"].permute(1, 2, 0).numpy().astype(np.uint8)  # uint8 HWC
 
-        img_unflipped = cv2.flip(img, 1)
+        img_unflipped = cv2.flip(img, 0)  # undo vertical flip
 
         pred_unflipped = pred.copy()
-        pred_unflipped[:, 0] = 512.0 - pred[:, 0]
+        pred_unflipped[:, 1] = 512.0 - pred[:, 1]  # flip Y back (vertical)
 
         overlay = draw_overlay(img_unflipped, pred_unflipped.astype(np.float32))
 

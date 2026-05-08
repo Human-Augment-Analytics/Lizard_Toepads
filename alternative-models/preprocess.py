@@ -158,7 +158,7 @@ def process_image_unannotated(imgid, model, config, output_dir):
     if img is None:
         return 0, 0
 
-    img_flipped = cv2.flip(img, 1)
+    img_flipped = cv2.flip(img, 0)  # vertical flip — puts RHS (top) on bottom for YOLO detection
 
     results = model(img_flipped, verbose=False)
     if results[0].obb is None:
