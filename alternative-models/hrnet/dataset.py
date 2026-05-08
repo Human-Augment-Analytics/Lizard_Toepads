@@ -42,12 +42,15 @@ class LizardDataset(Dataset):
         coords[:, 1] = np.clip(coords[:, 1], 0, H - 1)
         keypoints = coords.tolist()
 
-        augmented = self.transform(image=img, keypoints=keypoints)
-        img_aug = augmented["image"]
-        kp_aug = np.array(augmented["keypoints"], dtype=np.float32)
-
-        if kp_aug.shape[0] != 9:
-            raise ValueError(f"Augmented keypoints shape mismatch: {kp_aug.shape}, expected 9")
+        for _ in range(10):
+            augmented = self.transform(image=img, keypoints=keypoints)
+            img_aug = augmented["image"]
+            kp_aug = np.array(augmented["keypoints"], dtype=np.float32)
+            if kp_aug.shape[0] == 9:
+                break
+        else:
+            img_aug = augmented["image"]
+            kp_aug = np.array(keypoints, dtype=np.float32)
 
         kp_aug[:, 0] = np.clip(kp_aug[:, 0], 0, self.input_size - 1)
         kp_aug[:, 1] = np.clip(kp_aug[:, 1], 0, self.input_size - 1)
