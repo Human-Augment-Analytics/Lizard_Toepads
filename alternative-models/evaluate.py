@@ -203,11 +203,14 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     try:
         from hrnet_gcn import HRNetGNN
         from utils import make_chain_edge_index
+        from config import HRNetGCNTrainingConfig
     finally:
         sys.path.pop(0)
 
-    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=64, gnn_hidden=128,
-                     num_layers=2, num_landmarks=9, num_iters=3)
+    config = HRNetGCNTrainingConfig(str(model_dir / "default-config.json"))
+
+    model = HRNetGNN(hrnet_backbone="hrnet_w18", feat_dim=config.feat_dim, gnn_hidden=config.gnn_hidden,
+                     num_layers=config.num_layers, num_landmarks=config.num_landmarks, num_iters=config.num_iters)
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
     model.eval()
 
@@ -216,7 +219,7 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
         [0.6, 0.6], [0.7, 0.5], [0.8, 0.4],
         [0.7, 0.3], [0.6, 0.2], [0.5, 0.1],
     ], dtype=torch.float)
-    edge_index = make_chain_edge_index(num_landmarks=9)
+    edge_index = make_chain_edge_index(num_landmarks=config.num_landmarks)
 
     predictions = []
     for f in test_files:
