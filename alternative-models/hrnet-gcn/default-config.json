@@ -10,7 +10,7 @@
     "num_layers": 3,
     "num_iters": 6,
     "input_size": 512,
-    "epochs": 80,
+    "epochs": 100,
     "batch_size": 32,
     "lr": 1e-4,
     "train_val_split": 0.8
