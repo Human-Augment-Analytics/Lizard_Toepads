@@ -43,7 +43,7 @@ def denormalize(img):
     std = np.array([0.229, 0.224, 0.225])
     img = img * std + mean
     img = np.clip(img * 255, 0, 255).astype(np.uint8)
-    return img
+    return np.ascontiguousarray(img)
 
 
 def overlay_landmarks(image_tensor, coords, save_path):
