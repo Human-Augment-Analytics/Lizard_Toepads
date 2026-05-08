@@ -8,12 +8,12 @@ import numpy as np
 import cv2
 import torch
 from pathlib import Path
-import albumentations as A
 from sklearn.model_selection import train_test_split
 from ultralytics import YOLO
 
 from common.tps_utils import get_tps_coords
 from common.obb_utils import crop_toe_boxes_obb
+from common.obb_utils import reversible_rescale
 from common.heatmap_utils import tps_to_heatmap
 
 
@@ -46,20 +46,8 @@ def collect_image_ids(imgdir):
     return sorted(ids)
 
 
-BASE_TRANSFORM = A.Compose(
-    [
-        A.LongestMaxSize(max_size=512),
-        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT),
-    ],
-    keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
-)
-
-BASE_TRANSFORM_NO_KPS = A.Compose(
-    [
-        A.LongestMaxSize(max_size=512),
-        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT),
-    ],
-)
+BASE_TRANSFORM = None  # No longer used — replaced by reversible_rescale
+BASE_TRANSFORM_NO_KPS = None  # No longer used — replaced by reversible_rescale
 
 
 def process_image_annotated(imgid, model, config, output_dir):
@@ -78,9 +66,6 @@ def process_image_annotated(imgid, model, config, output_dir):
     crops, tps_local, stats, Ms = crop_toe_boxes_obb(results[0], img, tps, imgid)
 
     # Determine class for each kept crop by re-examining detections
-    # crop_toe_boxes_obb keeps crops in detection order, filtering by:
-    # 1. cls_id in TRAIN_CLASSES, 2. global_kps exists and count==9, 3. all kps in bounds
-    # We replicate this logic to track class names
     from common.obb_utils import CLASSMAP, TRAIN_CLASSES, crop_obb_from_corners, transform_keypoints
     crop_classes = []
     if results[0].obb is not None:
@@ -94,7 +79,6 @@ def process_image_annotated(imgid, model, config, output_dir):
             global_kps = tps.get(class_name, [])
             if len(global_kps) == 0 or len(global_kps) != 9:
                 continue
-            # Replicate bounds check
             crop_check, M_check = crop_obb_from_corners(img, corners)
             local_kps = transform_keypoints(global_kps, M_check)
             h_c, w_c = crop_check.shape[:2]
@@ -114,26 +98,30 @@ def process_image_annotated(imgid, model, config, output_dir):
         class_name = crop_classes[i] if i < len(crop_classes) else "unknown"
         orig_h, orig_w = crop.shape[:2]
 
-        aug = BASE_TRANSFORM(image=crop, keypoints=kps.tolist())
-        img_aug = aug["image"]
-        kps_aug = np.array(aug["keypoints"], dtype=np.float32)
+        # Use reversible_rescale: center-pad + ImageNet normalize
+        img_aug, kps_aug, scale, pad_x, pad_y = reversible_rescale(crop, kps)
 
         if kps_aug.shape[0] != 9:
             print(f"\n[{imgid}_{i}] WARNING: keypoint count {kps_aug.shape[0]} != 9, skipping")
             skipped += 1
             continue
 
-        heatmap = tps_to_heatmap(kps_aug, img_aug, sigma=6)
+        # Generate heatmap from the transformed keypoints on a 512x512 canvas
+        # Need uint8 image for heatmap generation — reconstruct from normalized
+        img_uint8 = ((img_aug * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])) * 255).clip(0, 255).astype(np.uint8)
+        heatmap = tps_to_heatmap(kps_aug, img_uint8, sigma=6)
         heatmap_chw = np.transpose(heatmap, (2, 0, 1))
 
         out_path = os.path.join(output_dir, f"{imgid}_{i}.pt")
         torch.save(
             {
-                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
+                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.float32),
                 "tps": torch.from_numpy(kps_aug).to(torch.float32),
                 "heatmap": torch.from_numpy(heatmap_chw).to(torch.float32),
                 "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
                 "M": torch.from_numpy(M).to(torch.float64),
+                "scale": torch.tensor(scale, dtype=torch.float32),
+                "pad": torch.tensor([pad_x, pad_y], dtype=torch.float32),
                 "class_name": class_name,
             },
             out_path,
@@ -146,8 +134,8 @@ def process_image_annotated(imgid, model, config, output_dir):
 def process_image_unannotated(imgid, model, config, output_dir):
     """Flip image horizontally, run YOLO OBB to get RHS crops (no annotation).
     
-    Crops are stored in flipped orientation. During evaluation, predictions
-    are flipped back for visualization.
+    Crops are stored in flipped orientation, pre-normalized with reversible_rescale.
+    During evaluation, predictions are flipped back for visualization.
     """
     img = cv2.imread(f"{config['imgdir']}/{imgid}.jpg")
     if img is None:
@@ -180,17 +168,19 @@ def process_image_unannotated(imgid, model, config, output_dir):
         crop, M = crop_obb_from_corners(img_flipped, corners)
         orig_h, orig_w = crop.shape[:2]
 
-        aug = BASE_TRANSFORM_NO_KPS(image=crop)
-        img_aug = aug["image"]
+        # Use reversible_rescale without keypoints
+        img_aug, scale, pad_x, pad_y = reversible_rescale(crop)
 
         out_path = os.path.join(output_dir, f"{imgid}_flip_{crop_idx}.pt")
         torch.save(
             {
-                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
+                "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.float32),
                 "tps": torch.zeros(9, 2, dtype=torch.float32),
                 "heatmap": torch.zeros(9, 512, 512, dtype=torch.float32),
                 "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
                 "M": torch.from_numpy(M).to(torch.float64),
+                "scale": torch.tensor(scale, dtype=torch.float32),
+                "pad": torch.tensor([pad_x, pad_y], dtype=torch.float32),
                 "flipped": torch.tensor(True),
             },
             out_path,

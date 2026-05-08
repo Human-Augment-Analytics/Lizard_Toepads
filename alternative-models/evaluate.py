@@ -70,21 +70,22 @@ def discover_checkpoint(model_info):
     return None
 
 
-def back_project(coords_512, M, orig_size):
-    h, w = float(orig_size[0]), float(orig_size[1])
-    scale = min(512.0 / h, 512.0 / w)
-    new_h, new_w = int(h * scale), int(w * scale)
-    pad_x = (512 - new_w) // 2
-    pad_y = (512 - new_h) // 2
-
+def back_project(coords_512, M, scale, pad_x, pad_y):
+    # Undo letterbox: (coord - pad) / scale → raw crop space
     coords_raw = coords_512.copy()
     coords_raw[:, 0] = (coords_512[:, 0] - pad_x) / scale
     coords_raw[:, 1] = (coords_512[:, 1] - pad_y) / scale
 
-    M_inv = np.linalg.inv(M)
-    pts = coords_raw.reshape(1, -1, 2).astype(np.float64)
-    global_pts = cv2.perspectiveTransform(pts, M_inv)
-    return global_pts.reshape(-1, 2)
+    # Invert homography using affine approximation (matching notebook)
+    M_np = M.astype(np.float64)
+    A_mat = M_np[:2, :]  # (2x3) affine part
+    A_inv = cv2.invertAffineTransform(A_mat)
+
+    ones = np.ones((coords_raw.shape[0], 1), dtype=np.float64)
+    coords_h = np.hstack([coords_raw, ones])
+    global_pts = coords_h @ A_inv.T
+
+    return global_pts
 
 
 def extract_imgid_from_filename(filename):
@@ -107,7 +108,8 @@ def run_stacked_hourglass(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img = data["image"].permute(1, 2, 0).float() / 255.0
+            # Image is pre-normalized float32 CHW. SHG model expects (B, H, W, C) float.
+            img = data["image"].permute(1, 2, 0)  # CHW → HWC, already normalized
             img_batch = img.unsqueeze(0)
 
             with torch.no_grad():
@@ -137,26 +139,19 @@ def run_vit(model_dir, ckpt_path, test_files):
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
     model.eval()
 
-    import albumentations as A
-    from albumentations.pytorch import ToTensorV2
-
-    vit_transform = A.Compose([
-        A.LongestMaxSize(max_size=224),
-        A.PadIfNeeded(224, 224, border_mode=cv2.BORDER_CONSTANT, value=0),
-        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-        ToTensorV2(),
-    ])
-
     predictions = []
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img = data["image"].permute(1, 2, 0).numpy()
-            aug = vit_transform(image=img)
-            img_tensor = aug["image"].unsqueeze(0).float()
+            # Image is pre-normalized float32 CHW (512x512). ViT needs 224x224.
+            img = data["image"]  # (3, 512, 512) float32 normalized
+            # Resize to 224x224 using interpolate (keeps normalization intact)
+            img_224 = torch.nn.functional.interpolate(
+                img.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False
+            )
 
             with torch.no_grad():
-                out = model(img_tensor)
+                out = model(img_224)
 
             coords_224 = out[0].reshape(9, 2).numpy() * 224
             coords_512 = coords_224 * (512.0 / 224.0)
@@ -182,10 +177,7 @@ def run_hrnet(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img = data["image"].float()
-            img_np = img.permute(1, 2, 0).numpy()
-            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
-            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
+            img_tensor = data["image"].unsqueeze(0).float()  # already normalized
 
             with torch.no_grad():
                 out = model(img_tensor)
@@ -222,10 +214,7 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     for f in test_files:
         try:
             data = torch.load(f, map_location="cpu")
-            img = data["image"].float()
-            img_np = img.permute(1, 2, 0).numpy()
-            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
-            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
+            img_tensor = data["image"].unsqueeze(0).float()  # already normalized
             initial_coords = mean_shape.unsqueeze(0)
 
             with torch.no_grad():
@@ -289,12 +278,13 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
 
         data = torch.load(f, map_location="cpu")
         M = data["M"].numpy()
-        orig_size = data["orig_size"].numpy()
+        scale = data["scale"].item()
+        pad_x, pad_y = data["pad"].tolist()
 
         try:
-            pred_global = back_project(pred, M, orig_size)
-        except np.linalg.LinAlgError:
-            logging.warning(f"Singular M in {f.name}, skipping")
+            pred_global = back_project(pred, M, scale, pad_x, pad_y)
+        except Exception as e:
+            logging.warning(f"Back-projection failed for {f.name}: {e}, skipping")
             continue
 
         imgid = extract_imgid_from_filename(f.name)
@@ -351,8 +341,10 @@ def generate_overlays(predictions, test_files, overlay_dir, model_name, max_over
             break
 
         data = torch.load(f, map_location="cpu")
-        img = data["image"].permute(1, 2, 0).numpy()
-        img_bgr = img.astype(np.uint8)
+        img = data["image"].permute(1, 2, 0).numpy()  # CHW → HWC, normalized float
+        # Denormalize for display
+        img_display = (img * IMAGENET_STD + IMAGENET_MEAN) * 255
+        img_bgr = np.clip(img_display, 0, 255).astype(np.uint8)
 
         overlay = draw_overlay(img_bgr, pred.astype(np.float32))
 
@@ -379,9 +371,12 @@ def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, m
             break
 
         data = torch.load(f, map_location="cpu")
-        img = data["image"].permute(1, 2, 0).numpy().astype(np.uint8)
+        img = data["image"].permute(1, 2, 0).numpy()  # normalized float
+        # Denormalize for display
+        img_display = (img * IMAGENET_STD + IMAGENET_MEAN) * 255
+        img_bgr = np.clip(img_display, 0, 255).astype(np.uint8)
 
-        img_unflipped = cv2.flip(img, 1)
+        img_unflipped = cv2.flip(img_bgr, 1)
 
         pred_unflipped = pred.copy()
         pred_unflipped[:, 0] = 512.0 - pred[:, 0]

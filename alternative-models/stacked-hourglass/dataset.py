@@ -19,10 +19,9 @@ class LizardDataset(torch.utils.data.Dataset):
         data = torch.load(self.paths[true_idx])
         img = data["image"].permute(1, 2, 0).numpy()
         heatmaps = data["heatmap"].permute(1, 2, 0).numpy()
-        img, heatmaps = apply_base_transform(img, heatmaps)
         img, heatmaps = apply_augmentation(img, heatmaps)
 
-        img_tensor = torch.from_numpy(img).float() / 255.0
+        img_tensor = torch.from_numpy(img).float()
         heatmaps_tensor = torch.from_numpy(heatmaps).permute(2,0,1).float()
         heatmaps_tensor = F.interpolate(
             heatmaps_tensor.unsqueeze(0),
@@ -31,22 +30,9 @@ class LizardDataset(torch.utils.data.Dataset):
         )
         heatmaps_tensor = heatmaps_tensor.squeeze(0)
 
-        heatmaps_tensor = heatmaps_tensor / heatmaps_tensor.max()
+        heatmaps_tensor = heatmaps_tensor / (heatmaps_tensor.max() + 1e-8)
         return img_tensor, heatmaps_tensor
 
-
-def apply_base_transform(img, heatmap):
-    base_transform = A.Compose([
-        A.LongestMaxSize(max_size=512),
-        A.PadIfNeeded(512, 512, border_mode=cv2.BORDER_CONSTANT, border_value=0),
-    ],
-    additional_targets={"heatmap": "image"})
-
-    out = base_transform(image=img, heatmap=heatmap)
-    image = out["image"]
-    heatmap = out["heatmap"]
-
-    return image, heatmap
 
 def apply_augmentation(img, heatmap):
     aug_transform = A.Compose([
