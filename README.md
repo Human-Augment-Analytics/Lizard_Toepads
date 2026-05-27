@@ -1,4 +1,8 @@
-# PACE Documentation Contribution Template
+# Lizard Toepads
+
+**[🚀 Newcomer? Read the Guide to Lizard Toepads & LizardMorph here!](docs/NEWCOMER_GUIDE.md)**
+
+## PACE Documentation Contribution Template
 
 ## Document Metadata
 * **Authors**: Dylan Herbig, Junling Zhuang
