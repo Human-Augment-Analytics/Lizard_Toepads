@@ -206,6 +206,80 @@ All training parameters live in YAML configs under `configs/`. The training scri
 | `H8_obb_botonly.yaml` | obb | 6 | OBB bottom-only (legacy) |
 | `H9_obb_botonly.yaml` | obb | 6 | H8 + stronger augmentation (legacy) |
 
+### Config Structure
+
+```yaml
+train:
+  task: detect          # or obb
+  model: yolo11m.pt     # auto-downloaded by YOLO
+  epochs: 300
+  batch: 32
+  imgsz: 1280
+  # ... any YOLO train() parameter works here
+
+dataset:
+  path: data/obb/dataset_4class_split
+  train: images/train
+  val: images/val
+  nc: 4
+  names: ["finger", "toe", "ruler", "id"]
+
+inference:
+  conf: 0.2
+  iou: 0.2
+```
+
+---
+
+## Model Selection Guide
+
+This project uses two model families from [Ultralytics](https://docs.ultralytics.com/):
+
+- **[YOLOv11](https://docs.ultralytics.com/models/yolo11/)** — used for both detect and OBB tasks. Proven architecture with strong results on our dataset.
+
+### YOLOv11 Detection Models (`task: detect`)
+
+Used by configs: `H5.yaml`, `H6.yaml`
+
+| Model | Filename | Params | Speed | Use Case |
+|-------|----------|--------|-------|----------|
+| YOLOv11n | yolov11n.pt | 2.6M | Fastest | Quick experiments |
+| YOLOv11s | yolov11s.pt | 9.4M | Fast | Good balance |
+| **YOLOv11m** | **yolov11m.pt** | 20.1M | Medium | **Recommended** |
+| YOLOv11l | yolov11l.pt | 25.3M | Slow | High accuracy |
+| YOLOv11x | yolov11x.pt | 56.9M | Slowest | Maximum accuracy |
+
+### YOLOv11-OBB Models (`task: obb`)
+
+Used by configs: `H10_obb.yaml`, `H7_obb_6class.yaml`, `H8_obb_botonly.yaml`
+
+| Model | Filename | Params | Speed | Use Case |
+|-------|----------|--------|-------|----------|
+| YOLOv11n-OBB | yolo11n-obb.pt | 2.7M | Fastest | Quick experiments |
+| YOLOv11s-OBB | yolo11s-obb.pt | 9.6M | Fast | Good balance |
+| **YOLOv11m-OBB** | **yolo11m-obb.pt** | 20.4M | Medium | **Recommended** |
+| YOLOv11l-OBB | yolo11l-obb.pt | 25.5M | Slow | High accuracy |
+| YOLOv11x-OBB | yolo11x-obb.pt | 57.5M | Slowest | Maximum accuracy |
+
+> **When to use OBB?** If toepad specimens are scanned at various angles, OBB produces tighter bounding boxes and cleaner crops for downstream landmark prediction. See [docs/COMPARISON_BASELINE_VS_OBB.md](docs/COMPARISON_BASELINE_VS_OBB.md) for a quantitative comparison.
+
+---
+
+## SLURM Allocation Examples
+
+```bash
+# Single H200 GPU (recommended for training)
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:H200:1
+
+# Single A100 GPU
+salloc -N1 --ntasks-per-node=4 -t8:00:00 --gres=gpu:A100:1
+
+# Multi-GPU for hyperparameter tuning
+salloc -N1 --ntasks-per-node=8 -t12:00:00 --gres=gpu:H200:4
+```
+
+See `sbatch/` for pre-built SLURM batch scripts.
+
 ---
 
 ## Project Structure
