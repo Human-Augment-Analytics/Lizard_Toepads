@@ -1,10 +1,24 @@
 # Lizard Toepads
 
-**[🚀 Newcomer? Read the Guide to Lizard Toepads & LizardMorph here!](docs/NEWCOMER_GUIDE.md)**
-
 **Authors**: Dylan Herbig, Junling Zhuang, Leyang Loh
 **Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
 **Last Updated**: Junling Zhuang, 2026-03-06
+
+## System Overview
+
+The project is split into two distinct parts:
+
+1.  **Lizard Toepads (this repository)**: The Machine Learning Research & Training core.
+    *   **Purpose**: Handles data preprocessing (TPS to YOLO), training the YOLOv11 detectors (Stage 1), and the landmark prediction research (Stage 2 / ml-morph).
+    *   **Stack**: Python, Ultralytics YOLOv11, dlib, PyTorch.
+    *   **Primary Environment**: PACE ICE Cluster (GPU-intensive training).
+
+2.  **[LizardMorph (Web App)](https://github.com/Human-Augment-Analytics/LizardMorph)**: The User Interface & Deployment platform.
+    *   **Purpose**: A web application that allows researchers to upload images, run inference using the models trained here, and visualize results.
+    *   **Stack**: Backend (Python/FastAPI), Frontend (Next.js/React).
+    *   **Deployment**: Models trained here (e.g., `best.pt` for YOLO, `predictor.dat` for dlib) are registered via **MLflow** or moved to the `backend/models/` directory of the LizardMorph app.
+
+---
 
 ## Overview
 
@@ -310,7 +324,6 @@ Lizard_Toepads/
 
 ## Additional Documentation
 
-- **[NEWCOMER_GUIDE.md](docs/NEWCOMER_GUIDE.md)** - Guide to Lizard Toepads & LizardMorph
 - [Baseline vs OBB Comparison](docs/COMPARISON_BASELINE_VS_OBB.md)
 - [OBB Crop & Rotate Experiment](docs/EXPERIMENT_CROP_ROTATE_OBB.md)
 - [Inference with Flip Strategy](docs/INFERENCE_WITH_FLIP.md)
@@ -320,5 +333,5 @@ Lizard_Toepads/
 
 ## Resources
 
-- [PACE Documentation](https://gatech.service-now.com/home?id=kb_article_view&sysparm_article=KB0042096)
+- [PACE Documentation](Georgia Tech Service Portal)
 - [Ultralytics YOLO](https://www.ultralytics.com/yolo)
