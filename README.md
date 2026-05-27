@@ -2,7 +2,7 @@
 
 **[🚀 Newcomer? Read the Guide to Lizard Toepads & LizardMorph here!](docs/NEWCOMER_GUIDE.md)**
 
-**Authors**: Dylan Herbig, Junling Zhuang, Leyang Shen
+**Authors**: Dylan Herbig, Junling Zhuang, Leyang Loh
 **Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
 **Last Updated**: Junling Zhuang, 2026-03-06
 
