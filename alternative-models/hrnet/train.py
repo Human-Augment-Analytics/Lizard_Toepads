@@ -14,14 +14,16 @@ from model import HRNetLandmarkModel
 from dataset import LizardDataset
 
 MODEL_NAME = "hrnet"
+SCRIPT_DIR = Path(__file__).parent.resolve()
 
 def setup_logging():
-    Path("logs").mkdir(parents=True, exist_ok=True)
+    log_dir = SCRIPT_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",
         handlers=[
-            logging.FileHandler(f"logs/{MODEL_NAME}.log"),
+            logging.FileHandler(str(log_dir / f"{MODEL_NAME}.log")),
             logging.StreamHandler(sys.stdout),
         ]
     )
@@ -29,11 +31,11 @@ def setup_logging():
 
 def load_config(config_name):
     if config_name is not None:
-        p = Path(f"configs/{config_name}.json")
+        p = SCRIPT_DIR / "configs" / f"{config_name}.json"
         if p.exists():
             with open(p, "r") as f:
                 return json.load(f)
-    p = Path("configs/default.json")
+    p = SCRIPT_DIR / "configs" / "default.json"
     with open(p, "r") as f:
         return json.load(f)
 
@@ -82,7 +84,8 @@ def main(args):
 
     OVERLAY_DIR = os.path.join(DATA_PATH, "overlays")
     Path(OVERLAY_DIR).mkdir(parents=True, exist_ok=True)
-    Path("checkpoints").mkdir(parents=True, exist_ok=True)
+    ckpt_dir = SCRIPT_DIR / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     if args.split:
         if not Path(args.split).exists():
@@ -126,8 +129,15 @@ def main(args):
 
     optimizer = torch.optim.AdamW([
         {'params': model.backbone.parameters(), 'lr': LR_BACKBONE},
+        {'params': model.feature_proj.parameters(), 'lr': LR_HEAD},
         {'params': model.cross_attn.parameters(), 'lr': LR_HEAD},
+        {'params': model.cross_attn_norm.parameters(), 'lr': LR_HEAD},
+        {'params': model.cross_attn_ff_norm.parameters(), 'lr': LR_HEAD},
+        {'params': model.cross_attn_ff.parameters(), 'lr': LR_HEAD},
         {'params': model.self_attn.parameters(), 'lr': LR_HEAD},
+        {'params': model.self_attn_norm.parameters(), 'lr': LR_HEAD},
+        {'params': model.self_attn_ff_norm.parameters(), 'lr': LR_HEAD},
+        {'params': model.self_attn_ff.parameters(), 'lr': LR_HEAD},
         {'params': model.coord_head.parameters(), 'lr': LR_HEAD},
         {'params': [model.landmark_queries], 'lr': LR_HEAD}
     ], weight_decay=config["weight_decay"])
@@ -200,7 +210,7 @@ def main(args):
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), f"checkpoints/{MODEL_NAME}_best.pth")
+            torch.save(model.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
 
 
 if __name__ == "__main__":

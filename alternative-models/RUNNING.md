@@ -4,7 +4,31 @@ All commands are run from the `alternative-models/` directory unless noted.
 
 ---
 
-## Stacked Hourglass
+## Running All Models Together (Recommended)
+
+To train all models on the same data split and then generate the benchmark report:
+
+```bash
+# Step 1: Generate the shared split (only needed once)
+cd alternative-models
+python benchmarking/generate_split.py
+
+# Step 2: Train all models sequentially on the same split
+python benchmarking/run_all.py --split benchmarking/splits/split.json
+
+# Step 3: Generate the benchmark report
+python evaluate.py
+```
+
+`run_all.py` trains every model (stacked hourglass, ViT, HRNet, HRNet-GCN, ml-morph) using the same split file so results are directly comparable. It prints a summary table of exit codes and runtimes at the end.
+
+> **Note:** ml-morph requires `dlib` to be installed: `uv pip install dlib`
+
+---
+
+## Running Individual Models
+
+### Stacked Hourglass
 
 ```bash
 # Preprocess (axis-aligned YOLO)

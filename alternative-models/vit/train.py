@@ -15,14 +15,16 @@ from model import ViTLandmark
 from dataset import ViTDataset
 
 MODEL_NAME = "vit"
+SCRIPT_DIR = Path(__file__).parent.resolve()
 
 def setup_logging():
-    Path("logs").mkdir(parents=True, exist_ok=True)
+    log_dir = SCRIPT_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",
         handlers=[
-            logging.FileHandler(f"logs/{MODEL_NAME}.log"),
+            logging.FileHandler(str(log_dir / f"{MODEL_NAME}.log")),
             logging.StreamHandler(sys.stdout),
         ]
     )
@@ -30,11 +32,11 @@ def setup_logging():
 
 def load_config(config_name):
     if config_name is not None:
-        p = Path(f"configs/{config_name}.json")
+        p = SCRIPT_DIR / "configs" / f"{config_name}.json"
         if p.exists():
             with open(p, "r") as f:
                 return json.load(f)
-    p = Path("configs/default.json")
+    p = SCRIPT_DIR / "configs" / "default.json"
     with open(p, "r") as f:
         return json.load(f)
 
@@ -77,7 +79,8 @@ def main(args):
     for p in model.backbone.parameters():
         p.requires_grad = False
 
-    Path("checkpoints").mkdir(parents=True, exist_ok=True)
+    ckpt_dir = SCRIPT_DIR / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     best_pixel_error = float('inf')
 
     for epoch in range(config["epochs"]):
@@ -127,7 +130,7 @@ def main(args):
 
         if avg_pixel_error < best_pixel_error:
             best_pixel_error = avg_pixel_error
-            torch.save(model.state_dict(), f"checkpoints/{MODEL_NAME}_best.pth")
+            torch.save(model.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
             logging.info(f"New best model saved with pixel error {best_pixel_error:.2f}")
 
 

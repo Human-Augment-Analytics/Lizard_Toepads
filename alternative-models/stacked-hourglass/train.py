@@ -15,14 +15,16 @@ import argparse
 import json
 
 MODEL_NAME = "stacked_hourglass"
+SCRIPT_DIR = Path(__file__).parent.resolve()
 
 def setup_logging():
-    Path("logs").mkdir(parents=True, exist_ok=True)
+    log_dir = SCRIPT_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",
         handlers=[
-            logging.FileHandler(f"logs/{MODEL_NAME}.log"),
+            logging.FileHandler(str(log_dir / f"{MODEL_NAME}.log")),
             logging.StreamHandler(sys.stdout),
         ]
     )
@@ -31,13 +33,13 @@ def main(args):
     setup_logging()
     training_data_dir = args.data
     if training_data_dir is None:
-        training_data_dir = "./data"
+        training_data_dir = str(SCRIPT_DIR / "data")
 
     configName = args.config
     config = loadConfig(configName)
     validateConfig(config)
     logging.info(config)
-    initEnvironment()
+    ckpt_dir = initEnvironment()
 
     npz_dir = Path(f"{training_data_dir}/train")
     npz_paths = list(npz_dir.glob("*.pt"))
@@ -117,16 +119,18 @@ def main(args):
         scheduler.step(avg_val_loss)
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(shg.state_dict(), f"checkpoints/{MODEL_NAME}_best.pth")
+            torch.save(shg.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
         print()
         logging.info(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
 def initEnvironment():
-    Path("checkpoints").mkdir(parents=True, exist_ok=True)
+    ckpt_dir = SCRIPT_DIR / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    return ckpt_dir
 
 def loadConfig(cname):
     if cname != None:
-        p = Path(f"./configs/{cname}.json")
+        p = SCRIPT_DIR / "configs" / f"{cname}.json"
         if p.exists():
             try:
                 with open(p, "r") as f:
@@ -139,7 +143,7 @@ def loadConfig(cname):
     return None
 
 def loadDefaultConfig():
-    p = Path(f"./configs/default.json")
+    p = SCRIPT_DIR / "configs" / "default.json"
     with open(p, "r") as f:
         config = json.load(f)
         return config

@@ -371,10 +371,12 @@ def generate_overlays(predictions, test_files, overlay_dir, model_name, max_over
 
 
 def generate_unannotated_overlays(predictions, unannotated_files, overlay_dir, model_name, max_overlays=10):
-    """Generate overlays for unannotated (flipped RHS) crops.
+    """Generate overlays for unannotated (vertically flipped RHS) crops.
     
-    Predictions are flipped back horizontally before drawing so the
+    Predictions are flipped back vertically after inference so the
     visualization shows the original (unflipped) orientation.
+    The model infers on the vertically-flipped crop (RHS appears as LHS).
+    After inference, we undo the vertical flip on both image and Y coordinates.
     """
     saved = []
     count = 0

@@ -20,14 +20,16 @@ from datetime import datetime
 from common.obb_utils import order_box_points, crop_obb_from_corners, transform_keypoints, crop_toe_boxes_obb
 
 MODEL_NAME = "hrnet_gcn"
+SCRIPT_DIR = Path(__file__).parent.resolve()
 
 def setup_logging():
-    Path("logs").mkdir(parents=True, exist_ok=True)
+    log_dir = SCRIPT_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(message)s",
         handlers=[
-            logging.FileHandler(f"logs/{MODEL_NAME}.log"),
+            logging.FileHandler(str(log_dir / f"{MODEL_NAME}.log")),
             logging.StreamHandler(sys.stdout),
         ]
     )
@@ -94,6 +96,9 @@ def train(model, train_dataset, val_dataset=None, device='cuda', epochs=10, batc
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=15, min_lr=1e-6
+    )
     edge_index = make_chain_edge_index(num_landmarks=train_dataset[0][1].shape[0]).to(device)
     best_val = float('inf')
     for epoch in range(epochs):
@@ -116,6 +121,7 @@ def train(model, train_dataset, val_dataset=None, device='cuda', epochs=10, batc
             
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
             epoch_loss += loss.item() * imgs.size(0)
@@ -150,9 +156,11 @@ def train(model, train_dataset, val_dataset=None, device='cuda', epochs=10, batc
             
             if val_loss < best_val:
                 best_val = val_loss
-                Path("checkpoints").mkdir(parents=True, exist_ok=True)
-                torch.save(model.state_dict(), "checkpoints/best_hrnet_gcn.pth")
+                ckpt_dir = SCRIPT_DIR / "checkpoints"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(model.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
             
+            scheduler.step(val_loss)
             model.train()
         logging.info(f"Epoch {epoch+1}/{epochs}, Train Loss: {epoch_loss:.6f}, Avg Pixel Error: {pix_err}" +
              (f", Val Loss: {val_loss:.6f}" if val_loss is not None else ""))
