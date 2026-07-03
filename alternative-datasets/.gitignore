@@ -1,0 +1,18 @@
+# Raw dataset files (images, annotation sources)
+wflw/WFLW_images/
+wflw/WFLW_annotations/
+
+# Preprocessed .pt crop files (can be regenerated via preprocess.py)
+wflw/pt_crops/
+
+# Generated split files
+wflw/splits/
+
+# Computed mean shapes
+wflw/mean_shapes/
+
+# Evaluation results
+wflw/results/
+
+# Visualization outputs
+wflw/visualizations/
