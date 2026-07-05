@@ -221,13 +221,15 @@ def preprocess_wflw(
         stem = f"{Path(ann['image_path']).stem}_{line_idx:05d}"
 
         # Save .pt file
+        # orig_size is the pre-letterbox crop dimensions (not the 512×512 output),
+        # used by compute_rescaled_pixel_error to report error in original pixel space.
+        crop_h = y2 - y1
+        crop_w = x2 - x1
         pt_data = {
-            "image": torch.from_numpy(img_chw),                          # (3,512,512) uint8
-            "tps":   torch.from_numpy(landmarks_norm),                    # (98,2) float32
-            "attrs": torch.from_numpy(ann["attrs"]),                      # (6,) uint8
-            "orig_size": torch.tensor(
-                [img_chw.shape[1], img_chw.shape[2]], dtype=torch.int32  # [H, W]
-            ),
+            "image": torch.from_numpy(img_chw),                               # (3,512,512) uint8
+            "tps":   torch.from_numpy(landmarks_norm),                        # (98,2) float32
+            "attrs": torch.from_numpy(ann["attrs"]),                          # (6,) uint8
+            "orig_size": torch.tensor([crop_h, crop_w], dtype=torch.int32),  # [H, W] pre-letterbox
         }
 
         out_path = output_dir / f"{stem}.pt"

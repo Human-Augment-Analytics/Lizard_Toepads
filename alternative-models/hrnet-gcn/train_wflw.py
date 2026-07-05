@@ -281,11 +281,17 @@ def main():
         val_loss = val_loss_total / len(val_dataset)
         pix_err = pxerr_total / len(val_dataset)
 
+        # Also log raw 512-space pixel error for reference (no rescaling)
+        pix_err_512 = (
+            (pred_coords - coords).norm(dim=-1).mean().item() * config.input_size
+        )
+
         logging.info(
             f"Epoch {epoch}/{config.epochs}, "
             f"Train Loss: {epoch_loss:.6f}, "
             f"Val Loss: {val_loss:.6f}, "
-            f"Avg Pixel Error: {pix_err:.2f}"
+            f"Avg Pixel Error (orig px): {pix_err:.2f}, "
+            f"Avg Pixel Error (512px): {pix_err_512:.2f}"
         )
 
         scheduler.step(val_loss)
@@ -305,9 +311,9 @@ def main():
                 save_path=str(vis_dir / f"epoch{epoch}.jpg"),
             )
 
-        # Save image overlays at epoch 3, then every 10 epochs
+        # Save image overlays: every epoch for first 20, then every 10
         # Shows predicted (red dots) vs GT (green dots) on actual face crop
-        if epoch == 3 or (epoch > 3 and epoch % 10 == 0):
+        if epoch <= 20 or epoch % 10 == 0:
             n_samples = min(3, imgs.shape[0])
             for i in range(n_samples):
                 save_overlay(
