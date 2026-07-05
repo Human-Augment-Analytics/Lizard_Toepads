@@ -82,8 +82,8 @@ def main():
     parser.add_argument(
         "--fraction",
         type=float,
-        default=1.0,
-        help="Training fraction to generate split at (default: 1.0)",
+        default=0.8,
+        help="Training fraction to generate split at (default: 0.8)",
     )
     parser.add_argument(
         "--seed",

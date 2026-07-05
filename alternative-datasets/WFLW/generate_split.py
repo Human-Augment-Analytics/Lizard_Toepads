@@ -55,8 +55,8 @@ def main():
     parser.add_argument(
         "--val-fraction",
         type=float,
-        default=0.1,
-        help="Fraction of the remaining pool (after train) used for val (default: 0.1)",
+        default=0.2,
+        help="Fraction of the remaining pool (after train) used for val (default: 0.2)",
     )
     args = parser.parse_args()
 
@@ -102,18 +102,30 @@ def main():
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Val is sampled from the remaining pool (files not selected for train)
-    train_set = set(train_files)
-    remaining = [p for p in train_pool if p not in train_set]
-
-    if remaining and args.val_fraction > 0:
+    # Val is sampled from the pool before train when fraction == 1.0,
+    # otherwise from the remaining files after train is removed.
+    # This avoids an empty val set when fraction=1.0.
+    if args.fraction >= 1.0 and args.val_fraction > 0:
+        # Reserve val first, then use the rest for train
         try:
-            val_files = sample_fraction(remaining, args.val_fraction, args.seed + 1)
+            val_files = sample_fraction(train_pool, args.val_fraction, args.seed + 1)
         except ValueError as e:
             print(f"ERROR sampling val: {e}", file=sys.stderr)
             sys.exit(1)
+        val_set = set(val_files)
+        train_files = [p for p in train_pool if p not in val_set]
     else:
-        val_files = []
+        # Val is sampled from what remains after train
+        train_set = set(train_files)
+        remaining = [p for p in train_pool if p not in train_set]
+        if remaining and args.val_fraction > 0:
+            try:
+                val_files = sample_fraction(remaining, args.val_fraction, args.seed + 1)
+            except ValueError as e:
+                print(f"ERROR sampling val: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            val_files = []
 
     write_split(train_files, val_files, test_files, args.output)
 
