@@ -1,27 +1,27 @@
 """
-Model A training script — HRNet-GCN with mean-shape initialization on WFLW.
+Model B training script — HRNet-GCN with image-conditioned initialization.
 
-Implements its own training loop (does NOT call utils.train()) because:
-  - The frozen utils.train() hardcodes a 9-point Lizard mean shape
-  - WFLW requires a 98-point mean shape loaded from a .pt file
-  - WFLW training uses noise-augmented initialization for pose robustness
-  - WFLW uses the facial topology graph instead of a simple chain
+Trains HRNetGNNWithInit using dual-loss supervision:
+    loss = loss_init_weight * landmark_loss(initial_coords, gt)
+         + loss_final_weight * landmark_loss(final_coords, gt)
+
+Checkpoint selection is based on final_coords validation loss only.
 
 Does NOT modify any frozen files:
   hrnet_gcn.py, train.py, utils.py, lizard_dataset.py, default-config.json
 
+Validates on Lizard first (hinit-config.json, num_landmarks=9) before WFLW.
+
 Usage:
-    python train_wflw.py \\
-        --config wflw-config.json \\
-        --split /path/to/wflw_split.json
+    python train_hinit.py \\
+        --config hinit-config.json \\
+        --split /path/to/lizard_split.json
 """
 import sys
 import os
 from pathlib import Path as _Path
 
 _SCRIPT_DIR = _Path(__file__).resolve().parent
-# Insert alternative-datasets/ onto sys.path so 'common' package is importable
-# Works regardless of cwd since __file__ is always absolute after resolve()
 _ALT_DATASETS = _SCRIPT_DIR.parent.parent / "alternative-datasets"
 if str(_ALT_DATASETS) not in sys.path:
     sys.path.insert(0, str(_ALT_DATASETS))
@@ -37,12 +37,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from config import HRNetGCNTrainingConfig
-from hrnet_gcn import HRNetGNN
+from hrnet_gcn_hinit import HRNetGNNWithInit
 from lizard_dataset import LizardDataset
 from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
-from common.graph_topologies import get_edge_index
+from common.graph_topologies import get_edge_index, make_chain_edge_index
 
-MODEL_NAME = "hrnet_gcn_wflw"
+MODEL_NAME = "hrnet_gcn_hinit"
 SCRIPT_DIR = _SCRIPT_DIR
 
 
@@ -61,13 +61,13 @@ def setup_logging():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train HRNet-GCN (mean-init) on WFLW"
+        description="Train HRNet-GCN with image-conditioned initialization"
     )
     parser.add_argument(
         "--config",
         type=str,
-        default=str(SCRIPT_DIR / "wflw-config.json"),
-        help="Path to WFLW training config JSON",
+        default=str(SCRIPT_DIR / "hinit-config.json"),
+        help="Path to training config JSON",
     )
     parser.add_argument(
         "--split",
@@ -91,23 +91,13 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info(f"Using device: {device}")
 
-    # Load mean shape
-    if not config.mean_shape_path or not Path(config.mean_shape_path).exists():
-        logging.error(
-            f"mean_shape_path not set or not found: {config.mean_shape_path}\n"
-            "Run compute_mean_shape.py first and update wflw-config.json."
-        )
-        sys.exit(1)
-
-    mean_shape = torch.load(config.mean_shape_path, map_location=device)
-    logging.info(f"Loaded mean shape: {mean_shape.shape} from {config.mean_shape_path}")
-
-    # Build edge index from topology registry
-    edge_index = get_edge_index(config.graph_topology, config.num_landmarks).to(device)
-    logging.info(
-        f"Graph topology: '{config.graph_topology}', "
-        f"edge_index shape: {edge_index.shape}"
-    )
+    # Edge index from topology registry or fallback to chain (Lizard case)
+    if config.graph_topology is not None:
+        edge_index = get_edge_index(config.graph_topology, config.num_landmarks).to(device)
+        logging.info(f"Graph topology: '{config.graph_topology}'")
+    else:
+        edge_index = make_chain_edge_index(config.num_landmarks).to(device)
+        logging.info(f"Graph topology: chain (fallback), num_landmarks={config.num_landmarks}")
 
     # Datasets
     train_dataset = LizardDataset(split_data["train"], input_size=config.input_size)
@@ -124,7 +114,7 @@ def main():
     )
 
     # Model
-    model = HRNetGNN(
+    model = HRNetGNNWithInit(
         hrnet_backbone="hrnet_w18",
         feat_dim=config.feat_dim,
         gnn_hidden=config.gnn_hidden,
@@ -153,14 +143,13 @@ def main():
         for imgs, coords, _ in train_loader:
             imgs = imgs.to(device)
             coords = coords.to(device)
-            B = imgs.shape[0]
 
-            # Noise-augmented mean shape initialization (train only)
-            noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
-            initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1) + noise
+            initial_coords, final_coords = model(imgs, edge_index)
 
-            pred_coords = model(imgs, initial_coords, edge_index)
-            loss = landmark_loss(pred_coords, coords)
+            loss = (
+                config.loss_init_weight * landmark_loss(initial_coords, coords)
+                + config.loss_final_weight * landmark_loss(final_coords, coords)
+            )
 
             optimizer.zero_grad()
             loss.backward()
@@ -180,14 +169,12 @@ def main():
             for imgs, coords, orig_size in val_loader:
                 imgs = imgs.to(device)
                 coords = coords.to(device)
-                B = imgs.shape[0]
 
-                # Clean mean shape — no noise during validation
-                initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
-                pred_coords = model(imgs, initial_coords, edge_index)
+                _, final_coords = model(imgs, edge_index)
 
-                val_loss_total += landmark_loss(pred_coords, coords).item() * imgs.size(0)
-                pxerr_total += compute_rescaled_pixel_error(pred_coords, coords, orig_size, device)
+                # Checkpoint selection based on final_coords val loss only
+                val_loss_total += landmark_loss(final_coords, coords).item() * imgs.size(0)
+                pxerr_total += compute_rescaled_pixel_error(final_coords, coords, orig_size, device)
 
         val_loss = val_loss_total / len(val_dataset)
         pix_err = pxerr_total / len(val_dataset)
@@ -211,7 +198,7 @@ def main():
         if epoch % 10 == 0:
             visualize_landmarks(
                 imgs[0],
-                pred_coords[0],
+                final_coords[0],
                 coords[0],
                 save_path=str(vis_dir / f"epoch{epoch}.jpg"),
             )
