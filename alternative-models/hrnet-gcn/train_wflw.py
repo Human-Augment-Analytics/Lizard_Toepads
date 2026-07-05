@@ -124,6 +124,12 @@ def main():
         required=True,
         help="Path to split JSON file (must have train/val/test keys)",
     )
+    parser.add_argument(
+        "--mean-shape",
+        type=str,
+        default=None,
+        help="Path to mean_shape.pt (overrides mean_shape_path in config)",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -164,6 +170,10 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info(f"Using device: {device}")
+
+    # CLI --mean-shape overrides the config value
+    if args.mean_shape:
+        config.mean_shape_path = args.mean_shape
 
     # Load mean shape
     if not config.mean_shape_path or not Path(config.mean_shape_path).exists():

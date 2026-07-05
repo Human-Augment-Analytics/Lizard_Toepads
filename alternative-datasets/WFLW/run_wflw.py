@@ -52,6 +52,12 @@ def main():
         default=DEFAULT_CONFIG,
         help=f"Path to WFLW training config JSON (default: {DEFAULT_CONFIG})",
     )
+    parser.add_argument(
+        "--mean-shape",
+        type=str,
+        default=None,
+        help="Path to mean_shape.pt (overrides mean_shape_path in config)",
+    )
     args = parser.parse_args()
 
     split_file = Path(args.split).resolve()
@@ -80,6 +86,8 @@ def main():
             "--config", str(config_file),
             "--split", str(split_file),
         ]
+        if args.mean_shape:
+            cmd += ["--mean-shape", args.mean_shape]
 
         result = subprocess.run(cmd, cwd=str(model_dir), check=False)
         elapsed = time.time() - start

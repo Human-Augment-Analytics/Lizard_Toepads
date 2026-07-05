@@ -17,21 +17,13 @@ class WFLWDataset(Dataset):
         self.input_size = input_size
         self.num_landmarks = num_landmarks
 
+        # Minimal augmentation — geometry-only ops that can misalign landmarks
+        # (HorizontalFlip, Affine/rotate) are disabled until flip-pair reordering
+        # is implemented. This lets the model converge cleanly first.
         self.transform = A.Compose([
             A.LongestMaxSize(max_size=input_size),
             A.PadIfNeeded(input_size, input_size, border_mode=cv2.BORDER_CONSTANT),
-            A.Affine(
-                scale=(0.85, 1.15),
-                translate_percent=(0.05, 0.05),
-                rotate=(-30, 30),
-                p=0.8
-            ),
-            A.HorizontalFlip(p=0.5),
-            A.OneOf([
-                A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2),
-                A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=15, val_shift_limit=10)
-            ], p=0.7),
-            A.GaussNoise(p=0.3),
+            A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.5),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ], keypoint_params=A.KeypointParams(format="xy", remove_invisible=False, label_fields=[]))
 
