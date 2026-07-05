@@ -38,6 +38,16 @@ from torch.utils.data import DataLoader
 
 from hrnet_gcn import HRNetGNN
 from lizard_dataset import LizardDataset
+
+# Import WFLWDataset directly from alternative-datasets/wflw/
+import importlib.util as _ilu2
+_ds_spec = _ilu2.spec_from_file_location(
+    "wflw_dataset",
+    str(_ALT_DATASETS / "wflw" / "wflw_dataset.py")
+)
+_ds_mod = _ilu2.module_from_spec(_ds_spec)
+_ds_spec.loader.exec_module(_ds_mod)
+WFLWDataset = _ds_mod.WFLWDataset
 from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
 
 # Import directly by absolute path to avoid shadowing by alternative-models/common/
@@ -141,12 +151,17 @@ def main():
         f"edge_index shape: {edge_index.shape}"
     )
 
-    # Datasets
-    train_dataset = LizardDataset(split_data["train"], input_size=config.input_size)
-    val_dataset = LizardDataset(split_data["val"], input_size=config.input_size)
+    # Datasets — use WFLWDataset which supports any num_landmarks (not hardcoded to 9)
+    train_dataset = WFLWDataset(split_data["train"], input_size=config.input_size, num_landmarks=config.num_landmarks)
+    val_dataset = WFLWDataset(split_data["val"], input_size=config.input_size, num_landmarks=config.num_landmarks)
     logging.info(
         f"Train: {len(train_dataset)} samples, Val: {len(val_dataset)} samples"
     )
+    if len(val_dataset) == 0:
+        logging.error(
+            "Val set is empty. Re-run generate_split.py with --val-fraction > 0."
+        )
+        sys.exit(1)
 
     train_loader = DataLoader(
         train_dataset, batch_size=config.batch_size, shuffle=True
