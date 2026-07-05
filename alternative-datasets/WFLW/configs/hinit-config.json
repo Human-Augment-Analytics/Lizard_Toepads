@@ -1,0 +1,14 @@
+{
+    "training_data_path": "/storage/ice-shared/cs8903onl/alternative-models/data",
+    "num_landmarks": 9,
+    "gnn_hidden": 128,
+    "num_layers": 2,
+    "num_iters": 4,
+    "input_size": 512,
+    "epochs": 150,
+    "batch_size": 16,
+    "lr": 1e-4,
+    "train_val_split": 0.9,
+    "loss_init_weight": 0.5,
+    "loss_final_weight": 1.0
+}

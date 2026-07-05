@@ -1,5 +1,5 @@
 {
-    "training_data_path": "<fill in: path to WFLW pt_crops/train/ directory>",
+    "training_data_path": "alternative-datasets/wflw/pt_crops",
     "num_landmarks": 98,
     "gnn_hidden": 128,
     "num_layers": 2,
@@ -10,6 +10,6 @@
     "lr": 1e-4,
     "train_val_split": 0.9,
     "graph_topology": "wflw",
-    "mean_shape_path": "<fill in: path to mean_shape_wflw.pt>",
+    "mean_shape_path": "alternative-datasets/wflw/mean_shapes/mean_shape_wflw.pt",
     "init_noise_sigma": 0.05
 }

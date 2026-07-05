@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 SCRIPT_DIR = Path(__file__).parent.resolve()
 ALT_MODELS_DIR = SCRIPT_DIR.parent.parent / "alternative-models"
 
-DEFAULT_CONFIG = str(ALT_MODELS_DIR / "hrnet-gcn" / "hinit-config.json")
+DEFAULT_CONFIG = str(SCRIPT_DIR / "configs" / "hinit-config.json")
 
 MODELS = [
     {
