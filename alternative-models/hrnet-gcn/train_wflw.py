@@ -33,6 +33,8 @@ import json
 import logging
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -69,6 +71,28 @@ get_edge_index = _gt_mod.get_edge_index
 
 MODEL_NAME = "hrnet_gcn_wflw"
 SCRIPT_DIR = _SCRIPT_DIR
+
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def save_overlay(img_tensor, pred_coords, gt_coords, save_path, input_size=512):
+    """Draw predicted (red) and GT (green) landmarks on the actual face crop image."""
+    # Denormalize image: reverse ImageNet normalization
+    img = img_tensor.permute(1, 2, 0).cpu().numpy()  # HWC float
+    img = img * IMAGENET_STD + IMAGENET_MEAN
+    img = np.clip(img * 255, 0, 255).astype(np.uint8)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    pred = pred_coords.cpu().numpy() * input_size   # (N, 2) in pixel space
+    gt   = gt_coords.cpu().numpy()   * input_size
+
+    for x, y in gt:
+        cv2.circle(img_bgr, (int(x), int(y)), 2, (0, 255, 0), -1)   # green GT
+    for x, y in pred:
+        cv2.circle(img_bgr, (int(x), int(y)), 2, (0, 0, 255), -1)   # red pred
+
+    cv2.imwrite(str(save_path), img_bgr)
 
 
 def setup_logging():
@@ -117,11 +141,12 @@ def main():
     config.num_landmarks    = cfg.get("num_landmarks", 98)
     config.feat_dim         = cfg.get("feat_dim", 64)
     config.gnn_hidden       = cfg.get("gnn_hidden", 128)
-    config.num_layers       = cfg.get("num_layers", 2)
+    config.num_layers       = cfg.get("num_layers", 3)
     config.num_iters        = cfg.get("num_iters", 4)
     config.input_size       = cfg.get("input_size", 512)
     config.epochs           = cfg.get("epochs", 150)
-    config.batch_size       = cfg.get("batch_size", 16)
+    config.batch_size       = cfg.get("batch_size", 32)
+    config.val_batch_size   = cfg.get("val_batch_size", 64)
     config.lr               = cfg.get("lr", 1e-4)
     config.graph_topology   = cfg.get("graph_topology", "wflw")
     config.mean_shape_path  = cfg.get("mean_shape_path", None)
@@ -174,7 +199,7 @@ def main():
         train_dataset, batch_size=config.batch_size, shuffle=True
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=config.batch_size, shuffle=False
+        val_dataset, batch_size=config.val_batch_size, shuffle=False
     )
 
     # Model
@@ -269,6 +294,19 @@ def main():
                 coords[0],
                 save_path=str(vis_dir / f"epoch{epoch}.jpg"),
             )
+
+        # Save image overlays at epoch 3, then every 10 epochs
+        # Shows predicted (red dots) vs GT (green dots) on actual face crop
+        if epoch == 3 or (epoch > 3 and epoch % 10 == 0):
+            n_samples = min(3, imgs.shape[0])
+            for i in range(n_samples):
+                save_overlay(
+                    imgs[i],
+                    pred_coords[i],
+                    coords[i],
+                    save_path=vis_dir / f"overlay_epoch{epoch:04d}_sample{i}.jpg",
+                    input_size=config.input_size,
+                )
 
         model.train()
 
