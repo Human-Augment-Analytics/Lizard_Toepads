@@ -37,14 +37,21 @@ import torch
 from torch.utils.data import DataLoader
 
 from hrnet_gcn import HRNetGNN
-from lizard_dataset import LizardDataset
 
-# Import WFLWDataset directly from alternative-datasets/wflw/
+# Locate wflw_dataset.py — handle case differences between systems
+# (repo uses lowercase 'wflw', cluster may have uppercase 'WFLW')
 import importlib.util as _ilu2
-_ds_spec = _ilu2.spec_from_file_location(
-    "wflw_dataset",
-    str(_ALT_DATASETS / "wflw" / "wflw_dataset.py")
-)
+_wflw_dataset_path = None
+for _candidate in ["wflw", "WFLW"]:
+    _p = _ALT_DATASETS / _candidate / "wflw_dataset.py"
+    if _p.exists():
+        _wflw_dataset_path = _p
+        break
+if _wflw_dataset_path is None:
+    raise FileNotFoundError(
+        f"wflw_dataset.py not found under {_ALT_DATASETS}/wflw/ or {_ALT_DATASETS}/WFLW/"
+    )
+_ds_spec = _ilu2.spec_from_file_location("wflw_dataset", str(_wflw_dataset_path))
 _ds_mod = _ilu2.module_from_spec(_ds_spec)
 _ds_spec.loader.exec_module(_ds_mod)
 WFLWDataset = _ds_mod.WFLWDataset
