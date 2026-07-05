@@ -40,7 +40,17 @@ from config import HRNetGCNTrainingConfig
 from hrnet_gcn import HRNetGNN
 from lizard_dataset import LizardDataset
 from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
-from common.graph_topologies import get_edge_index
+
+# Import get_edge_index directly by absolute path to avoid shadowing
+# by the existing alternative-models/common/ package
+import importlib.util as _ilu
+_gt_spec = _ilu.spec_from_file_location(
+    "alt_datasets_graph_topologies",
+    str(_ALT_DATASETS / "common" / "graph_topologies.py")
+)
+_gt_mod = _ilu.module_from_spec(_gt_spec)
+_gt_spec.loader.exec_module(_gt_mod)
+get_edge_index = _gt_mod.get_edge_index
 
 MODEL_NAME = "hrnet_gcn_wflw"
 SCRIPT_DIR = _SCRIPT_DIR
