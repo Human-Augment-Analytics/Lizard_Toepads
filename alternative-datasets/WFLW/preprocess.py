@@ -135,7 +135,7 @@ def letterbox_crop(
                 min_height=target_size,
                 min_width=target_size,
                 border_mode=cv2.BORDER_CONSTANT,
-                value=0,
+                fill_value=0,
             ),
         ],
         keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
@@ -206,6 +206,19 @@ def preprocess_wflw(
             skipped += 1
             continue
 
+        # Compute pre-letterbox crop dimensions from the padded bbox
+        # (mirrors the clamping logic in letterbox_crop so values are consistent)
+        H_img, W_img = img.shape[:2]
+        x_min, y_min, x_max, y_max = ann["bbox"]
+        bw, bh = x_max - x_min, y_max - y_min
+        pad_x, pad_y = bw * 0.10, bh * 0.10
+        _x1 = int(max(0, x_min - pad_x))
+        _y1 = int(max(0, y_min - pad_y))
+        _x2 = int(min(W_img, x_max + pad_x))
+        _y2 = int(min(H_img, y_max + pad_y))
+        crop_h = _y2 - _y1
+        crop_w = _x2 - _x1
+
         # Crop and resize
         try:
             img_chw, landmarks_norm = letterbox_crop(
@@ -223,8 +236,6 @@ def preprocess_wflw(
         # Save .pt file
         # orig_size is the pre-letterbox crop dimensions (not the 512×512 output),
         # used by compute_rescaled_pixel_error to report error in original pixel space.
-        crop_h = y2 - y1
-        crop_w = x2 - x1
         pt_data = {
             "image": torch.from_numpy(img_chw),                               # (3,512,512) uint8
             "tps":   torch.from_numpy(landmarks_norm),                        # (98,2) float32
