@@ -76,7 +76,7 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default=str(SCRIPT_DIR / "wflw-config.json"),
+        default=str(SCRIPT_DIR.parent.parent / "alternative-datasets" / "wflw" / "configs" / "wflw-config.json"),
         help="Path to WFLW training config JSON",
     )
     parser.add_argument(
