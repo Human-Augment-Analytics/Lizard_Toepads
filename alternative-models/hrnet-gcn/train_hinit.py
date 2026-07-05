@@ -36,7 +36,6 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import HRNetGCNTrainingConfig
 from hrnet_gcn_hinit import HRNetGNNWithInit
 from lizard_dataset import LizardDataset
 from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
@@ -87,7 +86,30 @@ def main():
     )
     args = parser.parse_args()
 
-    config = HRNetGCNTrainingConfig(args.config)
+    config_path = Path(args.config)
+    if not config_path.exists():
+        logging.error(f"Config file not found: {config_path}")
+        sys.exit(1)
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    class _Cfg:
+        pass
+    config = _Cfg()
+    config.num_landmarks     = cfg.get("num_landmarks", 9)
+    config.feat_dim          = cfg.get("feat_dim", 64)
+    config.gnn_hidden        = cfg.get("gnn_hidden", 128)
+    config.num_layers        = cfg.get("num_layers", 2)
+    config.num_iters         = cfg.get("num_iters", 4)
+    config.input_size        = cfg.get("input_size", 512)
+    config.epochs            = cfg.get("epochs", 150)
+    config.batch_size        = cfg.get("batch_size", 16)
+    config.lr                = cfg.get("lr", 1e-4)
+    config.graph_topology    = cfg.get("graph_topology", None)
+    config.loss_init_weight  = cfg.get("loss_init_weight", 0.5)
+    config.loss_final_weight = cfg.get("loss_final_weight", 1.0)
+
     setup_logging()
 
     split_path = Path(args.split)

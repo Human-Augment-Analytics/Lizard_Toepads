@@ -36,13 +36,11 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from config import HRNetGCNTrainingConfig
 from hrnet_gcn import HRNetGNN
 from lizard_dataset import LizardDataset
 from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
 
-# Import get_edge_index directly by absolute path to avoid shadowing
-# by the existing alternative-models/common/ package
+# Import directly by absolute path to avoid shadowing by alternative-models/common/
 import importlib.util as _ilu
 _gt_spec = _ilu.spec_from_file_location(
     "alt_datasets_graph_topologies",
@@ -87,7 +85,31 @@ def main():
     )
     args = parser.parse_args()
 
-    config = HRNetGCNTrainingConfig(args.config)
+    config_path = Path(args.config)
+    if not config_path.exists():
+        logging.error(f"Config file not found: {config_path}")
+        sys.exit(1)
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    # Wrap raw dict in a simple namespace for attribute-style access
+    class _Cfg:
+        pass
+    config = _Cfg()
+    config.num_landmarks    = cfg.get("num_landmarks", 98)
+    config.feat_dim         = cfg.get("feat_dim", 64)
+    config.gnn_hidden       = cfg.get("gnn_hidden", 128)
+    config.num_layers       = cfg.get("num_layers", 2)
+    config.num_iters        = cfg.get("num_iters", 4)
+    config.input_size       = cfg.get("input_size", 512)
+    config.epochs           = cfg.get("epochs", 150)
+    config.batch_size       = cfg.get("batch_size", 16)
+    config.lr               = cfg.get("lr", 1e-4)
+    config.graph_topology   = cfg.get("graph_topology", "wflw")
+    config.mean_shape_path  = cfg.get("mean_shape_path", None)
+    config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
+
     setup_logging()
 
     split_path = Path(args.split)

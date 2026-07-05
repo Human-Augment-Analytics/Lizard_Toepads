@@ -37,6 +37,7 @@ MODELS = [
     {"name": "vit",               "dir": ALT_MODELS_DIR / "vit"},
     {"name": "hrnet",             "dir": ALT_MODELS_DIR / "hrnet"},
     {"name": "hrnet_gcn",         "dir": ALT_MODELS_DIR / "hrnet-gcn"},
+    {"name": "hrnet_gcn_hinit",   "dir": ALT_MODELS_DIR / "hrnet-gcn"},
     {"name": "ml_morph",          "dir": ALT_MODELS_DIR / "ml-morph"},
 ]
 
@@ -244,6 +245,51 @@ def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     return predictions
 
 
+def run_hrnet_gcn_hinit(model_dir, ckpt_path, test_files):
+    sys.path.insert(0, str(model_dir))
+    try:
+        from hrnet_gcn_hinit import HRNetGNNWithInit
+        from utils import make_chain_edge_index
+        from config import HRNetGCNTrainingConfig
+    finally:
+        sys.path.pop(0)
+
+    config = HRNetGCNTrainingConfig(str(model_dir / "default-config.json"))
+
+    model = HRNetGNNWithInit(
+        hrnet_backbone="hrnet_w18",
+        feat_dim=config.feat_dim,
+        gnn_hidden=config.gnn_hidden,
+        num_layers=config.num_layers,
+        num_landmarks=config.num_landmarks,
+        num_iters=config.num_iters,
+    )
+    model.load_state_dict(torch.load(str(ckpt_path), map_location=DEVICE))
+    model.to(DEVICE)
+    model.eval()
+
+    edge_index = make_chain_edge_index(num_landmarks=config.num_landmarks).to(DEVICE)
+
+    predictions = []
+    for f in test_files:
+        try:
+            data = torch.load(f, map_location="cpu")
+            img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
+            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
+            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(DEVICE)
+
+            with torch.no_grad():
+                out = model(img_tensor, edge_index)
+
+            # out is (initial_coords, final_coords) — use final_coords
+            coords_512 = out[1][0].cpu().numpy() * 512
+            predictions.append(coords_512.astype(np.float64))
+        except Exception as e:
+            logging.error(f"[hrnet_gcn_hinit] Error on {f.name}: {e}")
+            predictions.append(None)
+    return predictions
+
+
 def run_ml_morph(model_dir, ckpt_path, test_files):
     if not _DLIB_AVAILABLE:
         logging.warning("[ml_morph] dlib not installed, skipping")
@@ -280,6 +326,7 @@ RUNNERS = {
     "vit": run_vit,
     "hrnet": run_hrnet,
     "hrnet_gcn": run_hrnet_gcn,
+    "hrnet_gcn_hinit": run_hrnet_gcn_hinit,
     "ml_morph": run_ml_morph,
 }
 
