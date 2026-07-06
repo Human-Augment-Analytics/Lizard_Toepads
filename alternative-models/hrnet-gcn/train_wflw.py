@@ -57,7 +57,8 @@ _ds_spec = _ilu2.spec_from_file_location("wflw_dataset", str(_wflw_dataset_path)
 _ds_mod = _ilu2.module_from_spec(_ds_spec)
 _ds_spec.loader.exec_module(_ds_mod)
 WFLWDataset = _ds_mod.WFLWDataset
-from utils import landmark_loss, compute_rescaled_pixel_error, visualize_landmarks
+_FLIP_PERM_98 = _ds_mod._FLIP_PERM_98
+from utils import landmark_loss, compute_rescaled_pixel_error
 
 # Import directly by absolute path to avoid shadowing by alternative-models/common/
 import importlib.util as _ilu
@@ -186,6 +187,15 @@ def main():
     mean_shape = torch.load(config.mean_shape_path, map_location=device)
     logging.info(f"Loaded mean shape: {mean_shape.shape} from {config.mean_shape_path}")
 
+    # Pre-compute flipped mean shape for use with horizontally-flipped training samples.
+    # Since we can't track per-sample flip state through the DataLoader, we randomly
+    # use the canonical or flipped mean shape per-batch during training. This ensures
+    # the GCN sees both initializations and learns to refine from either orientation.
+    _flip_perm = torch.tensor(_FLIP_PERM_98, dtype=torch.long, device=device)
+    mean_shape_flipped = mean_shape.clone()
+    mean_shape_flipped[:, 0] = 1.0 - mean_shape_flipped[:, 0]
+    mean_shape_flipped = mean_shape_flipped[_flip_perm]
+
     # Build edge index from topology registry
     edge_index = get_edge_index(config.graph_topology, config.num_landmarks).to(device)
     logging.info(
@@ -194,8 +204,18 @@ def main():
     )
 
     # Datasets — use WFLWDataset which supports any num_landmarks (not hardcoded to 9)
-    train_dataset = WFLWDataset(split_data["train"], input_size=config.input_size, num_landmarks=config.num_landmarks)
-    val_dataset = WFLWDataset(split_data["val"], input_size=config.input_size, num_landmarks=config.num_landmarks)
+    train_dataset = WFLWDataset(
+        split_data["train"],
+        input_size=config.input_size,
+        num_landmarks=config.num_landmarks,
+        augment=True,
+    )
+    val_dataset = WFLWDataset(
+        split_data["val"],
+        input_size=config.input_size,
+        num_landmarks=config.num_landmarks,
+        augment=False,
+    )
     logging.info(
         f"Train: {len(train_dataset)} samples, Val: {len(val_dataset)} samples"
     )
@@ -244,9 +264,12 @@ def main():
             coords = coords.to(device)
             B = imgs.shape[0]
 
-            # Noise-augmented mean shape initialization (train only)
+            # Noise-augmented mean shape initialization (train only).
+            # Randomly use canonical or flipped mean shape to match the
+            # horizontal flip augmentation applied in WFLWDataset.
+            ms = mean_shape_flipped if torch.rand(1).item() < 0.5 else mean_shape
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
-            initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1) + noise
+            initial_coords = ms.unsqueeze(0).repeat(B, 1, 1) + noise
 
             pred_coords = model(imgs, initial_coords, edge_index)
             loss = landmark_loss(pred_coords, coords)
@@ -303,16 +326,9 @@ def main():
                 str(ckpt_dir / f"{MODEL_NAME}_best.pth"),
             )
 
-        if epoch % 10 == 0:
-            visualize_landmarks(
-                imgs[0],
-                pred_coords[0],
-                coords[0],
-                save_path=str(vis_dir / f"epoch{epoch}.jpg"),
-            )
-
-        # Save image overlays: every epoch for first 20, then every 10
-        # Shows predicted (red dots) vs GT (green dots) on actual face crop
+        # Save overlays: every epoch for first 20 to watch early convergence,
+        # then every 10 epochs. Uses save_overlay which correctly denormalizes
+        # the ImageNet-normalized image before drawing landmarks.
         if epoch <= 20 or epoch % 10 == 0:
             n_samples = min(3, imgs.shape[0])
             for i in range(n_samples):
