@@ -3,8 +3,11 @@ WFLW dataset class — compatible with the existing LizardDataset .pt format
 but supports any number of landmarks (not hardcoded to 9).
 
 Drop-in replacement for LizardDataset when training on WFLW.
+
+Coordinate convention:
+  preprocess.py saves "tps" as (N, 2) float32 in [0, 1], normalized to the
+  512x512 letterboxed image. This class reads them directly — no re-scaling.
 """
-import cv2
 import torch
 from torch.utils.data import Dataset
 import albumentations as A
@@ -17,45 +20,24 @@ class WFLWDataset(Dataset):
         self.input_size = input_size
         self.num_landmarks = num_landmarks
 
-        # Minimal augmentation — geometry-only ops that can misalign landmarks
-        # (HorizontalFlip, Affine/rotate) are disabled until flip-pair reordering
-        # is implemented. This lets the model converge cleanly first.
-        self.transform = A.Compose([
-            A.LongestMaxSize(max_size=input_size),
-            A.PadIfNeeded(input_size, input_size, border_mode=cv2.BORDER_CONSTANT),
-            A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.5),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-        ], keypoint_params=A.KeypointParams(format="xy", remove_invisible=False, label_fields=[]))
-
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, idx):
         data = torch.load(self.paths[idx])
-        img = data["image"].permute(1, 2, 0).numpy()   # HWC uint8
-        coords = data["tps"].numpy()                    # (N, 2) float32
+        img = data["image"].permute(1, 2, 0).numpy()   # HWC uint8, already 512x512
+        coords_norm = data["tps"].numpy()               # (N, 2) float32, already [0,1]
 
-        H, W = img.shape[:2]
-        coords[:, 0] = np.clip(coords[:, 0], 0, W - 1)
-        coords[:, 1] = np.clip(coords[:, 1], 0, H - 1)
-        keypoints = [(float(pt[0]), float(pt[1])) for pt in coords]
+        orig_size = data.get("orig_size", torch.tensor([img.shape[0], img.shape[1]]))
 
-        orig_size = data.get("orig_size", torch.tensor([H, W]))
-
-        for _ in range(10):
-            augmented = self.transform(image=img, keypoints=keypoints)
-            img_aug = augmented["image"]
-            kp_aug = np.array(augmented["keypoints"], dtype=np.float32)
-            if kp_aug.shape[0] == self.num_landmarks:
-                break
-        else:
-            # Fallback: use original keypoints without augmentation
-            img_aug = augmented["image"]
-            kp_aug = np.array(keypoints, dtype=np.float32)
-
-        kp_aug[:, 0] = np.clip(kp_aug[:, 0], 0, self.input_size - 1)
-        kp_aug[:, 1] = np.clip(kp_aug[:, 1], 0, self.input_size - 1)
-        coords_norm = kp_aug / self.input_size
+        # Image-only augmentation — no geometry transforms, so coords are unaffected.
+        # The .pt files are already letterbox-cropped to input_size x input_size by
+        # preprocess.py, so no resize/pad is needed here either.
+        img_only_transform = A.Compose([
+            A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.5),
+            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+        ])
+        img_aug = img_only_transform(image=img)["image"]
 
         img_tensor = torch.from_numpy(img_aug).permute(2, 0, 1).float()
         coords_tensor = torch.from_numpy(coords_norm).float()
