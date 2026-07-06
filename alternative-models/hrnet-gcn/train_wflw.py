@@ -23,8 +23,11 @@ _SCRIPT_DIR = _Path(__file__).resolve().parent
 # Insert alternative-datasets/ onto sys.path so 'common' package is importable
 # Works regardless of cwd since __file__ is always absolute after resolve()
 _ALT_DATASETS = _SCRIPT_DIR.parent.parent / "alternative-datasets"
+_ALT_MODELS = _SCRIPT_DIR.parent  # alternative-models/
 if str(_ALT_DATASETS) not in sys.path:
     sys.path.insert(0, str(_ALT_DATASETS))
+if str(_ALT_MODELS) not in sys.path:
+    sys.path.insert(0, str(_ALT_MODELS))
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
