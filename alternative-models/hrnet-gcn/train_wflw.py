@@ -282,17 +282,21 @@ def main():
         model.train()
         epoch_loss = 0.0
 
-        for imgs, coords, _ in train_loader:
+        for imgs, coords, _, flipped in train_loader:
             imgs = imgs.to(device)
             coords = coords.to(device)
             B = imgs.shape[0]
 
-            # Noise-augmented mean shape initialization (train only).
-            # Randomly use canonical or flipped mean shape to match the
-            # horizontal flip augmentation applied in WFLWDataset.
-            ms = mean_shape_flipped if torch.rand(1).item() < 0.5 else mean_shape
+            # Per-sample mean shape: use flipped mean shape for flipped samples.
+            # This ensures the GCN initialization matches each sample's orientation,
+            # which is critical for tightly-clustered landmarks like eye contours.
+            ms_base = mean_shape.unsqueeze(0).expand(B, -1, -1)        # (B, N, 2)
+            ms_flip = mean_shape_flipped.unsqueeze(0).expand(B, -1, -1)
+            flip_mask = flipped.to(device).view(B, 1, 1).float()        # (B, 1, 1)
+            ms = ms_flip * flip_mask + ms_base * (1.0 - flip_mask)
+
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
-            initial_coords = ms.unsqueeze(0).repeat(B, 1, 1) + noise
+            initial_coords = ms + noise
 
             pred_coords = model(imgs, initial_coords, edge_index)
             loss = landmark_loss(pred_coords, coords)
@@ -312,7 +316,7 @@ def main():
         pxerr_total = 0.0
 
         with torch.no_grad():
-            for imgs, coords, orig_size in val_loader:
+            for imgs, coords, orig_size, _ in val_loader:
                 imgs = imgs.to(device)
                 coords = coords.to(device)
                 B = imgs.shape[0]

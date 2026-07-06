@@ -72,20 +72,6 @@ class WFLWDataset(Dataset):
             # Fallback: no flip reordering for non-98-point schemes
             self.flip_perm = np.arange(num_landmarks, dtype=np.int64)
 
-        # Affine augmentation: scale + translate only (no rotation).
-        # albumentations handles keypoint remapping for these ops automatically
-        # since they don't change the semantic identity of landmarks.
-        self.affine_transform = A.Compose([
-            A.Affine(
-                scale=(0.90, 1.10),
-                translate_percent={"x": (-0.05, 0.05), "y": (-0.05, 0.05)},
-                rotate=0,
-                p=0.7,
-            ),
-        ], keypoint_params=A.KeypointParams(
-            format="xy", remove_invisible=False, label_fields=[]
-        ))
-
         # Image-only augmentation (no landmark impact)
         self.color_transform = A.Compose([
             A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
@@ -106,45 +92,62 @@ class WFLWDataset(Dataset):
         coords = data["tps"].numpy().copy()              # (N, 2) float32, already [0,1]
         orig_size = data.get("orig_size", torch.tensor([img.shape[0], img.shape[1]]))
 
+        was_flipped = False
         if self.augment:
-            img, coords = self._augment(img, coords)
+            img, coords, was_flipped = self._augment(img, coords)
 
         img_norm = self.normalize(image=img)["image"]
         img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
         coords_tensor = torch.from_numpy(coords).float()
+        flipped_tensor = torch.tensor(was_flipped, dtype=torch.bool)
 
-        return img_tensor, coords_tensor, orig_size
+        return img_tensor, coords_tensor, orig_size, flipped_tensor
 
     def _augment(self, img: np.ndarray, coords: np.ndarray):
-        """Apply augmentation to image and landmarks.
+        """Apply augmentation. Returns (img, coords, was_flipped)."""
+        was_flipped = False
 
-        Handles flip separately from affine because flip requires landmark
-        reordering that albumentations cannot do automatically.
-        """
         # ── Horizontal flip ───────────────────────────────────────────────
         if random.random() < self.flip_prob:
-            img = img[:, ::-1, :].copy()          # mirror image horizontally
-            coords[:, 0] = 1.0 - coords[:, 0]    # mirror x coordinates
-            coords = coords[self.flip_perm]        # reorder landmarks
+            img = img[:, ::-1, :].copy()
+            coords[:, 0] = 1.0 - coords[:, 0]
+            coords = coords[self.flip_perm]
+            was_flipped = True
 
-        # ── Affine (scale + translate) ────────────────────────────────────
-        # Convert [0,1] coords to pixel space for albumentations
-        kps_px = [(float(x * self.input_size), float(y * self.input_size))
-                  for x, y in coords]
+        # ── Affine (scale + translate, no rotation) ───────────────────────
+        # Implemented manually so we can reject transforms that push any
+        # landmark out of [0,1] bounds rather than clipping — clipping
+        # multiple landmarks to the same border coordinate causes centroid
+        # collapse during training.
+        if random.random() < 0.7:
+            for _ in range(10):
+                scale = random.uniform(0.90, 1.10)
+                tx = random.uniform(-0.05, 0.05)  # fraction of image width
+                ty = random.uniform(-0.05, 0.05)
 
-        for _ in range(5):  # retry if any keypoints go out of bounds
-            result = self.affine_transform(image=img, keypoints=kps_px)
-            kps_out = np.array(result["keypoints"], dtype=np.float32)
-            if kps_out.shape[0] == self.num_landmarks:
-                img = result["image"]
-                # Clip and renormalise back to [0,1]
-                kps_out[:, 0] = np.clip(kps_out[:, 0], 0, self.input_size - 1)
-                kps_out[:, 1] = np.clip(kps_out[:, 1], 0, self.input_size - 1)
-                coords = kps_out / self.input_size
-                break
-        # If all retries lost keypoints, coords stays as-is (pre-affine)
+                # Transform coords: scale around centre, then translate
+                new_coords = (coords - 0.5) * scale + 0.5
+                new_coords[:, 0] += tx
+                new_coords[:, 1] += ty
+
+                # Only accept if all landmarks stay within bounds
+                if new_coords.min() >= 0.0 and new_coords.max() <= 1.0:
+                    # Apply same transform to image via OpenCV
+                    cx, cy = self.input_size / 2, self.input_size / 2
+                    M = cv2.getRotationMatrix2D((cx, cy), 0, scale)
+                    M[0, 2] += tx * self.input_size
+                    M[1, 2] += ty * self.input_size
+                    img = cv2.warpAffine(
+                        img, M, (self.input_size, self.input_size),
+                        flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=0,
+                    )
+                    coords = new_coords
+                    break
+            # If no valid transform found after 10 tries, skip affine
 
         # ── Color jitter ──────────────────────────────────────────────────
         img = self.color_transform(image=img)["image"]
 
-        return img, coords
+        return img, coords, was_flipped
