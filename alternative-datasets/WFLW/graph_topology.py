@@ -39,8 +39,11 @@ WFLW_FLIP_PAIRS = [
     (14, 18), (15, 17), (16, 16),
 
     # Eyebrows: right (33-41) ↔ left (42-50)
-    (33, 42), (34, 43), (35, 44), (36, 45), (37, 46),
-    (38, 47), (39, 48), (40, 49), (41, 50),
+    # Right brow: 33=outer_r, 34,35,36,37=arch upper, 38,39,40,41=arch lower
+    # Left brow:  42=inner_l, 43,44,45,46=arch upper, 47,48,49,50=arch lower
+    # After flip, outer_r (33) maps to outer_l (46), inner_r (37) maps to inner_l (42)
+    (33, 46), (34, 45), (35, 44), (36, 43), (37, 42),
+    (38, 50), (39, 49), (40, 48), (41, 47),
 
     # Nose bridge: all midline
     (51, 51), (52, 52), (53, 53), (54, 54),
@@ -49,10 +52,12 @@ WFLW_FLIP_PAIRS = [
     (55, 59), (56, 58), (57, 57),
 
     # Eyes: right (60-67) ↔ left (68-75)
-    # Right eye order: 60=outer_r, 61, 62, 63, 64=center_r, 65, 66, 67=inner_r
-    # Left eye order:  68=inner_l, 69, 70, 71, 72=center_l, 73, 74, 75=outer_l
-    (60, 68), (61, 75), (62, 74), (63, 73),
-    (64, 72), (65, 71), (66, 70), (67, 69),
+    # Both eyes traverse counter-clockwise from the inner corner:
+    # Right eye: 60=inner_corner_left, 61,62,63=upper, 64=outer_corner_right, 65,66,67=lower
+    # Left eye:  68=inner_corner_right, 69,70,71=upper, 72=outer_corner_left, 73,74,75=lower
+    # After horizontal flip, right-eye inner (60) maps to left-eye inner (68), etc.
+    (60, 68), (61, 69), (62, 70), (63, 71),
+    (64, 72), (65, 73), (66, 74), (67, 75),
 
     # Outer mouth: (76,82), (77,81), (78,80); 79 is midline top
     #              (83,87), (84,86); 85 is midline bottom
