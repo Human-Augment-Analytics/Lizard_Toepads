@@ -6,8 +6,11 @@ import json
 import argparse
 import logging
 import base64
+import time
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import cv2
@@ -47,6 +50,22 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
+@dataclass
+class PerfStats:
+    """Wall-clock time and peak VRAM for a model's inference run."""
+    wall_clock_s: Optional[float] = None   # total seconds for all test crops
+    peak_vram_mb: Optional[float] = None   # peak VRAM allocated during inference (MB)
+
+    @property
+    def ms_per_sample(self) -> Optional[float]:
+        return None  # filled in after we know sample count
+
+    def ms_per_sample_for(self, n_samples: int) -> Optional[float]:
+        if self.wall_clock_s is None or n_samples == 0:
+            return None
+        return (self.wall_clock_s / n_samples) * 1000.0
+
+
 def load_test_files(data_dir):
     test_dir = Path(data_dir) / "test"
     if not test_dir.exists():
@@ -74,19 +93,19 @@ def discover_checkpoint(model_info):
 
 
 def back_project(coords_512, M, scale, pad_x, pad_y):
-    # Undo letterbox: (coord - pad) / scale → raw crop space
-    coords_raw = coords_512.copy()
+    # Undo letterbox: (coord - pad) / scale → OBB crop space
+    coords_raw = coords_512.copy().astype(np.float64)
     coords_raw[:, 0] = (coords_512[:, 0] - pad_x) / scale
     coords_raw[:, 1] = (coords_512[:, 1] - pad_y) / scale
 
-    # Invert homography using affine approximation (matching notebook)
-    M_np = M.astype(np.float64)
-    A_mat = M_np[:2, :]  # (2x3) affine part
-    A_inv = cv2.invertAffineTransform(A_mat)
+    # Invert the full 3x3 perspective transform (M is from getPerspectiveTransform)
+    M_inv = np.linalg.inv(M.astype(np.float64))
 
+    # Homogeneous multiply + perspective divide → original image space
     ones = np.ones((coords_raw.shape[0], 1), dtype=np.float64)
-    coords_h = np.hstack([coords_raw, ones])
-    global_pts = coords_h @ A_inv.T
+    coords_h = np.hstack([coords_raw, ones])   # (N, 3)
+    proj = coords_h @ M_inv.T                  # (N, 3)
+    global_pts = proj[:, :2] / proj[:, 2:3]   # perspective divide
 
     return global_pts
 
@@ -464,10 +483,11 @@ def _img_to_base64(path):
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir):
+def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir,
+                      all_perf=None, n_test=0):
     sections = []
 
-    sections.append("<h2>Per-Model Pixel Error (Global Image Space)</h2>")
+    sections.append("<h2>Per-Model Pixel Error (Original Image Space)</h2>")
     sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
     sections.append("<tr><th>Model</th><th>Mean Pixel Error</th><th>Median Pixel Error</th></tr>")
     for name, metrics in all_metrics.items():
@@ -475,6 +495,31 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
         median_str = f"{metrics['median']:.2f}" if metrics["median"] is not None else "N/A"
         sections.append(f"<tr><td>{name}</td><td>{mean_str}</td><td>{median_str}</td></tr>")
     sections.append("</table>")
+
+    # --- Wall-clock timing table ---
+    if all_perf:
+        sections.append("<h2>Inference Wall-Clock Time</h2>")
+        sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
+        sections.append(
+            "<tr><th>Model</th><th>Total (s)</th>"
+            f"<th>ms / sample (n={n_test})</th></tr>"
+        )
+        for name, perf in all_perf.items():
+            total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
+            per_s = perf.ms_per_sample_for(n_test)
+            per_s_str = f"{per_s:.1f}" if per_s is not None else "N/A"
+            sections.append(f"<tr><td>{name}</td><td>{total}</td><td>{per_s_str}</td></tr>")
+        sections.append("</table>")
+
+    # --- Peak VRAM table ---
+    if all_perf:
+        sections.append("<h2>Peak VRAM Usage</h2>")
+        sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
+        sections.append("<tr><th>Model</th><th>Peak VRAM (MB)</th></tr>")
+        for name, perf in all_perf.items():
+            vram = f"{perf.peak_vram_mb:.1f}" if perf.peak_vram_mb is not None else "N/A (CPU)"
+            sections.append(f"<tr><td>{name}</td><td>{vram}</td></tr>")
+        sections.append("</table>")
 
     sections.append("<h2>Per-Landmark Mean Pixel Error</h2>")
     sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
@@ -529,9 +574,10 @@ table {{ border-collapse: collapse; }}
     return html
 
 
-def build_markdown_summary(all_metrics):
+def build_markdown_summary(all_metrics, all_perf=None, n_test=0):
     lines = [
         "# Evaluation Summary\n",
+        "## Pixel Error (Original Image Space)\n",
         "| Model | Mean Pixel Error | Median Pixel Error |",
         "|---|---|---|",
     ]
@@ -539,6 +585,30 @@ def build_markdown_summary(all_metrics):
         mean_str = f"{metrics['mean']:.2f}" if metrics["mean"] is not None else "N/A"
         median_str = f"{metrics['median']:.2f}" if metrics["median"] is not None else "N/A"
         lines.append(f"| {name} | {mean_str} | {median_str} |")
+
+    if all_perf:
+        lines += [
+            "",
+            f"## Inference Wall-Clock Time (n={n_test} test crops)\n",
+            "| Model | Total (s) | ms / sample |",
+            "|---|---|---|",
+        ]
+        for name, perf in all_perf.items():
+            total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
+            per_s = perf.ms_per_sample_for(n_test)
+            per_s_str = f"{per_s:.1f}" if per_s is not None else "N/A"
+            lines.append(f"| {name} | {total} | {per_s_str} |")
+
+        lines += [
+            "",
+            "## Peak VRAM Usage\n",
+            "| Model | Peak VRAM (MB) |",
+            "|---|---|",
+        ]
+        for name, perf in all_perf.items():
+            vram = f"{perf.peak_vram_mb:.1f}" if perf.peak_vram_mb is not None else "N/A (CPU)"
+            lines.append(f"| {name} | {vram} |")
+
     return "\n".join(lines) + "\n"
 
 
@@ -573,6 +643,7 @@ def main():
     all_metrics = {}
     all_overlays = {}
     all_unannotated_overlays = {}
+    all_perf = {}
 
     for model_info in MODELS:
         name = model_info["name"]
@@ -582,11 +653,25 @@ def main():
             all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9}
             all_overlays[name] = []
             all_unannotated_overlays[name] = []
+            all_perf[name] = PerfStats()
             continue
 
         logging.info(f"[{name}] Running inference on {len(test_files)} test crops...")
         runner = RUNNERS[name]
+
+        # --- timed + VRAM-tracked inference ---
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        t0 = time.perf_counter()
         predictions = runner(model_info["dir"], ckpt, test_files)
+        wall_s = time.perf_counter() - t0
+        peak_vram_mb = (
+            torch.cuda.max_memory_allocated() / 1024 ** 2
+            if torch.cuda.is_available()
+            else None
+        )
+        all_perf[name] = PerfStats(wall_clock_s=wall_s, peak_vram_mb=peak_vram_mb)
+        # ----------------------------------------
 
         logging.info(f"[{name}] Computing metrics...")
         metrics = compute_metrics(predictions, test_files, args.tps_data_dir, args.raw_images_dir)
@@ -609,8 +694,9 @@ def main():
             all_unannotated_overlays[name] = []
 
     logging.info("Writing report...")
-    html = build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir)
-    md = build_markdown_summary(all_metrics)
+    html = build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir,
+                             all_perf=all_perf, n_test=len(test_files))
+    md = build_markdown_summary(all_metrics, all_perf=all_perf, n_test=len(test_files))
 
     html_path = output_dir / "benchmark_report.html"
     md_path = output_dir / "benchmark_summary.md"
