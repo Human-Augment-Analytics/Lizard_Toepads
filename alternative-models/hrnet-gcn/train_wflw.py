@@ -283,7 +283,7 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=15, min_lr=1e-6
+        optimizer, mode="min", factor=0.5, patience=20, min_lr=1e-6
     )
 
     ckpt_dir = SCRIPT_DIR / "checkpoints"
