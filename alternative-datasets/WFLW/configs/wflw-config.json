@@ -3,7 +3,7 @@
     "num_landmarks": 98,
     "gnn_hidden": 256,
     "num_layers": 3,
-    "num_iters": 6,
+    "num_iters": 4,
     "input_size": 512,
     "epochs": 150,
     "batch_size": 32,
