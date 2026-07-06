@@ -12,5 +12,7 @@
     "train_val_split": 0.9,
     "graph_topology": "wflw",
     "mean_shape_path": "alternative-datasets/wflw/mean_shapes/mean_shape_wflw.pt",
-    "init_noise_sigma": 0.02
+    "init_noise_sigma": 0.02,
+    "model_variant": "multiscale",
+    "scale_indices": [0, 1, 2, 3]
 }

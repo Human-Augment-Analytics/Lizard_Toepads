@@ -39,6 +39,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from hrnet_gcn import HRNetGNN
+from hrnet_gcn_ms import HRNetGNN_MS
 
 # Locate wflw_dataset.py — handle case differences between systems
 # (repo uses lowercase 'wflw', cluster may have uppercase 'WFLW')
@@ -181,6 +182,8 @@ def main():
     config.graph_topology   = cfg.get("graph_topology", "wflw")
     config.mean_shape_path  = cfg.get("mean_shape_path", None)
     config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
+    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale"
+    config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
 
     setup_logging()
 
@@ -255,15 +258,28 @@ def main():
         val_dataset, batch_size=config.val_batch_size, shuffle=False
     )
 
-    # Model
-    model = HRNetGNN(
-        hrnet_backbone="hrnet_w18",
-        feat_dim=config.feat_dim,
-        gnn_hidden=config.gnn_hidden,
-        num_layers=config.num_layers,
-        num_landmarks=config.num_landmarks,
-        num_iters=config.num_iters,
-    ).to(device)
+    # Model — select variant based on config
+    if config.model_variant == "multiscale":
+        model = HRNetGNN_MS(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+            scale_indices=config.scale_indices,
+        ).to(device)
+        logging.info(f"Model: HRNetGNN_MS (multi-scale), scale_indices={config.scale_indices}")
+    else:
+        model = HRNetGNN(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        ).to(device)
+        logging.info("Model: HRNetGNN (standard, single scale)")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
