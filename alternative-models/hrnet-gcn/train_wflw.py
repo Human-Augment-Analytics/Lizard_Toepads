@@ -23,11 +23,8 @@ _SCRIPT_DIR = _Path(__file__).resolve().parent
 # Insert alternative-datasets/ onto sys.path so 'common' package is importable
 # Works regardless of cwd since __file__ is always absolute after resolve()
 _ALT_DATASETS = _SCRIPT_DIR.parent.parent / "alternative-datasets"
-_ALT_MODELS = _SCRIPT_DIR.parent  # alternative-models/
 if str(_ALT_DATASETS) not in sys.path:
     sys.path.insert(0, str(_ALT_DATASETS))
-if str(_ALT_MODELS) not in sys.path:
-    sys.path.insert(0, str(_ALT_MODELS))
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
@@ -61,7 +58,30 @@ _ds_mod = _ilu2.module_from_spec(_ds_spec)
 _ds_spec.loader.exec_module(_ds_mod)
 WFLWDataset = _ds_mod.WFLWDataset
 _FLIP_PERM_98 = _ds_mod._FLIP_PERM_98
-from utils import landmark_loss, compute_rescaled_pixel_error
+
+# Define landmark_loss and compute_rescaled_pixel_error inline to avoid
+# importing utils.py, which has a module-level dependency on common.obb_utils
+# that is irrelevant to WFLW training and causes import failures.
+import torch.nn.functional as _F
+
+def landmark_loss(pred_coords, gt_coords):
+    coord_loss = _F.mse_loss(pred_coords, gt_coords)
+    pred_dists = (pred_coords[:, 1:] - pred_coords[:, :-1]).norm(dim=-1)
+    gt_dists   = (gt_coords[:, 1:]   - gt_coords[:, :-1]).norm(dim=-1)
+    dist_loss  = _F.mse_loss(pred_dists, gt_dists)
+    return coord_loss + 0.5 * dist_loss
+
+def compute_rescaled_pixel_error(pred_coords, coords, orig_size, device="cuda"):
+    pred_px = pred_coords * 512
+    gt_px   = coords * 512
+    orig_h  = orig_size[:, 0].to(device)
+    orig_w  = orig_size[:, 1].to(device)
+    scale_x = 512 / orig_w
+    scale_y = 512 / orig_h
+    dx = (pred_px[:, :, 0] - gt_px[:, :, 0]) / scale_x.unsqueeze(1)
+    dy = (pred_px[:, :, 1] - gt_px[:, :, 1]) / scale_y.unsqueeze(1)
+    error = torch.sqrt(dx**2 + dy**2)
+    return error.mean(dim=1).sum().item()
 
 # Import directly by absolute path to avoid shadowing by alternative-models/common/
 import importlib.util as _ilu
