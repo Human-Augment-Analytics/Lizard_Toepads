@@ -1,34 +1,27 @@
 """
 WFLW NME evaluator for Model A (HRNet-GCN with mean-shape initialization).
 
-Computes Normalized Mean Error (NME) on the full WFLW test set and each
-of the six attribute subsets (pose, expression, illumination, makeup,
-occlusion, blur).
+Computes Normalized Mean Error (NME), Failure Rate (FR@0.1), and AUC@0.1
+on the full WFLW test set and each of the six attribute subsets
+(pose, expression, illumination, makeup, occlusion, blur).
 
 NME = mean(||pred_i - gt_i||_2) / inter_ocular_distance   (per image)
 then averaged across all test images.
+
+FR  = fraction of test images where NME > FR_THRESHOLD (default 0.1)
+
+AUC = area under the Cumulative Error Distribution curve from 0 to
+      AUC_THRESHOLD (default 0.1), normalised to [0, 1].
 
 Inter-ocular distance = ||gt[60] - gt[72]|| in 512-pixel space
 (outer eye corners in WFLW's 98-point scheme).
 
 Output JSON format:
 {
-    "full":         float,
-    "pose":         float,
-    "expression":   float,
-    "illumination": float,
-    "makeup":       float,
-    "occlusion":    float,
-    "blur":         float,
-    "counts": {
-        "full":         int,
-        "pose":         int,
-        "expression":   int,
-        "illumination": int,
-        "makeup":       int,
-        "occlusion":    int,
-        "blur":         int
-    }
+    "nme":  {"full": float, "pose": float, ...},
+    "fr":   {"full": float, "pose": float, ...},
+    "auc":  {"full": float, "pose": float, ...},
+    "counts": {"full": int, "pose": int, ...}
 }
 
 Usage:
@@ -37,7 +30,7 @@ Usage:
         --split splits/wflw_1.0_seed42.json \\
         --mean-shape mean_shapes/mean_shape_wflw.pt \\
         --config ../../alternative-models/hrnet-gcn/wflw-config.json \\
-        --output results/wflw_eval.json
+        --output-json results/wflw_eval.json
 """
 import argparse
 import json
@@ -53,7 +46,6 @@ ALT_MODELS_DIR = SCRIPT_DIR.parent.parent / "alternative-models"
 sys.path.insert(0, str(ALT_MODELS_DIR / "hrnet-gcn"))
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
-from config import HRNetGCNTrainingConfig
 from hrnet_gcn import HRNetGNN
 from common.graph_topologies import get_edge_index
 
@@ -69,16 +61,15 @@ TARGET_SIZE = 512
 IOD_LM_LEFT = 60   # right outer eye corner (from viewer's left)
 IOD_LM_RIGHT = 72  # left outer eye corner (from viewer's right)
 
+FR_THRESHOLD  = 0.10   # NME > this → failure
+AUC_THRESHOLD = 0.10   # CED curve integrated up to this NME value
+AUC_STEPS     = 1000   # resolution of the AUC numerical integration
 
-def compute_nme(pred_px: np.ndarray, gt_px: np.ndarray) -> float:
-    """Compute per-image NME.
 
-    Args:
-        pred_px: (N, 2) predicted landmark coordinates in pixel space.
-        gt_px:   (N, 2) ground-truth landmark coordinates in pixel space.
+def compute_nme(pred_px: np.ndarray, gt_px: np.ndarray):
+    """Per-image NME normalised by inter-ocular distance.
 
-    Returns:
-        NME value, or None if inter-ocular distance is <= 0.
+    Returns None when IOD is zero (degenerate annotation).
     """
     iod = float(np.linalg.norm(gt_px[IOD_LM_LEFT] - gt_px[IOD_LM_RIGHT]))
     if iod <= 0:
@@ -87,9 +78,32 @@ def compute_nme(pred_px: np.ndarray, gt_px: np.ndarray) -> float:
     return float(dists.mean() / iod)
 
 
+def compute_auc(nme_list: list, threshold: float = AUC_THRESHOLD) -> float:
+    """Area under the CED curve, normalised to [0, 1].
+
+    CED(x) = fraction of samples with NME <= x.
+    AUC = integral from 0 to threshold of CED(x) dx, divided by threshold.
+    """
+    if not nme_list:
+        return 0.0
+    nme_arr = np.array(nme_list)
+    xs = np.linspace(0, threshold, AUC_STEPS + 1)
+    ced = np.array([(nme_arr <= x).mean() for x in xs])
+    # trapezoid rule, then normalise by threshold so result is in [0,1]
+    return float(np.trapz(ced, xs) / threshold)
+
+
+def compute_fr(nme_list: list, threshold: float = FR_THRESHOLD) -> float:
+    """Fraction of samples where NME > threshold."""
+    if not nme_list:
+        return 0.0
+    nme_arr = np.array(nme_list)
+    return float((nme_arr > threshold).mean())
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate HRNet-GCN (mean-init) on WFLW using NME"
+        description="Evaluate HRNet-GCN (mean-init) on WFLW — NME / FR / AUC"
     )
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--split", type=str, required=True,
@@ -99,7 +113,7 @@ def main():
     parser.add_argument("--config", type=str, required=True,
                         help="Path to wflw-config.json")
     parser.add_argument("--output-json", type=str, required=True,
-                        help="Output path for NME results JSON")
+                        help="Output path for results JSON")
     args = parser.parse_args()
 
     # Validate inputs
@@ -113,8 +127,22 @@ def main():
             logging.error(f"{label} not found: {path}")
             sys.exit(1)
 
-    config = HRNetGCNTrainingConfig(args.config)
+    # Load config — use raw JSON to avoid dependency on Lizard config class
+    with open(args.config) as f:
+        cfg = json.load(f)
+
+    class _Cfg:
+        pass
+    config = _Cfg()
+    config.num_landmarks  = cfg.get("num_landmarks", 98)
+    config.feat_dim       = cfg.get("feat_dim", 64)
+    config.gnn_hidden     = cfg.get("gnn_hidden", 128)
+    config.num_layers     = cfg.get("num_layers", 3)
+    config.num_iters      = cfg.get("num_iters", 4)
+    config.graph_topology = cfg.get("graph_topology", "wflw")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    logging.info(f"Using device: {device}")
 
     # Load split
     with open(args.split) as f:
@@ -142,9 +170,8 @@ def main():
     model.to(device)
     model.eval()
 
-    # Accumulate NME per subset
-    nme_buckets = {name: [] for name in ATTR_NAMES}
-    nme_full = []
+    # Accumulate per-sample NME values per subset
+    nme_buckets = {name: [] for name in ["full"] + ATTR_NAMES}
     skipped = 0
 
     with torch.no_grad():
@@ -152,24 +179,26 @@ def main():
             try:
                 data = torch.load(pt_path, map_location="cpu")
                 img_np = data["image"].permute(1, 2, 0).numpy()   # HWC uint8
-                gt_norm = data["tps"].numpy()                       # (N, 2) float32
+                gt_norm = data["tps"].numpy()                       # (N, 2) [0,1]
                 attrs = data["attrs"].numpy()                       # (6,) uint8
             except Exception as e:
                 logging.warning(f"Failed to load {pt_path}: {e}")
                 skipped += 1
                 continue
 
-            # Normalize image
+            # Normalise image
             img_f = img_np.astype(np.float32) / 255.0
             img_norm = (img_f - IMAGENET_MEAN) / IMAGENET_STD
-            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
+            img_tensor = (
+                torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
+            )
 
             # Inference — clean mean shape, no noise
             initial_coords = mean_shape.unsqueeze(0)
             pred_norm = model(img_tensor, initial_coords, edge_index)
 
             pred_px = pred_norm[0].cpu().numpy() * TARGET_SIZE   # (N, 2)
-            gt_px = gt_norm * TARGET_SIZE                         # (N, 2)
+            gt_px   = gt_norm * TARGET_SIZE                       # (N, 2)
 
             nme = compute_nme(pred_px, gt_px)
             if nme is None:
@@ -177,43 +206,44 @@ def main():
                 skipped += 1
                 continue
 
-            nme_full.append(nme)
-
+            nme_buckets["full"].append(nme)
             for i, attr_name in enumerate(ATTR_NAMES):
                 if attrs[i] == 1:
                     nme_buckets[attr_name].append(nme)
 
     logging.info(
-        f"Evaluation complete. Samples: {len(nme_full)}, Skipped: {skipped}"
+        f"Evaluation complete. Samples: {len(nme_buckets['full'])}, Skipped: {skipped}"
     )
+
+    subset_keys = ["full"] + ATTR_NAMES
 
     def mean_or_none(lst):
         return float(np.mean(lst)) if lst else None
 
     results = {
-        "full": mean_or_none(nme_full),
-        **{name: mean_or_none(nme_buckets[name]) for name in ATTR_NAMES},
-        "counts": {
-            "full": len(nme_full),
-            **{name: len(nme_buckets[name]) for name in ATTR_NAMES},
-        },
+        "nme":  {k: mean_or_none(nme_buckets[k]) for k in subset_keys},
+        "fr":   {k: compute_fr(nme_buckets[k])   for k in subset_keys},
+        "auc":  {k: compute_auc(nme_buckets[k])  for k in subset_keys},
+        "counts": {k: len(nme_buckets[k])         for k in subset_keys},
     }
 
-    # Log summary
-    logging.info(f"NME full test: {results['full']:.4f}" if results["full"] else "NME full: N/A")
-    for name in ATTR_NAMES:
-        v = results[name]
-        n = results["counts"][name]
-        logging.info(
-            f"  {name:<14}: {v:.4f} ({n} samples)" if v is not None else f"  {name:<14}: N/A"
-        )
+    # Log summary table
+    logging.info(f"\n{'Subset':<16} {'NME':>8} {'FR@0.1':>8} {'AUC@0.1':>9} {'N':>6}")
+    logging.info("-" * 52)
+    for k in subset_keys:
+        nme_v  = results["nme"][k]
+        fr_v   = results["fr"][k]
+        auc_v  = results["auc"][k]
+        n      = results["counts"][k]
+        nme_s  = f"{nme_v:.4f}" if nme_v is not None else "  N/A"
+        logging.info(f"{k:<16} {nme_s:>8} {fr_v:>8.4f} {auc_v:>9.4f} {n:>6}")
 
     # Save JSON
     out_path = Path(args.output_json)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
-    logging.info(f"Results saved to {out_path}")
+    logging.info(f"\nResults saved to {out_path}")
 
 
 if __name__ == "__main__":
