@@ -65,11 +65,11 @@ _FLIP_PERM_98 = _ds_mod._FLIP_PERM_98
 import torch.nn.functional as _F
 
 def landmark_loss(pred_coords, gt_coords):
-    coord_loss = _F.mse_loss(pred_coords, gt_coords)
-    pred_dists = (pred_coords[:, 1:] - pred_coords[:, :-1]).norm(dim=-1)
-    gt_dists   = (gt_coords[:, 1:]   - gt_coords[:, :-1]).norm(dim=-1)
-    dist_loss  = _F.mse_loss(pred_dists, gt_dists)
-    return coord_loss + 0.5 * dist_loss
+    # Pure coordinate MSE — the dist_loss term from the original 9-point Lizard
+    # chain loss is omitted here. It assumes consecutive landmark indices form a
+    # meaningful path, which is not true for the 98-point WFLW facial topology.
+    # The GCN graph structure already encodes spatial relationships.
+    return _F.mse_loss(pred_coords, gt_coords)
 
 def compute_rescaled_pixel_error(pred_coords, coords, orig_size, device="cuda"):
     pred_px = pred_coords * 512
