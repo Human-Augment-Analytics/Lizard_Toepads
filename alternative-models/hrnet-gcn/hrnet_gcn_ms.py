@@ -106,21 +106,27 @@ class HRNetGNN_MS(nn.Module):
         x: torch.Tensor,
         initial_coords: torch.Tensor,
         edge_index: torch.Tensor,
+        return_all_iters: bool = False,
     ) -> torch.Tensor:
         """
         Args:
             x:              (B, 3, H, W) input images
             initial_coords: (B, N, 2) initial landmark positions in [0, 1]
             edge_index:     (2, E) graph connectivity (single-graph, batched inside)
+            return_all_iters: if True, returns list of (B, N, 2) coords per iteration
+                              instead of just the final coords. Used for intermediate
+                              supervision during training.
 
         Returns:
-            (B, N, 2) refined landmark positions
+            If return_all_iters=False: (B, N, 2) final refined landmark positions
+            If return_all_iters=True:  list of (B, N, 2), one per iteration
         """
         coords = initial_coords.clone()
         feat_maps = self.backbone(x)  # list of feature maps at each scale
 
         B = x.shape[0]
         N = coords.shape[1]
+        all_coords = []
 
         for _ in range(self.num_iters):
             # Sample from each selected scale and concatenate along channel dim
@@ -150,4 +156,9 @@ class HRNetGNN_MS(nn.Module):
             delta = self.delta_head(h).view(B, N, 2)
             coords = torch.clamp(coords + delta, 0.0, 1.0)
 
+            if return_all_iters:
+                all_coords.append(coords)
+
+        if return_all_iters:
+            return all_coords
         return coords
