@@ -108,20 +108,27 @@ def main(args):
 
         shg.eval()
         val_loss = 0.0
+        stack_losses = [0.0] * shg.nstack
         with torch.no_grad():
             for imgs, gt_heatmaps in valid_dataloader:
                 imgs, gt_heatmaps = imgs.to(device), gt_heatmaps.to(device)
                 preds = shg(imgs)
                 pred_list = [preds[:, i, :, :, :] for i in range(preds.shape[1])]
-                loss = shg.calc_loss(pred_list, gt_heatmaps).mean()
-                val_loss += loss.item()
+                per_stack = shg.calc_loss(pred_list, gt_heatmaps)  # (B, nstack)
+                val_loss += per_stack.mean().item()
+                for s in range(shg.nstack):
+                    stack_losses[s] += per_stack[:, s].mean().item()
         avg_val_loss = val_loss / len(valid_dataloader)
+        stack_loss_str = " | ".join(
+            f"Stack{s+1}: {stack_losses[s]/len(valid_dataloader):.4f}"
+            for s in range(shg.nstack)
+        )
         scheduler.step(avg_val_loss)
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(shg.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
         print()
-        logging.info(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        logging.info(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | {stack_loss_str}")
 
 def initEnvironment():
     ckpt_dir = SCRIPT_DIR / "checkpoints"
