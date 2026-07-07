@@ -358,8 +358,18 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     _DIAG_MAX = 5
     diag_samples = []   # list of dicts, one per sampled crop
 
+    n_total = 0
+    n_skip_pred_none = 0
+    n_skip_backproject = 0
+    n_skip_img_missing = 0
+    n_skip_tps_missing = 0
+    n_skip_gt_count = 0
+    n_evaluated = 0
+
     for pred, f in zip(predictions, test_files):
+        n_total += 1
         if pred is None:
+            n_skip_pred_none += 1
             continue
 
         data = torch.load(f, map_location="cpu")
@@ -372,17 +382,26 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
             pred_global = back_project(pred, M, scale, pad_x, pad_y)
         except Exception as e:
             logging.warning(f"Back-projection failed for {f.name}: {e}, skipping")
+            n_skip_backproject += 1
             continue
 
         imgid = extract_imgid_from_filename(f.name)
         img_path = os.path.join(raw_images_dir, f"{imgid}.jpg")
         img = cv2.imread(img_path)
         if img is None:
+            logging.warning(f"Could not read raw image: {img_path}")
+            n_skip_img_missing += 1
             continue
 
         full_h, full_w = img.shape[:2]
 
-        gt_coords = get_tps_coords(imgid, img, tps_data_dir)
+        try:
+            gt_coords = get_tps_coords(imgid, img, tps_data_dir)
+        except Exception as e:
+            logging.warning(f"Could not load TPS for {imgid}: {e}")
+            n_skip_tps_missing += 1
+            continue
+
         class_name = data.get("class_name", None)
         if class_name is None:
             gt_finger = gt_coords.get("finger", [])
@@ -392,11 +411,14 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
             gt_all = gt_coords.get(class_name, [])
 
         if len(gt_all) != 9:
+            logging.warning(f"GT landmark count {len(gt_all)} != 9 for {f.name} (class={class_name})")
+            n_skip_gt_count += 1
             continue
 
         gt_arr = np.array(gt_all, dtype=np.float64)
         dists = np.linalg.norm(pred_global - gt_arr, axis=1)
         errors.append(np.mean(dists))
+        n_evaluated += 1
 
         for lm in range(9):
             per_landmark_errors[lm].append(dists[lm])
@@ -411,26 +433,35 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
                 "obb_crop_wh": (int(orig_w), int(orig_h)),
                 "resize_scale": round(float(scale), 4),
                 "pad_xy": (int(pad_x), int(pad_y)),
-                # 512-space prediction range
                 "pred_512_xrange": (round(float(pred[:, 0].min()), 1), round(float(pred[:, 0].max()), 1)),
                 "pred_512_yrange": (round(float(pred[:, 1].min()), 1), round(float(pred[:, 1].max()), 1)),
-                # back-projected prediction range (should be in original image coords)
                 "pred_global_xrange": (round(float(pred_global[:, 0].min()), 1), round(float(pred_global[:, 0].max()), 1)),
                 "pred_global_yrange": (round(float(pred_global[:, 1].min()), 1), round(float(pred_global[:, 1].max()), 1)),
-                # GT range (original image coords)
                 "gt_xrange": (round(float(gt_arr[:, 0].min()), 1), round(float(gt_arr[:, 0].max()), 1)),
                 "gt_yrange": (round(float(gt_arr[:, 1].min()), 1), round(float(gt_arr[:, 1].max()), 1)),
                 "mean_error_px": round(float(np.mean(dists)), 2),
             })
 
+    coverage = {
+        "n_total": n_total,
+        "n_evaluated": n_evaluated,
+        "n_skip_pred_none": n_skip_pred_none,
+        "n_skip_backproject": n_skip_backproject,
+        "n_skip_img_missing": n_skip_img_missing,
+        "n_skip_tps_missing": n_skip_tps_missing,
+        "n_skip_gt_count": n_skip_gt_count,
+    }
+
     if not errors:
-        return {"mean": None, "median": None, "per_landmark": [None] * 9, "diag_samples": diag_samples}
+        return {"mean": None, "median": None, "per_landmark": [None] * 9,
+                "diag_samples": diag_samples, "coverage": coverage}
 
     return {
         "mean": float(np.mean(errors)),
         "median": float(np.median(errors)),
         "per_landmark": [float(np.mean(e)) if e else None for e in per_landmark_errors],
         "diag_samples": diag_samples,
+        "coverage": coverage,
     }
 
 
@@ -550,6 +581,30 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
             vram = f"{perf.peak_vram_mb:.1f}" if perf.peak_vram_mb is not None else "N/A (CPU)"
             sections.append(f"<tr><td>{name}</td><td>{vram}</td></tr>")
         sections.append("</table>")
+
+    # --- Sample coverage table ---
+    sections.append("<h2>Evaluation Coverage (how many test crops were actually scored)</h2>")
+    sections.append("<p style='font-size:0.85em;color:#c00'><b>If n_evaluated is much less than n_total, the reported mean/median is unreliable.</b></p>")
+    sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
+    sections.append(
+        "<tr><th>Model</th><th>n_total</th><th>n_evaluated</th>"
+        "<th>skip: pred=None</th><th>skip: backproject</th>"
+        "<th>skip: img missing</th><th>skip: TPS missing</th><th>skip: GT count≠9</th></tr>"
+    )
+    for name, metrics in all_metrics.items():
+        cov = metrics.get("coverage", {})
+        def _c(k): return str(cov.get(k, "?"))
+        n_eval = cov.get("n_evaluated", 0)
+        n_tot = cov.get("n_total", 0)
+        # highlight row red if fewer than 50% evaluated
+        style = " style='background:#ffe0e0'" if n_tot > 0 and n_eval < n_tot * 0.5 else ""
+        sections.append(
+            f"<tr{style}><td>{name}</td><td>{_c('n_total')}</td><td><b>{_c('n_evaluated')}</b></td>"
+            f"<td>{_c('n_skip_pred_none')}</td><td>{_c('n_skip_backproject')}</td>"
+            f"<td>{_c('n_skip_img_missing')}</td><td>{_c('n_skip_tps_missing')}</td>"
+            f"<td>{_c('n_skip_gt_count')}</td></tr>"
+        )
+    sections.append("</table>")
 
     # --- Coordinate-space diagnostics ---
     sections.append("<h2>Coordinate-Space Diagnostics (first 5 valid samples per model)</h2>")
@@ -739,7 +794,11 @@ def main():
         ckpt = discover_checkpoint(model_info)
         if ckpt is None:
             logging.warning(f"[{name}] No checkpoint found, skipping")
-            all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9, "diag_samples": []}
+            all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9,
+                                 "diag_samples": [],
+                                 "coverage": {"n_total": 0, "n_evaluated": 0, "n_skip_pred_none": 0,
+                                              "n_skip_backproject": 0, "n_skip_img_missing": 0,
+                                              "n_skip_tps_missing": 0, "n_skip_gt_count": 0}}
             all_overlays[name] = []
             all_unannotated_overlays[name] = []
             all_perf[name] = PerfStats()
@@ -767,7 +826,14 @@ def main():
         all_metrics[name] = metrics
 
         if metrics["mean"] is not None:
-            logging.info(f"[{name}] Mean pixel error: {metrics['mean']:.2f}, Median: {metrics['median']:.2f}")
+            cov = metrics.get("coverage", {})
+            logging.info(
+                f"[{name}] Mean pixel error: {metrics['mean']:.2f}, Median: {metrics['median']:.2f} "
+                f"— evaluated {cov.get('n_evaluated','?')}/{cov.get('n_total','?')} crops "
+                f"(skip: img_missing={cov.get('n_skip_img_missing',0)}, "
+                f"tps_missing={cov.get('n_skip_tps_missing',0)}, "
+                f"gt_count={cov.get('n_skip_gt_count',0)})"
+            )
 
         logging.info(f"[{name}] Generating test overlays...")
         overlays = generate_overlays(predictions, test_files, overlay_dir, name)
