@@ -81,7 +81,6 @@ class HRNetGNN_MS(nn.Module):
         self.gnn_layers = nn.ModuleList(
             [GCNConv(gnn_hidden, gnn_hidden) for _ in range(num_layers)]
         )
-        self.dropout = nn.Dropout(p=0.1)
 
         self.delta_head = nn.Linear(gnn_hidden, 2)
 
@@ -151,7 +150,6 @@ class HRNetGNN_MS(nn.Module):
             for layer in self.gnn_layers:
                 h = layer(h, batch_edge_index)
                 h = F.relu(h)
-                h = self.dropout(h)
 
             delta = self.delta_head(h).view(B, N, 2)
             coords = torch.clamp(coords + delta, 0.0, 1.0)

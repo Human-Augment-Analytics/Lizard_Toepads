@@ -295,14 +295,13 @@ def main():
 
     optimizer = torch.optim.Adam([
         {"params": backbone_params, "lr": config.lr_backbone, "weight_decay": 0.0},
-        {"params": head_params,     "lr": config.lr,          "weight_decay": config.weight_decay},
+        {"params": head_params,     "lr": config.lr,          "weight_decay": 0.0},
     ])
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=config.lr_milestones, gamma=config.lr_gamma
     )
     logging.info(
         f"LR: backbone={config.lr_backbone}, head={config.lr} | "
-        f"weight_decay={config.weight_decay} (head only) | "
         f"step decay at epochs {config.lr_milestones}, gamma={config.lr_gamma}"
     )
     ckpt_dir = SCRIPT_DIR / "checkpoints"
@@ -333,18 +332,10 @@ def main():
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
             initial_coords = ms + noise
 
-            # Intermediate supervision with geometric weighting.
-            # Later iterations are weighted more heavily — earlier iterations
-            # contribute less gradient signal since their predictions are further
-            # from ground truth, reducing gradient interference in early epochs.
-            # Weights sum to 1.0 so total loss magnitude matches single-iter baseline.
+            # Intermediate supervision with equal weights, normalised by num_iters.
+            # Each iteration gets an equal direct gradient signal.
             all_preds = model(imgs, initial_coords, edge_index, return_all_iters=True)
-            n = len(all_preds)
-            # Geometric weights: w_k = 2^k / sum(2^k), so last iter gets ~half the weight
-            raw_w = [2 ** i for i in range(n)]
-            total_w = sum(raw_w)
-            loss = sum((raw_w[i] / total_w) * landmark_loss(p, coords)
-                       for i, p in enumerate(all_preds))
+            loss = sum(landmark_loss(p, coords) for p in all_preds) / len(all_preds)
             pred_coords = all_preds[-1]
 
             optimizer.zero_grad()
