@@ -187,6 +187,8 @@ def main():
     config.lr_milestones    = cfg.get("lr_milestones", [60, 90])     # epochs to drop LR
     config.lr_gamma         = cfg.get("lr_gamma", 0.1)               # LR multiplier at each milestone
     config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
+    config.lr_backbone      = cfg.get("lr_backbone", 1e-5)           # backbone fine-tune LR
+    config.weight_decay     = cfg.get("weight_decay", 1e-4)          # L2 reg on GCN head only
 
     setup_logging()
 
@@ -284,12 +286,25 @@ def main():
         ).to(device)
         logging.info("Model: HRNetGNN (standard, single scale)")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    # Separate LR for backbone (fine-tune slowly) vs GCN head (train from scratch).
+    # Backbone uses a lower LR to preserve pretrained ImageNet features.
+    # Weight decay only on GCN head — backbone already has pretrained structure.
+    backbone_params = list(model.backbone.parameters())
+    backbone_ids    = {id(p) for p in backbone_params}
+    head_params     = [p for p in model.parameters() if id(p) not in backbone_ids]
+
+    optimizer = torch.optim.Adam([
+        {"params": backbone_params, "lr": config.lr_backbone, "weight_decay": 0.0},
+        {"params": head_params,     "lr": config.lr,          "weight_decay": config.weight_decay},
+    ])
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=config.lr_milestones, gamma=config.lr_gamma
     )
-    logging.info(f"LR schedule: step decay at epochs {config.lr_milestones}, gamma={config.lr_gamma}")
-
+    logging.info(
+        f"LR: backbone={config.lr_backbone}, head={config.lr} | "
+        f"weight_decay={config.weight_decay} (head only) | "
+        f"step decay at epochs {config.lr_milestones}, gamma={config.lr_gamma}"
+    )
     ckpt_dir = SCRIPT_DIR / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     vis_dir = SCRIPT_DIR / "visualizations" / MODEL_NAME

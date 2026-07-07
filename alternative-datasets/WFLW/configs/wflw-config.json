@@ -9,6 +9,8 @@
     "batch_size": 32,
     "val_batch_size": 64,
     "lr": 1e-4,
+    "lr_backbone": 1e-5,
+    "weight_decay": 1e-4,
     "train_val_split": 0.9,
     "graph_topology": "wflw",
     "mean_shape_path": "alternative-datasets/wflw/mean_shapes/mean_shape_wflw.pt",
