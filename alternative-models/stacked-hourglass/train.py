@@ -7,7 +7,6 @@ import numpy as np
 from torch import nn
 import torch
 from torch.utils.data import DataLoader
-import time
 import logging
 from pathlib import Path
 from sklearn.model_selection import train_test_split
@@ -87,11 +86,7 @@ def main(args):
         shg.train()
         running_loss = 0.0
 
-        total = len(dataloader)
-
-        batchct = 0
         for imgs, gt_heatmaps in dataloader:
-            starttime = time.time()
             imgs, gt_heatmaps = imgs.to(device), gt_heatmaps.to(device)
             optimizer.zero_grad()
             combined_hm_preds = shg(imgs)
@@ -100,10 +95,6 @@ def main(args):
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-            batchct += 1
-            endtime = time.time()
-            runtime = endtime-starttime
-            print(f"Batch {batchct} / {total} | Process Time: {runtime} s | ETA: {(total-batchct)*runtime} | Loss: {loss.item()}", end="\r", flush=True)
         avg_train_loss = running_loss / len(dataloader)
 
         shg.eval()
@@ -127,7 +118,6 @@ def main(args):
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(shg.state_dict(), str(ckpt_dir / f"{MODEL_NAME}_best.pth"))
-        print()
         logging.info(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | {stack_loss_str}")
 
 def initEnvironment():
