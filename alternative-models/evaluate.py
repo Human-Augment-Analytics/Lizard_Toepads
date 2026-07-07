@@ -354,8 +354,9 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     errors = []
     per_landmark_errors = [[] for _ in range(9)]
 
-    # Diagnostic accumulators — all valid crops
-    diag_samples = []   # list of dicts, one per valid crop
+    # Diagnostic accumulators — first 3 valid crops with full per-landmark detail
+    _DIAG_MAX = 3
+    diag_samples = []
 
     n_total = 0
     n_skip_pred_none = 0
@@ -422,8 +423,18 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         for lm in range(9):
             per_landmark_errors[lm].append(dists[lm])
 
-        # Collect diagnostic sample (all valid crops)
-        diag_samples.append({
+        # Collect full per-landmark diagnostic for first _DIAG_MAX valid crops
+        if len(diag_samples) < _DIAG_MAX:
+            lm_detail = []
+            for lm in range(9):
+                lm_detail.append({
+                    "lm": lm,
+                    "pred_512": (round(float(pred[lm, 0]), 2), round(float(pred[lm, 1]), 2)),
+                    "pred_global": (round(float(pred_global[lm, 0]), 2), round(float(pred_global[lm, 1]), 2)),
+                    "gt_global": (round(float(gt_arr[lm, 0]), 2), round(float(gt_arr[lm, 1]), 2)),
+                    "dist_px": round(float(dists[lm]), 2),
+                })
+            diag_samples.append({
                 "file": f.name,
                 "imgid": imgid,
                 "class": class_name or "N/A",
@@ -438,6 +449,7 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
                 "gt_xrange": (round(float(gt_arr[:, 0].min()), 1), round(float(gt_arr[:, 0].max()), 1)),
                 "gt_yrange": (round(float(gt_arr[:, 1].min()), 1), round(float(gt_arr[:, 1].max()), 1)),
                 "mean_error_px": round(float(np.mean(dists)), 2),
+                "landmarks": lm_detail,
             })
 
     coverage = {
@@ -645,7 +657,6 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
         for s in samples:
             ow, oh = s["orig_img_wh"]
             cw, ch = s["obb_crop_wh"]
-            # Highlight if pred_global range looks wrong (outside orig image bounds by >20%)
             px0, px1 = s["pred_global_xrange"]
             py0, py1 = s["pred_global_yrange"]
             in_bounds = (px0 >= -0.2 * ow) and (px1 <= 1.2 * ow) and (py0 >= -0.2 * oh) and (py1 <= 1.2 * oh)
@@ -667,6 +678,33 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
                 f"<td>{s['mean_error_px']}</td>"
                 "</tr>"
             )
+            # Per-landmark detail subtable
+            if s.get("landmarks"):
+                sections.append(
+                    "<tr><td colspan='13' style='padding:4px 16px'>"
+                    "<table border='1' cellpadding='3' cellspacing='0' style='font-size:0.75em;background:#f9f9f9'>"
+                    "<tr><th>LM</th>"
+                    "<th>Pred 512 (x,y)</th>"
+                    "<th>Pred global (x,y)</th>"
+                    "<th>GT global (x,y)</th>"
+                    "<th>Error (px)</th></tr>"
+                )
+                for lm in s["landmarks"]:
+                    p512 = f"{lm['pred_512'][0]}, {lm['pred_512'][1]}"
+                    pg   = f"{lm['pred_global'][0]}, {lm['pred_global'][1]}"
+                    gt   = f"{lm['gt_global'][0]}, {lm['gt_global'][1]}"
+                    err  = lm['dist_px']
+                    err_style = " style='background:#ffdddd'" if err > 50 else ""
+                    sections.append(
+                        f"<tr{err_style}>"
+                        f"<td>{lm['lm']}</td>"
+                        f"<td>{p512}</td>"
+                        f"<td>{pg}</td>"
+                        f"<td>{gt}</td>"
+                        f"<td><b>{err}</b></td>"
+                        "</tr>"
+                    )
+                sections.append("</table></td></tr>")
         sections.append("</table>")
 
     sections.append("<h2>Per-Landmark Mean Pixel Error</h2>")
