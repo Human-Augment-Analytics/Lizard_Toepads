@@ -354,6 +354,10 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     errors = []
     per_landmark_errors = [[] for _ in range(9)]
 
+    # Diagnostic accumulators — sampled from the first N valid crops
+    _DIAG_MAX = 5
+    diag_samples = []   # list of dicts, one per sampled crop
+
     for pred, f in zip(predictions, test_files):
         if pred is None:
             continue
@@ -362,6 +366,7 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         M = data["M"].numpy()
         scale = data["scale"].item()
         pad_x, pad_y = data["pad"].tolist()
+        orig_h, orig_w = data["orig_size"].tolist()  # OBB crop dims before resize_and_pad
 
         try:
             pred_global = back_project(pred, M, scale, pad_x, pad_y)
@@ -374,6 +379,8 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         img = cv2.imread(img_path)
         if img is None:
             continue
+
+        full_h, full_w = img.shape[:2]
 
         gt_coords = get_tps_coords(imgid, img, tps_data_dir)
         class_name = data.get("class_name", None)
@@ -394,13 +401,36 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         for lm in range(9):
             per_landmark_errors[lm].append(dists[lm])
 
+        # Collect diagnostic sample
+        if len(diag_samples) < _DIAG_MAX:
+            diag_samples.append({
+                "file": f.name,
+                "imgid": imgid,
+                "class": class_name or "N/A",
+                "orig_img_wh": (int(full_w), int(full_h)),
+                "obb_crop_wh": (int(orig_w), int(orig_h)),
+                "resize_scale": round(float(scale), 4),
+                "pad_xy": (int(pad_x), int(pad_y)),
+                # 512-space prediction range
+                "pred_512_xrange": (round(float(pred[:, 0].min()), 1), round(float(pred[:, 0].max()), 1)),
+                "pred_512_yrange": (round(float(pred[:, 1].min()), 1), round(float(pred[:, 1].max()), 1)),
+                # back-projected prediction range (should be in original image coords)
+                "pred_global_xrange": (round(float(pred_global[:, 0].min()), 1), round(float(pred_global[:, 0].max()), 1)),
+                "pred_global_yrange": (round(float(pred_global[:, 1].min()), 1), round(float(pred_global[:, 1].max()), 1)),
+                # GT range (original image coords)
+                "gt_xrange": (round(float(gt_arr[:, 0].min()), 1), round(float(gt_arr[:, 0].max()), 1)),
+                "gt_yrange": (round(float(gt_arr[:, 1].min()), 1), round(float(gt_arr[:, 1].max()), 1)),
+                "mean_error_px": round(float(np.mean(dists)), 2),
+            })
+
     if not errors:
-        return {"mean": None, "median": None, "per_landmark": [None] * 9}
+        return {"mean": None, "median": None, "per_landmark": [None] * 9, "diag_samples": diag_samples}
 
     return {
         "mean": float(np.mean(errors)),
         "median": float(np.median(errors)),
         "per_landmark": [float(np.mean(e)) if e else None for e in per_landmark_errors],
+        "diag_samples": diag_samples,
     }
 
 
@@ -519,6 +549,65 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
         for name, perf in all_perf.items():
             vram = f"{perf.peak_vram_mb:.1f}" if perf.peak_vram_mb is not None else "N/A (CPU)"
             sections.append(f"<tr><td>{name}</td><td>{vram}</td></tr>")
+        sections.append("</table>")
+
+    # --- Coordinate-space diagnostics ---
+    sections.append("<h2>Coordinate-Space Diagnostics (first 5 valid samples per model)</h2>")
+    sections.append("<p style='font-size:0.85em;color:#555'>")
+    sections.append("Checks that back-projected predictions and GT both land in original image space.<br/>")
+    sections.append("<b>pred_global</b> x/y range should be within orig_img_w/h. "
+                    "If ranges match obb_crop_w/h instead, back-projection is not reaching original image space.")
+    sections.append("</p>")
+
+    for name, metrics in all_metrics.items():
+        samples = metrics.get("diag_samples", [])
+        sections.append(f"<h3>{name}</h3>")
+        if not samples:
+            sections.append("<p><em>No diagnostic samples (no checkpoint or no valid crops).</em></p>")
+            continue
+        sections.append("<table border='1' cellpadding='4' cellspacing='0' style='font-size:0.8em'>")
+        sections.append(
+            "<tr>"
+            "<th>File</th>"
+            "<th>Class</th>"
+            "<th>Orig img W×H</th>"
+            "<th>OBB crop W×H</th>"
+            "<th>Resize scale</th>"
+            "<th>Pad X,Y</th>"
+            "<th>Pred 512 X range</th>"
+            "<th>Pred 512 Y range</th>"
+            "<th>Pred global X range</th>"
+            "<th>Pred global Y range</th>"
+            "<th>GT X range</th>"
+            "<th>GT Y range</th>"
+            "<th>Mean err (px)</th>"
+            "</tr>"
+        )
+        for s in samples:
+            ow, oh = s["orig_img_wh"]
+            cw, ch = s["obb_crop_wh"]
+            # Highlight if pred_global range looks wrong (outside orig image bounds by >20%)
+            px0, px1 = s["pred_global_xrange"]
+            py0, py1 = s["pred_global_yrange"]
+            in_bounds = (px0 >= -0.2 * ow) and (px1 <= 1.2 * ow) and (py0 >= -0.2 * oh) and (py1 <= 1.2 * oh)
+            row_style = "" if in_bounds else " style='background:#ffe0e0'"
+            sections.append(
+                f"<tr{row_style}>"
+                f"<td>{s['file']}</td>"
+                f"<td>{s['class']}</td>"
+                f"<td>{ow}×{oh}</td>"
+                f"<td>{cw}×{ch}</td>"
+                f"<td>{s['resize_scale']}</td>"
+                f"<td>{s['pad_xy'][0]},{s['pad_xy'][1]}</td>"
+                f"<td>{s['pred_512_xrange'][0]}–{s['pred_512_xrange'][1]}</td>"
+                f"<td>{s['pred_512_yrange'][0]}–{s['pred_512_yrange'][1]}</td>"
+                f"<td><b>{px0}–{px1}</b></td>"
+                f"<td><b>{py0}–{py1}</b></td>"
+                f"<td>{s['gt_xrange'][0]}–{s['gt_xrange'][1]}</td>"
+                f"<td>{s['gt_yrange'][0]}–{s['gt_yrange'][1]}</td>"
+                f"<td>{s['mean_error_px']}</td>"
+                "</tr>"
+            )
         sections.append("</table>")
 
     sections.append("<h2>Per-Landmark Mean Pixel Error</h2>")
@@ -650,7 +739,7 @@ def main():
         ckpt = discover_checkpoint(model_info)
         if ckpt is None:
             logging.warning(f"[{name}] No checkpoint found, skipping")
-            all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9}
+            all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9, "diag_samples": []}
             all_overlays[name] = []
             all_unannotated_overlays[name] = []
             all_perf[name] = PerfStats()
