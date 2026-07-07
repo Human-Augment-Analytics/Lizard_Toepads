@@ -125,6 +125,7 @@ def extract_imgid_from_filename(filename):
 def run_stacked_hourglass(model_dir, ckpt_path, test_files):
     sys.path.insert(0, str(model_dir))
     try:
+        sys.modules.pop("model", None)
         from model import StackedHourGlass
     finally:
         sys.path.pop(0)
@@ -160,6 +161,7 @@ def run_stacked_hourglass(model_dir, ckpt_path, test_files):
 def run_vit(model_dir, ckpt_path, test_files):
     sys.path.insert(0, str(model_dir))
     try:
+        sys.modules.pop("model", None)
         from model import ViTLandmark
     finally:
         sys.path.pop(0)
@@ -202,6 +204,7 @@ def run_vit(model_dir, ckpt_path, test_files):
 def run_hrnet(model_dir, ckpt_path, test_files):
     sys.path.insert(0, str(model_dir))
     try:
+        sys.modules.pop("model", None)
         from model import HRNetLandmarkModel
     finally:
         sys.path.pop(0)
