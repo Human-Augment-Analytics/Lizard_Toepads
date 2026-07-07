@@ -65,9 +65,10 @@ class HRNetHeatmap(nn.Module):
         # Paper head: single 1x1 conv mapping backbone channels → num_landmarks
         self.head = nn.Conv2d(high_res_channels, num_landmarks, kernel_size=1)
 
-        # Initialise head with small weights so heatmaps start near zero
+        # Initialise head: small weights, negative bias so sigmoid(bias) ≈ 0.01
+        # matching the near-zero Gaussian targets at initialisation.
         nn.init.normal_(self.head.weight, std=0.001)
-        nn.init.constant_(self.head.bias, 0)
+        nn.init.constant_(self.head.bias, -4.6)  # sigmoid(-4.6) ≈ 0.01
 
     def forward(self, x: torch.Tensor):
         """
@@ -90,9 +91,14 @@ class HRNetHeatmap(nn.Module):
 
         heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm)
 
-        coords = soft_argmax(heatmaps)  # (B, num_landmarks, 2) in [0, 1]
+        # Apply sigmoid so predicted heatmap values are in [0, 1], matching the
+        # Gaussian targets (peak = 1.0).  Without this, MSE drives logits to -inf
+        # (all-zero output), soft-argmax collapses to 0.5, and loss flatlines.
+        heatmaps_sigmoid = torch.sigmoid(heatmaps)
 
-        return heatmaps, coords
+        coords = soft_argmax(heatmaps_sigmoid)  # (B, num_landmarks, 2) in [0, 1]
+
+        return heatmaps_sigmoid, coords
 
 
 def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:

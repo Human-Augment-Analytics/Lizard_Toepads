@@ -239,8 +239,9 @@ def main():
                 pred_hm, coords_pred = model(imgs)
 
                 val_loss += criterion(pred_hm, target_hm).item() * imgs.size(0)
+                # .mean(dim=-1): mean over K landmarks per sample, then sum over batch
                 px_err   += (
-                    (coords_pred - coords_gt).norm(dim=-1).sum().item() * input_size
+                    (coords_pred - coords_gt).norm(dim=-1).mean(dim=-1).sum().item() * input_size
                 )
 
         val_loss /= len(val_dataset)
