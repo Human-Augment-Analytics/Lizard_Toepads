@@ -354,9 +354,8 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     errors = []
     per_landmark_errors = [[] for _ in range(9)]
 
-    # Diagnostic accumulators — sampled from the first N valid crops
-    _DIAG_MAX = 5
-    diag_samples = []   # list of dicts, one per sampled crop
+    # Diagnostic accumulators — all valid crops
+    diag_samples = []   # list of dicts, one per valid crop
 
     n_total = 0
     n_skip_pred_none = 0
@@ -423,9 +422,8 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         for lm in range(9):
             per_landmark_errors[lm].append(dists[lm])
 
-        # Collect diagnostic sample
-        if len(diag_samples) < _DIAG_MAX:
-            diag_samples.append({
+        # Collect diagnostic sample (all valid crops)
+        diag_samples.append({
                 "file": f.name,
                 "imgid": imgid,
                 "class": class_name or "N/A",
@@ -453,12 +451,16 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     }
 
     if not errors:
-        return {"mean": None, "median": None, "per_landmark": [None] * 9,
-                "diag_samples": diag_samples, "coverage": coverage}
+        return {"mean": None, "median": None, "std": None, "p25": None, "p75": None, "p90": None,
+                "per_landmark": [None] * 9, "diag_samples": diag_samples, "coverage": coverage}
 
     return {
         "mean": float(np.mean(errors)),
         "median": float(np.median(errors)),
+        "std": float(np.std(errors)),
+        "p25": float(np.percentile(errors, 25)),
+        "p75": float(np.percentile(errors, 75)),
+        "p90": float(np.percentile(errors, 90)),
         "per_landmark": [float(np.mean(e)) if e else None for e in per_landmark_errors],
         "diag_samples": diag_samples,
         "coverage": coverage,
@@ -550,11 +552,13 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
 
     sections.append("<h2>Per-Model Pixel Error (Original Image Space)</h2>")
     sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
-    sections.append("<tr><th>Model</th><th>Mean Pixel Error</th><th>Median Pixel Error</th></tr>")
+    sections.append("<tr><th>Model</th><th>Mean</th><th>Median</th><th>Std</th><th>P25</th><th>P75</th><th>P90</th></tr>")
     for name, metrics in all_metrics.items():
-        mean_str = f"{metrics['mean']:.2f}" if metrics["mean"] is not None else "N/A"
-        median_str = f"{metrics['median']:.2f}" if metrics["median"] is not None else "N/A"
-        sections.append(f"<tr><td>{name}</td><td>{mean_str}</td><td>{median_str}</td></tr>")
+        def _f(k): return f"{metrics[k]:.2f}" if metrics.get(k) is not None else "N/A"
+        sections.append(
+            f"<tr><td>{name}</td><td>{_f('mean')}</td><td>{_f('median')}</td>"
+            f"<td>{_f('std')}</td><td>{_f('p25')}</td><td>{_f('p75')}</td><td>{_f('p90')}</td></tr>"
+        )
     sections.append("</table>")
 
     # --- Wall-clock timing table ---
@@ -722,13 +726,12 @@ def build_markdown_summary(all_metrics, all_perf=None, n_test=0):
     lines = [
         "# Evaluation Summary\n",
         "## Pixel Error (Original Image Space)\n",
-        "| Model | Mean Pixel Error | Median Pixel Error |",
-        "|---|---|---|",
+        "| Model | Mean | Median | Std | P25 | P75 | P90 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for name, metrics in all_metrics.items():
-        mean_str = f"{metrics['mean']:.2f}" if metrics["mean"] is not None else "N/A"
-        median_str = f"{metrics['median']:.2f}" if metrics["median"] is not None else "N/A"
-        lines.append(f"| {name} | {mean_str} | {median_str} |")
+        def _f(k): return f"{metrics[k]:.2f}" if metrics.get(k) is not None else "N/A"
+        lines.append(f"| {name} | {_f('mean')} | {_f('median')} | {_f('std')} | {_f('p25')} | {_f('p75')} | {_f('p90')} |")
 
     if all_perf:
         lines += [
@@ -794,7 +797,9 @@ def main():
         ckpt = discover_checkpoint(model_info)
         if ckpt is None:
             logging.warning(f"[{name}] No checkpoint found, skipping")
-            all_metrics[name] = {"mean": None, "median": None, "per_landmark": [None] * 9,
+            all_metrics[name] = {"mean": None, "median": None, "std": None,
+                                 "p25": None, "p75": None, "p90": None,
+                                 "per_landmark": [None] * 9,
                                  "diag_samples": [],
                                  "coverage": {"n_total": 0, "n_evaluated": 0, "n_skip_pred_none": 0,
                                               "n_skip_backproject": 0, "n_skip_img_missing": 0,
