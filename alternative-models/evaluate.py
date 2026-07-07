@@ -363,8 +363,8 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
     errors = []
     per_landmark_errors = [[] for _ in range(9)]
 
-    # Diagnostic accumulators — first 3 valid crops with full per-landmark detail
-    _DIAG_MAX = 3
+    # Diagnostic accumulators — first 8 valid crops with full per-landmark detail
+    _DIAG_MAX = 8
     diag_samples = []
 
     n_total = 0
