@@ -333,11 +333,11 @@ def main():
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
             initial_coords = ms + noise
 
-            # Intermediate supervision: sum MSE loss over all GCN iterations.
-            # Each iteration gets a direct gradient signal, shortening the effective
-            # gradient path and stabilising training vs. loss-at-final-iter-only.
+            # Intermediate supervision: sum MSE loss over all GCN iterations,
+            # normalised by num_iters to keep loss magnitude comparable to the
+            # single-iteration baseline (so grad_clip and LR stay well-calibrated).
             all_preds = model(imgs, initial_coords, edge_index, return_all_iters=True)
-            loss = sum(landmark_loss(p, coords) for p in all_preds)
+            loss = sum(landmark_loss(p, coords) for p in all_preds) / len(all_preds)
             pred_coords = all_preds[-1]  # final iter used for metrics/logging
 
             optimizer.zero_grad()
