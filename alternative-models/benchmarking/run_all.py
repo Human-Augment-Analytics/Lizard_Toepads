@@ -30,6 +30,11 @@ MODELS = [
         "train_script": "train.py",
     },
     {
+        "name": "hrnet_heatmap",
+        "dir": ALT_MODELS_DIR / "hrnet",
+        "train_script": "train_heatmap.py",
+    },
+    {
         "name": "hrnet_gcn",
         "dir": ALT_MODELS_DIR / "hrnet-gcn",
         "train_script": "train.py",

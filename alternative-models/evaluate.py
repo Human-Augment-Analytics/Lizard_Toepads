@@ -39,6 +39,7 @@ MODELS = [
     {"name": "stacked_hourglass", "dir": ALT_MODELS_DIR / "stacked-hourglass"},
     {"name": "vit",               "dir": ALT_MODELS_DIR / "vit"},
     {"name": "hrnet",             "dir": ALT_MODELS_DIR / "hrnet"},
+    {"name": "hrnet_heatmap",     "dir": ALT_MODELS_DIR / "hrnet"},
     {"name": "hrnet_gcn",         "dir": ALT_MODELS_DIR / "hrnet-gcn"},
     {"name": "hrnet_gcn_hinit",   "dir": ALT_MODELS_DIR / "hrnet-gcn"},
     {"name": "ml_morph",          "dir": ALT_MODELS_DIR / "ml-morph"},
@@ -229,6 +230,44 @@ def run_hrnet(model_dir, ckpt_path, test_files):
     return predictions
 
 
+def run_hrnet_heatmap(model_dir, ckpt_path, test_files):
+    """Inference for paper-faithful HRNet heatmap regression model."""
+    sys.path.insert(0, str(model_dir))
+    try:
+        from hrnet_heatmap import HRNetHeatmap
+    finally:
+        sys.path.pop(0)
+
+    # Determine num_landmarks from checkpoint
+    state = torch.load(str(ckpt_path), map_location="cpu")
+    num_landmarks = state["head.weight"].shape[0]
+
+    model = HRNetHeatmap(num_landmarks=num_landmarks, pretrained=False)
+    model.load_state_dict(state)
+    model.to(DEVICE)
+    model.eval()
+
+    predictions = []
+    for f in test_files:
+        try:
+            data = torch.load(f, map_location="cpu")
+            img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
+            img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
+            img_tensor = (
+                torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(DEVICE)
+            )
+
+            with torch.no_grad():
+                _, coords = model(img_tensor)  # coords: (1, K, 2) in [0, 1]
+
+            coords_512 = coords[0].cpu().numpy() * 512
+            predictions.append(coords_512.astype(np.float64))
+        except Exception as e:
+            logging.error(f"[hrnet_heatmap] Error on {f.name}: {e}")
+            predictions.append(None)
+    return predictions
+
+
 def run_hrnet_gcn(model_dir, ckpt_path, test_files):
     sys.path.insert(0, str(model_dir))
     try:
@@ -353,6 +392,7 @@ RUNNERS = {
     "stacked_hourglass": run_stacked_hourglass,
     "vit": run_vit,
     "hrnet": run_hrnet,
+    "hrnet_heatmap": run_hrnet_heatmap,
     "hrnet_gcn": run_hrnet_gcn,
     "hrnet_gcn_hinit": run_hrnet_gcn_hinit,
     "ml_morph": run_ml_morph,

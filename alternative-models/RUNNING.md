@@ -76,7 +76,7 @@ python preprocessing.py --config default
 # Preprocess (OBB YOLO)
 python preprocessing.py --config default --mode obb
 
-# Train
+# Train (cross-attention variant)
 python train.py --config default --data /path/to/training_data
 ```
 
@@ -84,6 +84,31 @@ Checkpoint: `alternative-models/hrnet/checkpoints/hrnet_best.pth`
 Log: `alternative-models/hrnet/logs/hrnet.log`
 
 > Paths in `configs/default.json` point to the Linux cluster. Update `training_data_dir`, `imgdir`, and `tps_data_dir` before running locally.
+
+---
+
+## HRNet Heatmap (paper-faithful)
+
+Direct implementation of the Wang et al. CVPR 2019 HRNet landmark detection method.
+Uses the highest-resolution HRNet branch + 1×1 conv heatmap head + soft-argmax coordinate extraction.
+This is the correct SOTA baseline for sample complexity comparisons.
+
+```bash
+cd alternative-models/hrnet
+
+# Train with shared split (recommended for benchmarking)
+python train_heatmap.py --split /path/to/split.json
+
+# Train with data directory (random split)
+python train_heatmap.py --data /path/to/training_data
+
+# Override config
+python train_heatmap.py --split /path/to/split.json --config heatmap_default
+```
+
+Checkpoint: `alternative-models/hrnet/checkpoints/hrnet_heatmap_best.pth`
+Log: `alternative-models/hrnet/logs/hrnet_heatmap.log`
+Config: `alternative-models/hrnet/configs/heatmap_default.json`
 
 ---
 
