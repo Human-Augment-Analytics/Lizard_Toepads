@@ -332,10 +332,17 @@ def main():
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
             initial_coords = ms + noise
 
-            # Intermediate supervision with equal weights, normalised by num_iters.
-            # Each iteration gets an equal direct gradient signal.
+            # Intermediate supervision with linear warmup.
+            # For the first `inter_sup_warmup` epochs, only the final iteration
+            # is supervised (avoids early-epoch gradient interference from
+            # poorly-converged intermediate iterations).
+            # After warmup, all iterations contribute equally, normalised by count.
             all_preds = model(imgs, initial_coords, edge_index, return_all_iters=True)
-            loss = sum(landmark_loss(p, coords) for p in all_preds) / len(all_preds)
+            inter_sup_warmup = 15  # epochs before intermediate supervision kicks in
+            if epoch <= inter_sup_warmup:
+                loss = landmark_loss(all_preds[-1], coords)
+            else:
+                loss = sum(landmark_loss(p, coords) for p in all_preds) / len(all_preds)
             pred_coords = all_preds[-1]
 
             optimizer.zero_grad()
