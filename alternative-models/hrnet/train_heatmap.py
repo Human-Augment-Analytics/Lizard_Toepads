@@ -212,14 +212,21 @@ def main():
             target_hm = make_gaussian_heatmaps(
                 coords_gt, heatmap_size=heatmap_size, sigma=sigma
             )
-            pred_hm, _ = model(imgs)
-            loss = criterion(pred_hm, target_hm)
+            pred_hm, coords_pred = model(imgs)
+
+            # Heatmap loss: MSE between sigmoid-activated heatmaps and Gaussian targets
+            loss_hm = criterion(pred_hm, target_hm)
+            # Coordinate loss: direct MSE on normalised coords — ensures the
+            # soft-argmax branch receives a clean gradient even when the heatmap
+            # distribution is still broad early in training.
+            loss_coord = criterion(coords_pred, coords_gt)
+            loss = loss_hm + cfg.get("coord_loss_weight", 1.0) * loss_coord
 
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
             optimizer.step()
-            train_loss += loss.item() * imgs.size(0)
+            train_loss += loss_hm.item() * imgs.size(0)  # log heatmap loss only
 
         train_loss /= len(train_dataset)
 

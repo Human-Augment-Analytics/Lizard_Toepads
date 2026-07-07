@@ -65,10 +65,9 @@ class HRNetHeatmap(nn.Module):
         # Paper head: single 1x1 conv mapping backbone channels → num_landmarks
         self.head = nn.Conv2d(high_res_channels, num_landmarks, kernel_size=1)
 
-        # Initialise head: small weights, negative bias so sigmoid(bias) ≈ 0.01
-        # matching the near-zero Gaussian targets at initialisation.
+        # Initialise head with small weights so heatmaps start near zero
         nn.init.normal_(self.head.weight, std=0.001)
-        nn.init.constant_(self.head.bias, -4.6)  # sigmoid(-4.6) ≈ 0.01
+        nn.init.constant_(self.head.bias, 0)
 
     def forward(self, x: torch.Tensor):
         """
@@ -91,14 +90,17 @@ class HRNetHeatmap(nn.Module):
 
         heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm)
 
-        # Apply sigmoid so predicted heatmap values are in [0, 1], matching the
-        # Gaussian targets (peak = 1.0).  Without this, MSE drives logits to -inf
-        # (all-zero output), soft-argmax collapses to 0.5, and loss flatlines.
-        heatmaps_sigmoid = torch.sigmoid(heatmaps)
+        # soft_argmax operates on raw logits — it applies its own spatial softmax
+        # internally, so the distribution sharpens as the backbone learns to
+        # concentrate activations at the landmark location.
+        coords = soft_argmax(heatmaps)  # (B, num_landmarks, 2) in [0, 1]
 
-        coords = soft_argmax(heatmaps_sigmoid)  # (B, num_landmarks, 2) in [0, 1]
+        # Sigmoid is applied only for the MSE heatmap loss (bounds output to [0,1]
+        # to match Gaussian targets with peak=1.0). Kept separate from coords so
+        # the softmax inside soft_argmax sees unclipped logits.
+        heatmaps_out = torch.sigmoid(heatmaps)
 
-        return heatmaps_sigmoid, coords
+        return heatmaps_out, coords
 
 
 def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
