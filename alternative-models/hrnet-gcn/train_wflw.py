@@ -184,6 +184,9 @@ def main():
     config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
     config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale"
     config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
+    config.lr_milestones    = cfg.get("lr_milestones", [60, 90])     # epochs to drop LR
+    config.lr_gamma         = cfg.get("lr_gamma", 0.1)               # LR multiplier at each milestone
+    config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
 
     setup_logging()
 
@@ -282,9 +285,10 @@ def main():
         logging.info("Model: HRNetGNN (standard, single scale)")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=20, min_lr=1e-6
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones=config.lr_milestones, gamma=config.lr_gamma
     )
+    logging.info(f"LR schedule: step decay at epochs {config.lr_milestones}, gamma={config.lr_gamma}")
 
     ckpt_dir = SCRIPT_DIR / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -319,7 +323,7 @@ def main():
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
             optimizer.step()
 
             epoch_loss += loss.item() * imgs.size(0)
@@ -360,7 +364,7 @@ def main():
             f"Avg Pixel Error (512px): {pix_err_512:.2f}"
         )
 
-        scheduler.step(val_loss)
+        scheduler.step()  # MultiStepLR: step every epoch regardless of val loss
 
         if val_loss < best_val:
             best_val = val_loss

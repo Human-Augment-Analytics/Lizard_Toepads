@@ -146,6 +146,6 @@ class HRNetGNN_MS(nn.Module):
                 h = F.relu(h)
 
             delta = self.delta_head(h).view(B, N, 2)
-            coords = coords + delta
+            coords = torch.clamp(coords + delta, 0.0, 1.0)
 
         return coords

@@ -47,6 +47,7 @@ sys.path.insert(0, str(ALT_MODELS_DIR / "hrnet-gcn"))
 sys.path.insert(0, str(SCRIPT_DIR.parent))
 
 from hrnet_gcn import HRNetGNN
+from hrnet_gcn_ms import HRNetGNN_MS
 from common.graph_topologies import get_edge_index
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -140,6 +141,8 @@ def main():
     config.num_layers     = cfg.get("num_layers", 3)
     config.num_iters      = cfg.get("num_iters", 4)
     config.graph_topology = cfg.get("graph_topology", "wflw")
+    config.model_variant  = cfg.get("model_variant", "standard")
+    config.scale_indices  = cfg.get("scale_indices", [0, 1, 2, 3])
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logging.info(f"Using device: {device}")
@@ -157,15 +160,28 @@ def main():
     mean_shape = torch.load(args.mean_shape, map_location=device)
     edge_index = get_edge_index(config.graph_topology, config.num_landmarks).to(device)
 
-    # Load model
-    model = HRNetGNN(
-        hrnet_backbone="hrnet_w18",
-        feat_dim=config.feat_dim,
-        gnn_hidden=config.gnn_hidden,
-        num_layers=config.num_layers,
-        num_landmarks=config.num_landmarks,
-        num_iters=config.num_iters,
-    )
+    # Load model — select variant based on config
+    if config.model_variant == "multiscale":
+        model = HRNetGNN_MS(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+            scale_indices=config.scale_indices,
+        )
+        logging.info(f"Model: HRNetGNN_MS, scale_indices={config.scale_indices}")
+    else:
+        model = HRNetGNN(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        )
+        logging.info("Model: HRNetGNN (standard)")
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
     model.to(device)
     model.eval()

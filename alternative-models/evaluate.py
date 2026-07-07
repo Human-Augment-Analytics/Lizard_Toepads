@@ -53,8 +53,9 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 @dataclass
 class PerfStats:
     """Wall-clock time and peak VRAM for a model's inference run."""
-    wall_clock_s: Optional[float] = None   # total seconds for all test crops
-    peak_vram_mb: Optional[float] = None   # peak VRAM allocated during inference (MB)
+    wall_clock_s: Optional[float] = None      # GPU (or default device) wall clock, all test crops
+    peak_vram_mb: Optional[float] = None      # peak VRAM allocated during inference (MB)
+    cpu_wall_clock_s: Optional[float] = None  # CPU-only wall clock, all test crops
 
     @property
     def ms_per_sample(self) -> Optional[float]:
@@ -64,6 +65,11 @@ class PerfStats:
         if self.wall_clock_s is None or n_samples == 0:
             return None
         return (self.wall_clock_s / n_samples) * 1000.0
+
+    def cpu_ms_per_sample_for(self, n_samples: int) -> Optional[float]:
+        if self.cpu_wall_clock_s is None or n_samples == 0:
+            return None
+        return (self.cpu_wall_clock_s / n_samples) * 1000.0
 
 
 def load_test_files(data_dir):
@@ -124,6 +130,7 @@ def run_stacked_hourglass(model_dir, ckpt_path, test_files):
 
     model = StackedHourGlass()
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
+    model.to(DEVICE)
     model.eval()
 
     predictions = []
@@ -131,12 +138,12 @@ def run_stacked_hourglass(model_dir, ckpt_path, test_files):
         try:
             data = torch.load(f, map_location="cpu")
             img = data["image"].permute(1, 2, 0).float() / 255.0  # uint8 CHW → HWC float
-            img_batch = img.unsqueeze(0)
+            img_batch = img.unsqueeze(0).to(DEVICE)
 
             with torch.no_grad():
                 out = model(img_batch)
 
-            last_stack = out[0, -1]
+            last_stack = out[0, -1].cpu()
             coords_512 = []
             for c in range(last_stack.shape[0]):
                 hm = last_stack[c].numpy()
@@ -158,6 +165,7 @@ def run_vit(model_dir, ckpt_path, test_files):
 
     model = ViTLandmark(pretrained=False)
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
+    model.to(DEVICE)
     model.eval()
 
     import albumentations as A
@@ -176,12 +184,12 @@ def run_vit(model_dir, ckpt_path, test_files):
             data = torch.load(f, map_location="cpu")
             img = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
             aug = vit_transform(image=img)
-            img_tensor = aug["image"].unsqueeze(0).float()
+            img_tensor = aug["image"].unsqueeze(0).float().to(DEVICE)
 
             with torch.no_grad():
                 out = model(img_tensor)
 
-            coords_224 = out[0].reshape(9, 2).numpy() * 224
+            coords_224 = out[0].cpu().reshape(9, 2).numpy() * 224
             coords_512 = coords_224 * (512.0 / 224.0)
             predictions.append(coords_512.astype(np.float64))
         except Exception as e:
@@ -199,6 +207,7 @@ def run_hrnet(model_dir, ckpt_path, test_files):
 
     model = HRNetLandmarkModel(pretrained=False)
     model.load_state_dict(torch.load(str(ckpt_path), map_location="cpu"))
+    model.to(DEVICE)
     model.eval()
 
     predictions = []
@@ -207,12 +216,12 @@ def run_hrnet(model_dir, ckpt_path, test_files):
             data = torch.load(f, map_location="cpu")
             img_np = data["image"].permute(1, 2, 0).numpy()  # uint8 HWC
             img_norm = (img_np.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
-            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float()
+            img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(DEVICE)
 
             with torch.no_grad():
                 out = model(img_tensor)
 
-            coords_512 = out[0].numpy() * 512
+            coords_512 = out[0].cpu().numpy() * 512
             predictions.append(coords_512.astype(np.float64))
         except Exception as e:
             logging.error(f"[hrnet] Error on {f.name}: {e}")
@@ -578,14 +587,22 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
         sections.append("<h2>Inference Wall-Clock Time</h2>")
         sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
         sections.append(
-            "<tr><th>Model</th><th>Total (s)</th>"
-            f"<th>ms / sample (n={n_test})</th></tr>"
+            "<tr><th>Model</th><th>GPU total (s)</th>"
+            f"<th>GPU ms/sample (n={n_test})</th>"
+            "<th>CPU total (s)</th>"
+            f"<th>CPU ms/sample (n={n_test})</th></tr>"
         )
         for name, perf in all_perf.items():
-            total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
-            per_s = perf.ms_per_sample_for(n_test)
-            per_s_str = f"{per_s:.1f}" if per_s is not None else "N/A"
-            sections.append(f"<tr><td>{name}</td><td>{total}</td><td>{per_s_str}</td></tr>")
+            gpu_total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
+            gpu_per = perf.ms_per_sample_for(n_test)
+            gpu_per_str = f"{gpu_per:.1f}" if gpu_per is not None else "N/A"
+            cpu_total = f"{perf.cpu_wall_clock_s:.2f}" if perf.cpu_wall_clock_s is not None else "N/A"
+            cpu_per = perf.cpu_ms_per_sample_for(n_test)
+            cpu_per_str = f"{cpu_per:.1f}" if cpu_per is not None else "N/A"
+            sections.append(
+                f"<tr><td>{name}</td><td>{gpu_total}</td><td>{gpu_per_str}</td>"
+                f"<td>{cpu_total}</td><td>{cpu_per_str}</td></tr>"
+            )
         sections.append("</table>")
 
     # --- Peak VRAM table ---
@@ -775,14 +792,17 @@ def build_markdown_summary(all_metrics, all_perf=None, n_test=0):
         lines += [
             "",
             f"## Inference Wall-Clock Time (n={n_test} test crops)\n",
-            "| Model | Total (s) | ms / sample |",
-            "|---|---|---|",
+            "| Model | GPU total (s) | GPU ms/sample | CPU total (s) | CPU ms/sample |",
+            "|---|---|---|---|---|",
         ]
         for name, perf in all_perf.items():
-            total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
-            per_s = perf.ms_per_sample_for(n_test)
-            per_s_str = f"{per_s:.1f}" if per_s is not None else "N/A"
-            lines.append(f"| {name} | {total} | {per_s_str} |")
+            gpu_total = f"{perf.wall_clock_s:.2f}" if perf.wall_clock_s is not None else "N/A"
+            gpu_per = perf.ms_per_sample_for(n_test)
+            gpu_per_str = f"{gpu_per:.1f}" if gpu_per is not None else "N/A"
+            cpu_total = f"{perf.cpu_wall_clock_s:.2f}" if perf.cpu_wall_clock_s is not None else "N/A"
+            cpu_per = perf.cpu_ms_per_sample_for(n_test)
+            cpu_per_str = f"{cpu_per:.1f}" if cpu_per is not None else "N/A"
+            lines.append(f"| {name} | {gpu_total} | {gpu_per_str} | {cpu_total} | {cpu_per_str} |")
 
         lines += [
             "",
@@ -853,14 +873,16 @@ def main():
         # --- timed + VRAM-tracked inference ---
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
+            vram_before = torch.cuda.max_memory_allocated()
         t0 = time.perf_counter()
         predictions = runner(model_info["dir"], ckpt, test_files)
         wall_s = time.perf_counter() - t0
-        peak_vram_mb = (
-            torch.cuda.max_memory_allocated() / 1024 ** 2
-            if torch.cuda.is_available()
-            else None
-        )
+        if torch.cuda.is_available():
+            peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
+            # If nothing was allocated above baseline, report None (CPU-only runner)
+            peak_vram_mb = peak_vram_mb if peak_vram_mb > 1.0 else None
+        else:
+            peak_vram_mb = None
         all_perf[name] = PerfStats(wall_clock_s=wall_s, peak_vram_mb=peak_vram_mb)
         # ----------------------------------------
 
@@ -890,6 +912,27 @@ def main():
             all_unannotated_overlays[name] = u_overlays
         else:
             all_unannotated_overlays[name] = []
+
+    logging.info("Running CPU-only timing pass...")
+    global DEVICE
+    _original_device = DEVICE
+    DEVICE = 'cpu'
+    for model_info in MODELS:
+        name = model_info["name"]
+        if name not in all_perf:
+            continue
+        ckpt = discover_checkpoint(model_info)
+        if ckpt is None:
+            continue
+        runner = RUNNERS[name]
+        try:
+            t0 = time.perf_counter()
+            runner(model_info["dir"], ckpt, test_files)
+            all_perf[name].cpu_wall_clock_s = time.perf_counter() - t0
+            logging.info(f"[{name}] CPU wall clock: {all_perf[name].cpu_wall_clock_s:.2f}s")
+        except Exception as e:
+            logging.warning(f"[{name}] CPU timing failed: {e}")
+    DEVICE = _original_device
 
     logging.info("Writing report...")
     html = build_html_report(all_metrics, all_overlays, all_unannotated_overlays, output_dir,
