@@ -389,11 +389,11 @@ def main():
                 coords = coords.to(device)
                 B = imgs.shape[0]
 
-                # At eval, use coarse init as GCN input once it's been trained
-                # (after coarse_init_warmup epochs). Before that, fall back to
-                # mean shape so val metrics are not corrupted by an untrained MLP.
+                # Use coarse init for GCN only after full ramp completion.
+                # coarse_init_warmup (15) + coarse_init_ramp (20) = epoch 35
                 coarse_init_warmup = 15
-                if hasattr(model, 'use_coarse_init') and model.use_coarse_init and epoch > coarse_init_warmup:
+                coarse_fully_trained = coarse_init_warmup + config.coarse_init_ramp
+                if hasattr(model, 'use_coarse_init') and model.use_coarse_init and epoch > coarse_fully_trained:
                     # Run a quick coarse forward to get the learned initialization
                     feat_maps = model.backbone(imgs)
                     feat_map = feat_maps[model.backbone_out_idx]
