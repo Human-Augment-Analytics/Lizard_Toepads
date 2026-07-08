@@ -273,7 +273,7 @@ def main():
                 coords_pred = hard_argmax(pred_hm)
                 nme_total += compute_nme_batch(coords_pred, coords_gt)
                 # Avg pixel error in input_size space (comparable to GCN logs)
-                px_err_total += (coords_pred - coords_gt).norm(dim=-1).sum().item() * input_size
+                px_err_total += (coords_pred - coords_gt).norm(dim=-1).mean().item() * input_size * imgs.size(0)
 
         val_loss  /= len(val_dataset)
         val_nme    = nme_total / len(val_dataset)
