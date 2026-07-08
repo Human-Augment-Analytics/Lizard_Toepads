@@ -44,7 +44,7 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
-from hrnet_heatmap import HRNetHeatmap, make_gaussian_heatmaps
+from hrnet_heatmap import HRNetHeatmap, make_gaussian_heatmaps, hard_argmax
 
 # Load WFLWDataset the same way train_wflw.py does — handles case differences
 import importlib.util as _ilu
@@ -232,18 +232,13 @@ def main():
             target_hm = make_gaussian_heatmaps(
                 coords_gt, heatmap_size=heatmap_size, sigma=sigma
             )
-            pred_hm, coords_pred = model(imgs)
+            pred_hm, _ = model(imgs)
 
-            # Masked heatmap MSE — only penalise pixels where the target is
-            # non-trivial (>0.01). This prevents the all-zeros local minimum
-            # where predicting near-zero everywhere gives low MSE because most
-            # of the heatmap background should be near zero.
-            # Combined with a direct coordinate MSE for reliable gradient flow
-            # through soft-argmax.
-            mask = (target_hm > 0.01).float()
-            heatmap_loss = (criterion(pred_hm, target_hm) * mask).sum() / mask.sum().clamp(min=1)
-            coord_loss   = F.mse_loss(coords_pred, coords_gt)
-            loss = heatmap_loss + coord_loss
+            # Paper-faithful: MSE on raw logits vs Gaussian targets.
+            # The model head is initialised with std=0.001 so logits start near 0.
+            # Gaussian targets peak at 1.0 — the loss gradient drives the network
+            # to produce positive logits at landmark locations and near-zero elsewhere.
+            loss = criterion(pred_hm, target_hm)
 
             optimizer.zero_grad()
             loss.backward()
@@ -266,9 +261,12 @@ def main():
                 target_hm = make_gaussian_heatmaps(
                     coords_gt, heatmap_size=heatmap_size, sigma=sigma
                 )
-                pred_hm, coords_pred = model(imgs)
+                pred_hm, coords_soft = model(imgs)
 
                 val_loss  += criterion(pred_hm, target_hm).item() * imgs.size(0)
+                # Use hard argmax for NME — matches paper's decode_preds (argmax)
+                # rather than soft-argmax which averages over diffuse peaks.
+                coords_pred = hard_argmax(pred_hm)
                 nme_total += compute_nme_batch(coords_pred, coords_gt)
 
         val_loss  /= len(val_dataset)
@@ -292,8 +290,9 @@ def main():
 
         # Overlays: every epoch for first 20, then every 10
         if epoch <= 20 or epoch % 10 == 0:
+            hm_vis = torch.sigmoid(pred_hm[0])   # sigmoid only for visualization
             save_overlay(
-                imgs[0], coords_pred[0], coords_gt[0], pred_hm[0],
+                imgs[0], coords_pred[0], coords_gt[0], hm_vis,
                 save_path=vis_dir / f"overlay_epoch{epoch:04d}.jpg",
                 input_size=input_size,
             )

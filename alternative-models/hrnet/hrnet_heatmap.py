@@ -90,15 +90,34 @@ class HRNetHeatmap(nn.Module):
 
         heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm) raw logits
 
-        # Soft-argmax on raw logits — softmax inside will concentrate weight
-        # at the peak location as the network learns to produce peaks.
+        # Soft-argmax on raw logits for training (differentiable)
         coords = soft_argmax(heatmaps)  # (B, num_landmarks, 2) in [0, 1]
 
-        # Sigmoid only for the MSE loss output — maps logits to [0,1] to
-        # match Gaussian targets with peak=1.0.
-        heatmaps_out = torch.sigmoid(heatmaps)
+        # Return raw logits as heatmaps — loss is computed on raw logits vs
+        # Gaussian targets (matching the paper's JointsMSELoss on raw output).
+        # No sigmoid here — sigmoid is only applied if needed for visualization.
+        return heatmaps, coords
 
-        return heatmaps_out, coords
+
+def hard_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
+    """Hard argmax — returns the location of the peak value per heatmap channel.
+
+    Matches the paper's decode_preds which uses np.argmax on the score map.
+    Not differentiable. Use for evaluation/NME reporting only.
+
+    Args:
+        heatmaps: (B, K, H, W) raw logits or probabilities.
+
+    Returns:
+        coords: (B, K, 2) peak locations normalised to [0, 1].
+                coords[..., 0] = x (col), coords[..., 1] = y (row).
+    """
+    B, K, H, W = heatmaps.shape
+    flat = heatmaps.view(B, K, -1)
+    idx  = flat.argmax(dim=-1)           # (B, K)
+    y    = (idx // W).float() / (H - 1) # normalised row
+    x    = (idx %  W).float() / (W - 1) # normalised col
+    return torch.stack([x, y], dim=-1)   # (B, K, 2)
 
 
 def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
