@@ -50,10 +50,19 @@ class HRNetHeatmap(nn.Module):
             features_only=True,
         )
 
-        # Sum all branch channels: 18 + 36 + 72 + 144 = 270
-        all_channels = sum(
-            info["num_chs"] for info in self.backbone.feature_info
-        )
+        # Compute actual fused channel count from a dummy forward pass.
+        # timm's feature_info may not accurately reflect the concatenated output.
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, 256, 256)
+            feats = self.backbone(dummy)
+            H0, W0 = feats[0].shape[2], feats[0].shape[3]
+            fused_dummy = torch.cat([
+                feats[0],
+                F.interpolate(feats[1], size=(H0, W0), mode="bilinear", align_corners=False),
+                F.interpolate(feats[2], size=(H0, W0), mode="bilinear", align_corners=False),
+                F.interpolate(feats[3], size=(H0, W0), mode="bilinear", align_corners=False),
+            ], dim=1)
+            all_channels = fused_dummy.shape[1]
 
         # Paper head: 1×1 conv on fused multi-scale features
         self.head = nn.Conv2d(all_channels, num_landmarks, kernel_size=1)
