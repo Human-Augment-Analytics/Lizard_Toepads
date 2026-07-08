@@ -112,7 +112,8 @@ class WFLWDataset(Dataset):
             # Coords are already in [0,1] relative to 512px; they remain valid
             # after letterbox resize since the relative positions are preserved.
 
-        img_norm = self.normalize(image=img)["image"]        img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
+        img_norm = self.normalize(image=img)["image"]
+        img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
         coords_tensor = torch.from_numpy(coords).float()
         flipped_tensor = torch.tensor(was_flipped, dtype=torch.bool)
 
