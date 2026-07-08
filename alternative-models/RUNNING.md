@@ -99,16 +99,23 @@ cd alternative-models/hrnet
 # Train with shared split (recommended for benchmarking)
 python train_heatmap.py --split /path/to/split.json
 
+# Train on WFLW (sample complexity study)
+python run_wflw.py --split /path/to/wflw/splits/wflw_0.8_seed42.json
+
+# Evaluate on WFLW test set
+python evaluate_wflw.py \\
+    --checkpoint checkpoints/hrnet_heatmap_wflw_best.pth \\
+    --split /path/to/wflw/splits/wflw_0.8_seed42.json \\
+    --config configs/wflw-config.json \\
+    --output-json results/wflw_eval_hrnet_0.8.json
+
 # Train with data directory (random split)
 python train_heatmap.py --data /path/to/training_data
-
-# Override config
-python train_heatmap.py --split /path/to/split.json --config heatmap_default
 ```
 
-Checkpoint: `alternative-models/hrnet/checkpoints/hrnet_heatmap_best.pth`
-Log: `alternative-models/hrnet/logs/hrnet_heatmap.log`
-Config: `alternative-models/hrnet/configs/heatmap_default.json`
+Checkpoint: `alternative-models/hrnet/checkpoints/hrnet_heatmap_wflw_best.pth`
+Log:        `alternative-models/hrnet/logs/hrnet_heatmap_wflw.log`
+Config:     `alternative-models/hrnet/configs/wflw-config.json`
 
 ---
 
