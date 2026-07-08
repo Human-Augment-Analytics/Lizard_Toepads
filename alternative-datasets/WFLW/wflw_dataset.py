@@ -78,6 +78,15 @@ class WFLWDataset(Dataset):
             A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=15, val_shift_limit=10, p=0.3),
         ])
 
+        # Resize transform — applied when input_size != 512 (the native .pt crop size)
+        self.resize_transform = None
+        if input_size != 512:
+            import cv2 as _cv2
+            self.resize_transform = A.Compose([
+                A.LongestMaxSize(max_size=input_size),
+                A.PadIfNeeded(input_size, input_size, border_mode=_cv2.BORDER_CONSTANT),
+            ])
+
         self.normalize = A.Normalize(
             mean=(0.485, 0.456, 0.406),
             std=(0.229, 0.224, 0.225)
@@ -96,8 +105,14 @@ class WFLWDataset(Dataset):
         if self.augment:
             img, coords, was_flipped = self._augment(img, coords)
 
-        img_norm = self.normalize(image=img)["image"]
-        img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
+        # Resize to input_size if different from native 512px crop size
+        if self.resize_transform is not None:
+            resized = self.resize_transform(image=img)
+            img = resized["image"]
+            # Coords are already in [0,1] relative to 512px; they remain valid
+            # after letterbox resize since the relative positions are preserved.
+
+        img_norm = self.normalize(image=img)["image"]        img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
         coords_tensor = torch.from_numpy(coords).float()
         flipped_tensor = torch.tensor(was_flipped, dtype=torch.bool)
 

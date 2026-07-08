@@ -42,6 +42,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from hrnet_heatmap import HRNetHeatmap, make_gaussian_heatmaps
 
@@ -215,8 +216,18 @@ def main():
             target_hm = make_gaussian_heatmaps(
                 coords_gt, heatmap_size=heatmap_size, sigma=sigma
             )
-            pred_hm, _ = model(imgs)
-            loss = criterion(pred_hm, target_hm)
+            pred_hm, coords_pred = model(imgs)
+
+            # Masked heatmap MSE — only penalise pixels where the target is
+            # non-trivial (>0.01). This prevents the all-zeros local minimum
+            # where predicting near-zero everywhere gives low MSE because most
+            # of the heatmap background should be near zero.
+            # Combined with a direct coordinate MSE for reliable gradient flow
+            # through soft-argmax.
+            mask = (target_hm > 0.01).float()
+            heatmap_loss = (criterion(pred_hm, target_hm) * mask).sum() / mask.sum().clamp(min=1)
+            coord_loss   = F.mse_loss(coords_pred, coords_gt)
+            loss = heatmap_loss + coord_loss
 
             optimizer.zero_grad()
             loss.backward()
