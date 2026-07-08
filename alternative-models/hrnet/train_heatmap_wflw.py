@@ -255,6 +255,7 @@ def main():
         model.eval()
         val_loss = 0.0
         nme_total = 0.0
+        px_err_total = 0.0
 
         with torch.no_grad():
             for imgs, coords_gt, _, _flipped in val_loader:
@@ -271,15 +272,19 @@ def main():
                 # rather than soft-argmax which averages over diffuse peaks.
                 coords_pred = hard_argmax(pred_hm)
                 nme_total += compute_nme_batch(coords_pred, coords_gt)
+                # Avg pixel error in input_size space (comparable to GCN logs)
+                px_err_total += (coords_pred - coords_gt).norm(dim=-1).sum().item() * input_size
 
         val_loss  /= len(val_dataset)
         val_nme    = nme_total / len(val_dataset)
+        val_px_err = px_err_total / len(val_dataset)
 
         logging.info(
             f"Epoch {epoch}/{epochs}, "
             f"Train Loss: {train_loss:.6f}, "
             f"Val Loss: {val_loss:.6f}, "
-            f"Val NME: {val_nme:.4f}"
+            f"Val NME: {val_nme:.4f}, "
+            f"Avg Pixel Error ({input_size}px): {val_px_err:.2f}"
         )
 
         scheduler.step()
