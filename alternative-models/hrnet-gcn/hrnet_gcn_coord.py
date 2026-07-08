@@ -1,33 +1,37 @@
 """
-HRNetGNN_Coord — single-scale GCN with learned coordinate embedding.
+HRNetGNN_Coord — single-scale GCN with learned coordinate embedding
+                 and optional coarse initializer.
 
-Identical to the frozen HRNetGNN except each GCN node receives a learned
-embedding of its current (x, y) coordinate concatenated to the sampled image
-features before the node_feat_proj linear layer.
+Two enhancements over the frozen HRNetGNN:
 
-Why a learned embedding rather than raw (x, y):
-  Raw coordinates are in [0, 1] while backbone features span a wider range.
-  Concatenating them directly causes the coordinate signal to be swamped by
-  the feature dimensions. A small linear projection with ReLU (coord_embed)
-  maps (x, y) → 16-dim at a scale the projection layer can use effectively.
-  The network also learns to encode positional information in a task-relevant
-  way rather than relying on the raw spatial values.
+1. Coordinate embedding (always active):
+   Each GCN node receives a learned 16-dim embedding of its current (x, y)
+   coordinate concatenated to the sampled image features. This gives the GCN
+   explicit positional awareness, reducing ambiguity for dense landmark groups
+   and occluded landmarks with weak image features.
 
-Why coordinate embedding helps:
-  Standard GCNConv must infer a node's position from image features alone.
-  This is ambiguous when features are similar across nearby cells (e.g., the
-  coarse 16×16 map). Explicit positional input enables the GCN to learn
-  "I am at (0.3, 0.4) with these features → move 3px left" rather than
-  reconstructing position from context. Particularly useful for:
-    - Occluded landmarks with weak/ambiguous image features
-    - Dense groups (eyes, mouth inner contour) where many points have similar
-      local features but different absolute positions
-    - Correcting mean-shape initialisation bias under extreme pose
+2. Coarse initializer (optional, controlled by use_coarse_init):
+   A lightweight MLP operating on globally-pooled backbone features produces
+   an image-specific initial coordinate estimate (98×2) instead of the
+   dataset mean shape. This directly addresses the mean-shape limitation for
+   hard cases (extreme pose, unusual scale) where the mean shape may start
+   30-50px from the true landmark positions.
 
-Architecture change vs HRNetGNN:
-  coord_embed:        nn.Linear(2, 16) + ReLU  (new)
-  node_feat_proj:     backbone_channels + 16 → gnn_hidden  (was backbone_channels)
-  Everything else is identical.
+   Architecture:
+     global_pool(feat_map) → [144] → Linear(144, 256) → ReLU
+                                   → Linear(256, num_landmarks * 2) → sigmoid
+                                   → (B, num_landmarks, 2)
+
+   Training:
+     The coarse init output is supervised with a landmark_loss term with a
+     ramping weight (0→1 over coarse_init_ramp_epochs). This prevents large
+     early-epoch gradients from the random MLP destabilising backbone training.
+     The coarse init loss and GCN loss both backprop into the backbone, so
+     the ramp is important.
+
+   At inference (eval mode):
+     The coarse init prediction replaces the mean-shape input. No noise is
+     added (noise is only for training robustness).
 
 Constructor signature matches HRNetGNN for drop-in compatibility.
 """
@@ -37,23 +41,25 @@ import torch.nn.functional as F
 import timm
 from torch_geometric.nn import GCNConv
 
-COORD_EMBED_DIM = 16   # dimensionality of the coordinate embedding
+COORD_EMBED_DIM = 16   # dimensionality of the coordinate positional embedding
 
 
 class HRNetGNN_Coord(nn.Module):
     def __init__(
         self,
-        hrnet_backbone="hrnet_w18",  # kept for API compat
-        feat_dim=64,                  # kept for API compat, unused
+        hrnet_backbone="hrnet_w18",   # kept for API compat
+        feat_dim=64,                   # kept for API compat, unused
         gnn_hidden=128,
         num_layers=2,
         num_landmarks=9,
         num_iters=3,
+        use_coarse_init: bool = True,
     ):
         super().__init__()
         self.num_landmarks = num_landmarks
         self.num_iters = num_iters
         self.backbone_out_idx = -1
+        self.use_coarse_init = use_coarse_init
 
         self.backbone = timm.create_model(
             "hrnet_w18",
@@ -63,11 +69,23 @@ class HRNetGNN_Coord(nn.Module):
 
         backbone_channels = self.backbone.feature_info[self.backbone_out_idx]["num_chs"]
 
-        # Learned coordinate embedding: (x, y) in [0,1] → COORD_EMBED_DIM
-        # Maps raw spatial coordinates to a scale commensurate with image features.
+        # ── Coarse initializer ────────────────────────────────────────────
+        # Global average pool → small MLP → (num_landmarks, 2) in [0, 1]
+        if self.use_coarse_init:
+            self.coarse_init_mlp = nn.Sequential(
+                nn.Linear(backbone_channels, 256),
+                nn.ReLU(),
+                nn.Linear(256, num_landmarks * 2),
+            )
+            # Initialise final layer to predict near (0.5, 0.5) so early
+            # predictions are centred rather than random
+            nn.init.zeros_(self.coarse_init_mlp[-1].bias)
+            nn.init.normal_(self.coarse_init_mlp[-1].weight, std=0.01)
+
+        # ── Coordinate embedding ──────────────────────────────────────────
         self.coord_embed = nn.Linear(2, COORD_EMBED_DIM)
 
-        # Projection: image features + coordinate embedding → gnn_hidden
+        # ── GCN head ──────────────────────────────────────────────────────
         self.node_feat_proj = nn.Linear(backbone_channels + COORD_EMBED_DIM, gnn_hidden)
 
         self.gnn_layers = nn.ModuleList(
@@ -86,47 +104,69 @@ class HRNetGNN_Coord(nn.Module):
         Returns:
             (B, N, C)
         """
-        grid = coords * 2.0 - 1.0       # [0,1] → [-1,1] for grid_sample
-        grid = grid.unsqueeze(2)         # (B, N, 1, 2)
+        grid = coords * 2.0 - 1.0
+        grid = grid.unsqueeze(2)
         sampled = F.grid_sample(feat_map, grid, align_corners=True, mode="bilinear")
-        return sampled.squeeze(-1).permute(0, 2, 1)  # (B, N, C)
+        return sampled.squeeze(-1).permute(0, 2, 1)
 
     def forward(
         self,
         x: torch.Tensor,
         initial_coords: torch.Tensor,
         edge_index: torch.Tensor,
-    ) -> torch.Tensor:
+    ):
         """
         Args:
             x:              (B, 3, H, W)
-            initial_coords: (B, N, 2) in [0, 1]
+            initial_coords: (B, N, 2) in [0, 1] — used as fallback when
+                            use_coarse_init=False, or as the noise-augmented
+                            mean shape during training (ignored at eval if
+                            use_coarse_init=True).
             edge_index:     (2, E) graph connectivity
 
         Returns:
-            (B, N, 2) refined coordinates in [0, 1]
+            If use_coarse_init=True:
+                (gcn_coords, coarse_coords)
+                  gcn_coords:    (B, N, 2) final refined coordinates
+                  coarse_coords: (B, N, 2) coarse initializer output (for loss)
+            If use_coarse_init=False:
+                gcn_coords only: (B, N, 2)
         """
-        coords = initial_coords.clone()
         feat_maps = self.backbone(x)
-        feat_map = feat_maps[self.backbone_out_idx]
+        feat_map = feat_maps[self.backbone_out_idx]   # (B, C, H, W)
 
         B = x.shape[0]
-        N = coords.shape[1]
+        N = self.num_landmarks
 
+        # ── Coarse initializer ────────────────────────────────────────────
+        if self.use_coarse_init:
+            # Global average pool over spatial dims → (B, C)
+            global_feat = feat_map.mean(dim=[2, 3])
+            coarse_flat = self.coarse_init_mlp(global_feat)       # (B, N*2)
+            coarse_coords = torch.sigmoid(
+                coarse_flat.view(B, N, 2)
+            )                                                      # (B, N, 2) in [0,1]
+
+            # At eval, use coarse prediction as GCN initialization.
+            # At train, the caller passes noise-augmented mean shape
+            # (for robustness) but the coarse loss is still computed.
+            if not self.training:
+                coords = coarse_coords.detach()
+            else:
+                coords = initial_coords.clone()
+        else:
+            coords = initial_coords.clone()
+            coarse_coords = None
+
+        # ── GCN refinement ────────────────────────────────────────────────
         for _ in range(self.num_iters):
-            # Sample image features at current coordinate estimates
-            img_feats = self.sample_features(feat_map, coords)    # (B, N, C)
-
-            # Embed current coordinates into a learned representation
-            coord_emb = F.relu(self.coord_embed(coords))          # (B, N, 16)
-
-            # Concatenate image features + coordinate embedding
-            node_feats = torch.cat([img_feats, coord_emb], dim=-1) # (B, N, C+16)
+            img_feats = self.sample_features(feat_map, coords)      # (B, N, C)
+            coord_emb = F.relu(self.coord_embed(coords))            # (B, N, 16)
+            node_feats = torch.cat([img_feats, coord_emb], dim=-1)  # (B, N, C+16)
             node_feats = self.node_feat_proj(node_feats)            # (B, N, gnn_hidden)
             node_feats = F.relu(node_feats)
 
             node_feats_flat = node_feats.view(B * N, -1)
-
             batch_edge_index = torch.cat(
                 [edge_index + b * N for b in range(B)], dim=1
             )
@@ -139,4 +179,6 @@ class HRNetGNN_Coord(nn.Module):
             delta = self.delta_head(h).view(B, N, 2)
             coords = torch.clamp(coords + delta, 0.0, 1.0)
 
+        if self.use_coarse_init:
+            return coords, coarse_coords
         return coords

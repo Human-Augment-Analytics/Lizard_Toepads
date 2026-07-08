@@ -222,7 +222,8 @@ def main():
 
             # Inference — clean mean shape, no noise
             initial_coords = mean_shape.unsqueeze(0)
-            pred_norm = model(img_tensor, initial_coords, edge_index)
+            out = model(img_tensor, initial_coords, edge_index)
+            pred_norm = out[0] if isinstance(out, tuple) else out
 
             pred_px = pred_norm[0].cpu().numpy() * TARGET_SIZE   # (N, 2)
             gt_px   = gt_norm * TARGET_SIZE                       # (N, 2)

@@ -183,8 +183,10 @@ def main():
     config.graph_topology   = cfg.get("graph_topology", "wflw")
     config.mean_shape_path  = cfg.get("mean_shape_path", None)
     config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
-    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale"
+    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale" | "coord"
     config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
+    config.use_coarse_init  = cfg.get("use_coarse_init", True)       # learned global initializer
+    config.coarse_init_ramp = cfg.get("coarse_init_ramp", 20)        # epochs to ramp coarse loss 0→1
     config.lr_milestones    = cfg.get("lr_milestones", [60, 90])     # epochs to drop LR
     config.lr_gamma         = cfg.get("lr_gamma", 0.1)               # LR multiplier at each milestone
     config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
@@ -284,8 +286,12 @@ def main():
             num_layers=config.num_layers,
             num_landmarks=config.num_landmarks,
             num_iters=config.num_iters,
+            use_coarse_init=config.use_coarse_init,
         ).to(device)
-        logging.info("Model: HRNetGNN_Coord (single-scale + coordinate embedding)")
+        logging.info(
+            f"Model: HRNetGNN_Coord (coord embedding, "
+            f"use_coarse_init={config.use_coarse_init})"
+        )
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",
@@ -343,9 +349,18 @@ def main():
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
             initial_coords = ms + noise
 
-            pred_coords = model(imgs, initial_coords, edge_index)
-            loss = landmark_loss(pred_coords, coords)
-
+            # Forward pass — coord variant returns (gcn_coords, coarse_coords)
+            # when use_coarse_init=True, otherwise just gcn_coords.
+            out = model(imgs, initial_coords, edge_index)
+            if isinstance(out, tuple):
+                pred_coords, coarse_coords = out
+                # Coarse init loss with linear ramp 0→1 over coarse_init_ramp epochs.
+                # Keeps early backbone gradients dominated by the GCN loss signal.
+                coarse_weight = min(1.0, epoch / max(1, config.coarse_init_ramp))
+                loss = landmark_loss(pred_coords, coords) + coarse_weight * landmark_loss(coarse_coords, coords)
+            else:
+                pred_coords = out
+                loss = landmark_loss(pred_coords, coords)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
@@ -366,9 +381,12 @@ def main():
                 coords = coords.to(device)
                 B = imgs.shape[0]
 
-                # Clean mean shape — no noise during validation
+                # Clean mean shape — no noise during validation.
+                # At eval, coord model uses its own coarse init so initial_coords
+                # is only used as fallback when use_coarse_init=False.
                 initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
-                pred_coords = model(imgs, initial_coords, edge_index)
+                out = model(imgs, initial_coords, edge_index)
+                pred_coords = out[0] if isinstance(out, tuple) else out
 
                 val_loss_total += landmark_loss(pred_coords, coords).item() * imgs.size(0)
                 pxerr_total += compute_rescaled_pixel_error(pred_coords, coords, orig_size, device)
