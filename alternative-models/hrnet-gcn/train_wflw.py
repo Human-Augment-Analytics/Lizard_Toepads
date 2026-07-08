@@ -354,10 +354,18 @@ def main():
             out = model(imgs, initial_coords, edge_index)
             if isinstance(out, tuple):
                 pred_coords, coarse_coords = out
-                # Coarse init loss with linear ramp 0→1 over coarse_init_ramp epochs.
-                # Keeps early backbone gradients dominated by the GCN loss signal.
-                coarse_weight = min(1.0, epoch / max(1, config.coarse_init_ramp))
-                loss = landmark_loss(pred_coords, coords) + coarse_weight * landmark_loss(coarse_coords, coords)
+                # Coarse init loss: zero for first coarse_init_warmup epochs,
+                # then ramp 0→1 over coarse_init_ramp epochs.
+                # Keeps early backbone gradients from the coarse MLP (random init)
+                # from destabilising training before the GCN has converged.
+                coarse_init_warmup = 15
+                if epoch <= coarse_init_warmup:
+                    coarse_weight = 0.0
+                else:
+                    coarse_weight = min(1.0, (epoch - coarse_init_warmup) / max(1, config.coarse_init_ramp))
+                loss = landmark_loss(pred_coords, coords)
+                if coarse_weight > 0:
+                    loss = loss + coarse_weight * landmark_loss(coarse_coords, coords)
             else:
                 pred_coords = out
                 loss = landmark_loss(pred_coords, coords)
