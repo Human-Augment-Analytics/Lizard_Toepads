@@ -150,9 +150,6 @@ class HRNetGNN_Coord(nn.Module):
         # The coarse_coords output is used as an auxiliary loss target during training
         # and can be passed as initial_coords by the eval caller once trained.
         coords = initial_coords.clone()
-        else:
-            coords = initial_coords.clone()
-            coarse_coords = None
 
         # ── GCN refinement ────────────────────────────────────────────────
         for _ in range(self.num_iters):
