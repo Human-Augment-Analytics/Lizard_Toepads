@@ -389,10 +389,21 @@ def main():
                 coords = coords.to(device)
                 B = imgs.shape[0]
 
-                # Clean mean shape — no noise during validation.
-                # At eval, coord model uses its own coarse init so initial_coords
-                # is only used as fallback when use_coarse_init=False.
-                initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
+                # At eval, use coarse init as GCN input once it's been trained
+                # (after coarse_init_warmup epochs). Before that, fall back to
+                # mean shape so val metrics are not corrupted by an untrained MLP.
+                coarse_init_warmup = 15
+                if hasattr(model, 'use_coarse_init') and model.use_coarse_init and epoch > coarse_init_warmup:
+                    # Run a quick coarse forward to get the learned initialization
+                    feat_maps = model.backbone(imgs)
+                    feat_map = feat_maps[model.backbone_out_idx]
+                    global_feat = feat_map.mean(dim=[2, 3])
+                    coarse_flat = model.coarse_init_mlp(global_feat)
+                    coarse_init = torch.sigmoid(coarse_flat.view(B, model.num_landmarks, 2))
+                    initial_coords = coarse_init.detach()
+                else:
+                    initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
+
                 out = model(imgs, initial_coords, edge_index)
                 pred_coords = out[0] if isinstance(out, tuple) else out
 

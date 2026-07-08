@@ -220,8 +220,17 @@ def main():
                 torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
             )
 
-            # Inference — clean mean shape, no noise
-            initial_coords = mean_shape.unsqueeze(0)
+            # Inference — use coarse init if available, otherwise mean shape
+            if hasattr(model, 'use_coarse_init') and model.use_coarse_init:
+                feat_maps = model.backbone(img_tensor)
+                feat_map = feat_maps[model.backbone_out_idx]
+                global_feat = feat_map.mean(dim=[2, 3])
+                coarse_flat = model.coarse_init_mlp(global_feat)
+                initial_coords = torch.sigmoid(
+                    coarse_flat.view(1, model.num_landmarks, 2)
+                )
+            else:
+                initial_coords = mean_shape.unsqueeze(0)
             out = model(img_tensor, initial_coords, edge_index)
             pred_norm = out[0] if isinstance(out, tuple) else out
 

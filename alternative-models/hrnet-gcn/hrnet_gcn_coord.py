@@ -140,20 +140,16 @@ class HRNetGNN_Coord(nn.Module):
 
         # ── Coarse initializer ────────────────────────────────────────────
         if self.use_coarse_init:
-            # Global average pool over spatial dims → (B, C)
-            global_feat = feat_map.mean(dim=[2, 3])
-            coarse_flat = self.coarse_init_mlp(global_feat)       # (B, N*2)
-            coarse_coords = torch.sigmoid(
-                coarse_flat.view(B, N, 2)
-            )                                                      # (B, N, 2) in [0,1]
+            global_feat = feat_map.mean(dim=[2, 3])               # (B, C)
+            coarse_flat = self.coarse_init_mlp(global_feat)        # (B, N*2)
+            coarse_coords = torch.sigmoid(coarse_flat.view(B, N, 2))  # (B, N, 2)
+        else:
+            coarse_coords = None
 
-            # At eval, use coarse prediction as GCN initialization.
-            # At train, the caller passes noise-augmented mean shape
-            # (for robustness) but the coarse loss is still computed.
-            if not self.training:
-                coords = coarse_coords.detach()
-            else:
-                coords = initial_coords.clone()
+        # GCN always starts from initial_coords (mean shape at train, caller-provided at eval).
+        # The coarse_coords output is used as an auxiliary loss target during training
+        # and can be passed as initial_coords by the eval caller once trained.
+        coords = initial_coords.clone()
         else:
             coords = initial_coords.clone()
             coarse_coords = None
