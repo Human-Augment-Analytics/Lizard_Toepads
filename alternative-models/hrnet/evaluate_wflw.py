@@ -29,7 +29,7 @@ ALT_DATASETS = SCRIPT_DIR.parent.parent / "alternative-datasets"
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ALT_DATASETS))
 
-from hrnet_heatmap import HRNetHeatmap
+from hrnet_heatmap import HRNetHeatmap, hard_argmax
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -133,7 +133,11 @@ def main():
             img_norm = (img_f - IMAGENET_MEAN) / IMAGENET_STD
             img_t    = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
 
-            _, coords = model(img_t)
+            heatmaps, _ = model(img_t)
+            # Use hard argmax with sub-pixel refinement — matches training NME
+            # computation. Soft-argmax on raw logits averages toward center
+            # when peaks are sharp/narrow, giving inflated NME.
+            coords = hard_argmax(heatmaps)
             pred_px = coords[0].cpu().numpy() * TARGET_SIZE
             gt_px   = gt_norm * TARGET_SIZE
 

@@ -272,8 +272,10 @@ def main():
                 # rather than soft-argmax which averages over diffuse peaks.
                 coords_pred = hard_argmax(pred_hm)
                 nme_total += compute_nme_batch(coords_pred, coords_gt)
-                # Avg pixel error in input_size space (comparable to GCN logs)
-                px_err_total += (coords_pred - coords_gt).norm(dim=-1).mean().item() * input_size * imgs.size(0)
+                # Avg pixel error reported in 512px space to match GCN logs.
+                # Coords are in [0,1] — multiply by 512 regardless of input_size
+                # so numbers are directly comparable across models.
+                px_err_total += (coords_pred - coords_gt).norm(dim=-1).mean().item() * 512 * imgs.size(0)
 
         val_loss  /= len(val_dataset)
         val_nme    = nme_total / len(val_dataset)
@@ -284,7 +286,7 @@ def main():
             f"Train Loss: {train_loss:.6f}, "
             f"Val Loss: {val_loss:.6f}, "
             f"Val NME: {val_nme:.4f}, "
-            f"Avg Pixel Error ({input_size}px): {val_px_err:.2f}"
+            f"Avg Pixel Error (512px): {val_px_err:.2f}"
         )
 
         scheduler.step()
