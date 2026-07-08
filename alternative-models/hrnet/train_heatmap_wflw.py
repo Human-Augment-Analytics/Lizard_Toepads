@@ -83,16 +83,32 @@ def setup_logging():
     )
 
 
-def save_overlay(img_tensor, coords_pred, coords_gt, save_path, input_size=512):
+def save_overlay(img_tensor, coords_pred, coords_gt, heatmaps, save_path, input_size=256):
+    """Save side-by-side: coordinate overlay (left) + max heatmap (right)."""
     img = img_tensor.permute(1, 2, 0).cpu().numpy()
     img = img * IMAGENET_STD + IMAGENET_MEAN
     img = np.clip(img * 255, 0, 255).astype(np.uint8)
     img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    # Resize to input_size if needed
+    if img_bgr.shape[0] != input_size:
+        img_bgr = cv2.resize(img_bgr, (input_size, input_size))
+
+    # Left: coordinate overlay
+    coord_panel = img_bgr.copy()
     for x, y in (coords_gt.cpu().numpy() * input_size):
-        cv2.circle(img_bgr, (int(x), int(y)), 2, (0, 255, 0), -1)
+        cv2.circle(coord_panel, (int(x), int(y)), 2, (0, 255, 0), -1)
     for x, y in (coords_pred.cpu().numpy() * input_size):
-        cv2.circle(img_bgr, (int(x), int(y)), 2, (0, 0, 255), -1)
-    cv2.imwrite(str(save_path), img_bgr)
+        cv2.circle(coord_panel, (int(x), int(y)), 2, (0, 0, 255), -1)
+
+    # Right: max heatmap across landmarks — shows whether peaks are forming
+    hm_np  = heatmaps.cpu().numpy()              # (K, H, W)
+    hm_max = hm_np.max(axis=0)                   # (H, W)
+    hm_vis = (hm_max / (hm_max.max() + 1e-8) * 255).astype(np.uint8)
+    hm_col = cv2.applyColorMap(hm_vis, cv2.COLORMAP_JET)
+    hm_col = cv2.resize(hm_col, (input_size, input_size))
+
+    combined = np.concatenate([coord_panel, hm_col], axis=1)
+    cv2.imwrite(str(save_path), combined)
 
 
 def compute_nme_batch(pred_coords, gt_coords):
@@ -277,7 +293,7 @@ def main():
         # Overlays: every epoch for first 20, then every 10
         if epoch <= 20 or epoch % 10 == 0:
             save_overlay(
-                imgs[0], coords_pred[0], coords_gt[0],
+                imgs[0], coords_pred[0], coords_gt[0], pred_hm[0],
                 save_path=vis_dir / f"overlay_epoch{epoch:04d}.jpg",
                 input_size=input_size,
             )

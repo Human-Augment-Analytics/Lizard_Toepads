@@ -88,14 +88,15 @@ class HRNetHeatmap(nn.Module):
                 mode="bilinear", align_corners=False
             )
 
-        heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm)
+        heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm) raw logits
 
-        # Apply sigmoid to bound heatmaps to [0,1] to match Gaussian targets
+        # Soft-argmax on raw logits — softmax inside will concentrate weight
+        # at the peak location as the network learns to produce peaks.
+        coords = soft_argmax(heatmaps)  # (B, num_landmarks, 2) in [0, 1]
+
+        # Sigmoid only for the MSE loss output — maps logits to [0,1] to
+        # match Gaussian targets with peak=1.0.
         heatmaps_out = torch.sigmoid(heatmaps)
-
-        # soft-argmax over the sigmoid heatmaps: as the network learns to produce
-        # peaks at landmark locations, the softmax concentrates weight there.
-        coords = soft_argmax(heatmaps_out)  # (B, num_landmarks, 2) in [0, 1]
 
         return heatmaps_out, coords
 
