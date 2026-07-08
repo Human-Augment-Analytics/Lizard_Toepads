@@ -2,33 +2,28 @@
 HRNet Heatmap Regression — paper-faithful implementation.
 
 Reference: Wang et al., "Deep High-Resolution Representation Learning for
-Visual Recognition", CVPR 2019.  Section 3.3 / Appendix A (face alignment).
+Visual Recognition", CVPR 2019 / HRNetV2 face alignment codebase.
 
-Architecture:
-  - HRNet-W18 backbone (ImageNet pretrained via timm)
-  - Uses ONLY the highest-resolution output branch (1/4 input stride, 128x128
-    for a 512px input, 18 channels for W18)
-  - 1x1 conv head: 18 → num_landmarks heatmap channels
-  - Soft-argmax extracts (x, y) coordinates from each heatmap channel
+Key architectural detail from the paper source:
+  The head operates on ALL 4 resolution branches concatenated after
+  upsampling to the highest resolution (1/4 input stride):
+    branch 0: (B, 18, H/4, W/4)
+    branch 1: (B, 36, H/4, W/4)  — upsampled
+    branch 2: (B, 72, H/4, W/4)  — upsampled
+    branch 3: (B, 144, H/4, W/4) — upsampled
+    cat → (B, 270, H/4, W/4)
+    head → (B, num_landmarks, H/4, W/4)
 
-Loss:
-  MSE between predicted heatmaps and Gaussian target heatmaps.
-  Target Gaussian sigma is typically 2px at heatmap resolution.
+  This is NOT the same as using only branch 0 (18 channels). The paper
+  fuses all scales before predicting heatmaps. Our earlier HRNetGNN used
+  only the last branch (-1 index / 144ch) for GCN feature sampling, which
+  is a different design choice appropriate for coordinate refinement but
+  NOT for heatmap regression.
 
 Coordinate extraction:
-  Soft-argmax (differentiable spatial expectation) over the heatmap.
-  Returns coordinates normalised to [0, 1].
-
-Why this is paper-faithful:
-  The original HRNet paper does NOT use multi-scale fusion for the prediction
-  head — it simply takes the highest-resolution parallel branch output and
-  applies a conv head directly. Multi-scale fusion is used internally within
-  HRNet's repeated multi-resolution fusion modules, but the output head is
-  single-scale.
-
-  The current HRNetLandmarkModel in model.py uses cross-attention with
-  landmark queries, which is a different architecture (closer to DETR).
-  This file provides the correct paper baseline.
+  - soft_argmax: differentiable, used during training for coordinate loss
+  - hard_argmax: non-differentiable argmax, used for NME evaluation
+    (matches paper's decode_preds which uses np.argmax)
 """
 import torch
 from torch import nn
@@ -37,155 +32,171 @@ import timm
 
 
 class HRNetHeatmap(nn.Module):
-    """Paper-faithful HRNet heatmap regression for landmark detection.
+    """Paper-faithful HRNet heatmap regression.
 
-    Args:
-        num_landmarks: Number of landmarks to predict (one heatmap per landmark).
-        pretrained:    Load ImageNet pretrained weights for the HRNet backbone.
-        heatmap_size:  Spatial size of the output heatmap (H = W = heatmap_size).
-                       At input_size=512, HRNet-W18's highest-res branch is 128px.
-                       Set to None to use the backbone's native output size.
+    Uses all 4 HRNet resolution branches fused at the head, matching the
+    official HRNetV2 face alignment architecture.
     """
 
     def __init__(self, num_landmarks: int = 9, pretrained: bool = True,
-                 heatmap_size: int = 128):
+                 heatmap_size: int = 64):
         super().__init__()
         self.num_landmarks = num_landmarks
         self.heatmap_size = heatmap_size
 
-        # HRNet backbone — features_only=True returns all 4 branch outputs.
-        # We use index 0: the highest-resolution branch (stride 4, 18ch for W18).
         self.backbone = timm.create_model(
             "hrnet_w18",
             pretrained=pretrained,
             features_only=True,
         )
-        high_res_channels = self.backbone.feature_info[0]["num_chs"]  # 18 for W18
 
-        # Paper head: single 1x1 conv mapping backbone channels → num_landmarks
-        self.head = nn.Conv2d(high_res_channels, num_landmarks, kernel_size=1)
+        # Sum all branch channels: 18 + 36 + 72 + 144 = 270
+        all_channels = sum(
+            info["num_chs"] for info in self.backbone.feature_info
+        )
 
-        # Initialise head with small weights so heatmaps start near zero
+        # Paper head: 1×1 conv on fused multi-scale features
+        self.head = nn.Conv2d(all_channels, num_landmarks, kernel_size=1)
         nn.init.normal_(self.head.weight, std=0.001)
         nn.init.constant_(self.head.bias, 0)
 
     def forward(self, x: torch.Tensor):
         """
         Args:
-            x: (B, 3, H, W) input images, ImageNet-normalised.
+            x: (B, 3, H, W) ImageNet-normalised images.
 
         Returns:
-            heatmaps: (B, num_landmarks, heatmap_size, heatmap_size)
+            heatmaps: (B, num_landmarks, heatmap_size, heatmap_size) raw logits
             coords:   (B, num_landmarks, 2) soft-argmax coordinates in [0, 1]
         """
-        feat_maps = self.backbone(x)
-        feat = feat_maps[0]  # highest-resolution branch: (B, 18, H/4, W/4)
+        feat_maps = self.backbone(x)  # [f0, f1, f2, f3]
 
-        # Optionally resize to target heatmap_size
-        if self.heatmap_size is not None and feat.shape[-1] != self.heatmap_size:
-            feat = F.interpolate(
-                feat, size=(self.heatmap_size, self.heatmap_size),
-                mode="bilinear", align_corners=False
+        # Upsample all branches to f0's spatial size (highest resolution)
+        H, W = feat_maps[0].shape[2], feat_maps[0].shape[3]
+        fused = torch.cat([
+            feat_maps[0],
+            F.interpolate(feat_maps[1], size=(H, W), mode="bilinear", align_corners=False),
+            F.interpolate(feat_maps[2], size=(H, W), mode="bilinear", align_corners=False),
+            F.interpolate(feat_maps[3], size=(H, W), mode="bilinear", align_corners=False),
+        ], dim=1)  # (B, 270, H, W)
+
+        heatmaps = self.head(fused)  # (B, num_landmarks, H, W) raw logits
+
+        # Resize to target heatmap_size if needed
+        if self.heatmap_size is not None and H != self.heatmap_size:
+            heatmaps = F.interpolate(
+                heatmaps,
+                size=(self.heatmap_size, self.heatmap_size),
+                mode="bilinear", align_corners=False,
             )
 
-        heatmaps = self.head(feat)  # (B, num_landmarks, Hm, Wm) raw logits
+        # Soft-argmax for differentiable coordinate extraction (training)
+        coords = soft_argmax(heatmaps)
 
-        # Soft-argmax on raw logits for training (differentiable)
-        coords = soft_argmax(heatmaps)  # (B, num_landmarks, 2) in [0, 1]
-
-        # Return raw logits as heatmaps — loss is computed on raw logits vs
-        # Gaussian targets (matching the paper's JointsMSELoss on raw output).
-        # No sigmoid here — sigmoid is only applied if needed for visualization.
         return heatmaps, coords
 
 
 def hard_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
-    """Hard argmax — returns the location of the peak value per heatmap channel.
+    """Hard argmax with sub-pixel refinement.
 
-    Matches the paper's decode_preds which uses np.argmax on the score map.
-    Not differentiable. Use for evaluation/NME reporting only.
+    Matches paper's decode_preds: find peak pixel, then shift ±0.25px
+    based on local gradient direction around the peak.
 
     Args:
-        heatmaps: (B, K, H, W) raw logits or probabilities.
+        heatmaps: (B, K, H, W) raw logits.
 
     Returns:
-        coords: (B, K, 2) peak locations normalised to [0, 1].
-                coords[..., 0] = x (col), coords[..., 1] = y (row).
+        (B, K, 2) peak locations in [0, 1].
     """
     B, K, H, W = heatmaps.shape
     flat = heatmaps.view(B, K, -1)
     idx  = flat.argmax(dim=-1)           # (B, K)
-    y    = (idx // W).float() / (H - 1) # normalised row
-    x    = (idx %  W).float() / (W - 1) # normalised col
-    return torch.stack([x, y], dim=-1)   # (B, K, 2)
+    py   = idx // W                      # row
+    px   = idx %  W                      # col
+
+    # Sub-pixel refinement: shift ±0.25 based on gradient sign around peak
+    # Clamp to avoid boundary indexing
+    px_c = px.clamp(1, W - 2)
+    py_c = py.clamp(1, H - 2)
+
+    # Gather heatmap values at the required offsets (vectorised over B, K)
+    b_idx = torch.arange(B, device=heatmaps.device).unsqueeze(1).expand(B, K)
+    k_idx = torch.arange(K, device=heatmaps.device).unsqueeze(0).expand(B, K)
+
+    def g(r, c):
+        return heatmaps[b_idx, k_idx, r.clamp(0, H-1), c.clamp(0, W-1)]
+
+    dx = (g(py_c - 1, px_c) - g(py_c - 1, px_c - 2)).sign() * 0.25
+    dy = (g(py_c,     px_c - 1) - g(py_c - 2, px_c - 1)).sign() * 0.25
+
+    x_refined = (px.float() + dx + 0.5) / W
+    y_refined = (py.float() + dy + 0.5) / H
+
+    return torch.stack([x_refined, y_refined], dim=-1)
 
 
 def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
     """Differentiable spatial expectation (soft-argmax).
 
-    Converts (B, K, H, W) heatmaps to (B, K, 2) normalised [0,1] coordinates
-    by computing the expected (x, y) position under the softmax distribution.
-
     Args:
-        heatmaps: (B, K, H, W) raw logits or scores.
+        heatmaps: (B, K, H, W) raw logits.
 
     Returns:
-        coords: (B, K, 2) with coords[..., 0] = x (col) and coords[..., 1] = y (row),
-                both in [0, 1].
+        (B, K, 2) expected coordinates in [0, 1].
     """
     B, K, H, W = heatmaps.shape
+    flat    = heatmaps.view(B, K, -1)
+    weights = F.softmax(flat, dim=-1).view(B, K, H, W)
 
-    # Softmax over spatial dimensions
-    flat = heatmaps.view(B, K, -1)                     # (B, K, H*W)
-    weights = F.softmax(flat, dim=-1)                  # (B, K, H*W)
-    weights = weights.view(B, K, H, W)
-
-    # Build coordinate grids normalised to [0, 1]
-    # x varies along columns (dim=3), y along rows (dim=2)
     device = heatmaps.device
-    xs = torch.linspace(0, 1, W, device=device)        # (W,)
-    ys = torch.linspace(0, 1, H, device=device)        # (H,)
+    xs = torch.linspace(0, 1, W, device=device)
+    ys = torch.linspace(0, 1, H, device=device)
 
-    # Expected x: sum over rows first, then dot with xs
-    x_coords = (weights.sum(dim=2) * xs.view(1, 1, W)).sum(dim=-1)   # (B, K)
-    y_coords = (weights.sum(dim=3) * ys.view(1, 1, H)).sum(dim=-1)   # (B, K)
+    x_coords = (weights.sum(dim=2) * xs.view(1, 1, W)).sum(dim=-1)
+    y_coords = (weights.sum(dim=3) * ys.view(1, 1, H)).sum(dim=-1)
 
-    return torch.stack([x_coords, y_coords], dim=-1)   # (B, K, 2)
+    return torch.stack([x_coords, y_coords], dim=-1)
 
 
 def make_gaussian_heatmaps(
     coords_norm: torch.Tensor,
     heatmap_size: int,
-    sigma: float = 2.0,
+    sigma: float = 1.5,
 ) -> torch.Tensor:
-    """Generate Gaussian target heatmaps from normalised landmark coordinates.
+    """Generate Gaussian target heatmaps.
+
+    Matches paper's generate_target: Gaussian is only placed within
+    3*sigma bounding box. Landmarks outside the heatmap are skipped
+    (target stays zero), matching the paper's implicit visibility masking.
 
     Args:
-        coords_norm: (B, K, 2) landmark coordinates normalised to [0, 1].
-        heatmap_size: Spatial size of the output heatmap (square).
-        sigma:        Standard deviation of the Gaussian in heatmap pixels.
+        coords_norm: (B, K, 2) in [0, 1].
+        heatmap_size: square heatmap side length.
+        sigma: Gaussian sigma in heatmap pixels.
 
     Returns:
-        heatmaps: (B, K, heatmap_size, heatmap_size) float32 Gaussians,
-                  each with peak value 1.0 at the landmark position.
+        (B, K, heatmap_size, heatmap_size) float32 with peaks at 1.0.
     """
     B, K, _ = coords_norm.shape
     H = W = heatmap_size
     device = coords_norm.device
 
-    # Pixel-space coordinates of landmarks on the heatmap grid
     px = coords_norm[:, :, 0] * (W - 1)   # (B, K)
-    py = coords_norm[:, :, 1] * (H - 1)   # (B, K)
+    py = coords_norm[:, :, 1] * (H - 1)
 
-    # Build meshgrid
     ys = torch.arange(H, device=device, dtype=torch.float32)
     xs = torch.arange(W, device=device, dtype=torch.float32)
-    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")   # (H, W) each
+    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")   # (H, W)
 
-    # Broadcast: (B, K, H, W)
     dx = grid_x.unsqueeze(0).unsqueeze(0) - px.unsqueeze(-1).unsqueeze(-1)
     dy = grid_y.unsqueeze(0).unsqueeze(0) - py.unsqueeze(-1).unsqueeze(-1)
 
     heatmaps = torch.exp(-(dx ** 2 + dy ** 2) / (2 * sigma ** 2))
+
+    # Zero out landmarks that are outside the heatmap (paper's visibility masking)
+    outside = (
+        (px < 0) | (px >= W) | (py < 0) | (py >= H)
+    )  # (B, K)
+    heatmaps[outside] = 0.0
 
     return heatmaps

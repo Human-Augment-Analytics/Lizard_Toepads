@@ -232,13 +232,16 @@ def main():
             target_hm = make_gaussian_heatmaps(
                 coords_gt, heatmap_size=heatmap_size, sigma=sigma
             )
-            pred_hm, _ = model(imgs)
+            pred_hm, coords_soft = model(imgs)
 
-            # Paper-faithful: MSE on raw logits vs Gaussian targets.
-            # The model head is initialised with std=0.001 so logits start near 0.
-            # Gaussian targets peak at 1.0 — the loss gradient drives the network
-            # to produce positive logits at landmark locations and near-zero elsewhere.
-            loss = criterion(pred_hm, target_hm)
+            # Paper-faithful JointsMSELoss: MSE only on visible landmarks
+            # (where target > 0). This is the implicit masking the paper uses
+            # by skipping landmarks outside the image in generate_target.
+            # Combined with coordinate MSE for stable gradient through soft-argmax.
+            visible    = (target_hm.sum(dim=(-2, -1)) > 0).float().unsqueeze(-1).unsqueeze(-1)
+            hm_loss    = (criterion(pred_hm, target_hm) * visible).sum() / visible.sum().clamp(min=1)
+            coord_loss = F.mse_loss(coords_soft, coords_gt)
+            loss       = hm_loss + coord_loss
 
             optimizer.zero_grad()
             loss.backward()
