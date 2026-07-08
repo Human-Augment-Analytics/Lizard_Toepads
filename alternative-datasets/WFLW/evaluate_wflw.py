@@ -172,6 +172,17 @@ def main():
             scale_indices=config.scale_indices,
         )
         logging.info(f"Model: HRNetGNN_MS, scale_indices={config.scale_indices}")
+    elif config.model_variant == "coord":
+        from hrnet_gcn_coord import HRNetGNN_Coord
+        model = HRNetGNN_Coord(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        )
+        logging.info("Model: HRNetGNN_Coord (single-scale + coordinate embedding)")
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",

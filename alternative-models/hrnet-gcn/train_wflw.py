@@ -40,6 +40,7 @@ from torch.utils.data import DataLoader
 
 from hrnet_gcn import HRNetGNN
 from hrnet_gcn_ms import HRNetGNN_MS
+from hrnet_gcn_coord import HRNetGNN_Coord
 
 # Locate wflw_dataset.py — handle case differences between systems
 # (repo uses lowercase 'wflw', cluster may have uppercase 'WFLW')
@@ -275,6 +276,16 @@ def main():
             scale_indices=config.scale_indices,
         ).to(device)
         logging.info(f"Model: HRNetGNN_MS (multi-scale), scale_indices={config.scale_indices}")
+    elif config.model_variant == "coord":
+        model = HRNetGNN_Coord(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        ).to(device)
+        logging.info("Model: HRNetGNN_Coord (single-scale + coordinate embedding)")
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",
@@ -332,18 +343,8 @@ def main():
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
             initial_coords = ms + noise
 
-            # Intermediate supervision with linear warmup.
-            # For the first `inter_sup_warmup` epochs, only the final iteration
-            # is supervised (avoids early-epoch gradient interference from
-            # poorly-converged intermediate iterations).
-            # After warmup, all iterations contribute equally, normalised by count.
-            all_preds = model(imgs, initial_coords, edge_index, return_all_iters=True)
-            inter_sup_warmup = 15  # epochs before intermediate supervision kicks in
-            if epoch <= inter_sup_warmup:
-                loss = landmark_loss(all_preds[-1], coords)
-            else:
-                loss = sum(landmark_loss(p, coords) for p in all_preds) / len(all_preds)
-            pred_coords = all_preds[-1]
+            pred_coords = model(imgs, initial_coords, edge_index)
+            loss = landmark_loss(pred_coords, coords)
 
             optimizer.zero_grad()
             loss.backward()
