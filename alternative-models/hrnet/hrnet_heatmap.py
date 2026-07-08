@@ -64,10 +64,18 @@ class HRNetHeatmap(nn.Module):
             ], dim=1)
             all_channels = fused_dummy.shape[1]
 
-        # Paper head: 1×1 conv on fused multi-scale features
-        self.head = nn.Conv2d(all_channels, num_landmarks, kernel_size=1)
-        nn.init.normal_(self.head.weight, std=0.001)
-        nn.init.constant_(self.head.bias, 0)
+        # Paper-faithful two-stage head matching HighResolutionNet.head:
+        #   Conv1x1(fused_ch → fused_ch) + BN + ReLU + Conv1x1(fused_ch → num_landmarks)
+        # Our earlier single-conv head was missing the intermediate BN+ReLU stage.
+        self.head = nn.Sequential(
+            nn.Conv2d(all_channels, all_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(all_channels, momentum=0.01),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(all_channels, num_landmarks, kernel_size=1),
+        )
+        # Initialise final conv with small weights so heatmaps start near zero
+        nn.init.normal_(self.head[-1].weight, std=0.001)
+        nn.init.constant_(self.head[-1].bias, 0)
 
     def forward(self, x: torch.Tensor):
         """
