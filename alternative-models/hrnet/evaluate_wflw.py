@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import cv2
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 ALT_DATASETS = SCRIPT_DIR.parent.parent / "alternative-datasets"
@@ -130,6 +131,10 @@ def main():
                 continue
 
             img_f    = img_np.astype(np.float32) / 255.0
+            # Resize to the training input size (model was trained at 256px)
+            input_size = cfg.get("input_size", 256)
+            img_np_resized = cv2.resize(img_np, (input_size, input_size))
+            img_f    = img_np_resized.astype(np.float32) / 255.0
             img_norm = (img_f - IMAGENET_MEAN) / IMAGENET_STD
             img_t    = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
 
