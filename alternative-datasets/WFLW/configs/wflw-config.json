@@ -15,7 +15,7 @@
     "graph_topology": "wflw",
     "mean_shape_path": "alternative-datasets/wflw/mean_shapes/mean_shape_wflw.pt",
     "init_noise_sigma": 0.03,
-    "model_variant": "coord",
+    "model_variant": "fused",
     "scale_indices": [3],
     "use_coarse_init": false,
     "coarse_init_ramp": 20,

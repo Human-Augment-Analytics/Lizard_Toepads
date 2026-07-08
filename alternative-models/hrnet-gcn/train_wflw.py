@@ -41,6 +41,7 @@ from torch.utils.data import DataLoader
 from hrnet_gcn import HRNetGNN
 from hrnet_gcn_ms import HRNetGNN_MS
 from hrnet_gcn_coord import HRNetGNN_Coord
+from hrnet_gcn_fused import HRNetGNN_Fused
 
 # Locate wflw_dataset.py — handle case differences between systems
 # (repo uses lowercase 'wflw', cluster may have uppercase 'WFLW')
@@ -292,8 +293,17 @@ def main():
             f"Model: HRNetGNN_Coord (coord embedding, "
             f"use_coarse_init={config.use_coarse_init})"
         )
-    else:
-        model = HRNetGNN(
+    elif config.model_variant == "fused":
+        model = HRNetGNN_Fused(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        ).to(device)
+        logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
+    else:        model = HRNetGNN(
             hrnet_backbone="hrnet_w18",
             feat_dim=config.feat_dim,
             gnn_hidden=config.gnn_hidden,
