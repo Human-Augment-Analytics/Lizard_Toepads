@@ -303,7 +303,8 @@ def main():
             num_iters=config.num_iters,
         ).to(device)
         logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
-    else:        model = HRNetGNN(
+    else:
+        model = HRNetGNN(
             hrnet_backbone="hrnet_w18",
             feat_dim=config.feat_dim,
             gnn_hidden=config.gnn_hidden,
