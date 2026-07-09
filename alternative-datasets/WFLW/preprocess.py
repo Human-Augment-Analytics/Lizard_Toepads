@@ -199,17 +199,11 @@ def affine_crop(
         borderValue=0,
     )  # HWC uint8 RGB
 
-    # Map landmarks through the same transform matrix
-    # Use the 3×3 transform matrix (get_transform) with invert=0 to go
-    # original → output, equivalent to applying the affine matrix directly.
-    t_mat = _get_transform_matrix(center, scale, output_size, rot=0.0)
-
-    lm_out = np.zeros_like(landmarks, dtype=np.float32)
-    for i, (x, y) in enumerate(landmarks):
-        pt = np.array([x - 1.0, y - 1.0, 1.0], dtype=np.float64)
-        mapped = t_mat @ pt          # (3,)
-        lm_out[i, 0] = float(mapped[0]) + 1.0
-        lm_out[i, 1] = float(mapped[1]) + 1.0
+    # Map landmarks through the same affine matrix used for the image warp.
+    # The 2×3 affine matrix T maps [x, y, 1]^T → [x', y']^T in output space.
+    # This is guaranteed to be consistent with cv2.warpAffine.
+    lm_h = np.hstack([landmarks.astype(np.float32), np.ones((len(landmarks), 1), dtype=np.float32)])
+    lm_out = (trans @ lm_h.T).T   # (98, 2) in output pixel space
 
     # Normalise to [0, 1]
     landmarks_norm = lm_out / float(target_size)

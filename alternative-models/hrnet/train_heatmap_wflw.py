@@ -164,7 +164,15 @@ def main():
         split_data["val"], input_size=input_size,
         num_landmarks=num_landmarks, augment=False,
     )
-    logging.info(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
+    test_files = split_data.get("test", [])
+    test_dataset = WFLWHeatmapDataset(
+        test_files, input_size=input_size,
+        num_landmarks=num_landmarks, augment=False,
+    ) if test_files else None
+    logging.info(
+        f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, "
+        f"Test: {len(test_dataset) if test_dataset else 0}"
+    )
 
     if len(val_dataset) == 0:
         logging.error("Val set is empty.")
@@ -178,6 +186,10 @@ def main():
         val_dataset, batch_size=val_batch, shuffle=False,
         num_workers=num_workers, pin_memory=True,
     )
+    test_loader = DataLoader(
+        test_dataset, batch_size=val_batch, shuffle=False,
+        num_workers=num_workers, pin_memory=True,
+    ) if test_dataset else None
 
     # ── Model ─────────────────────────────────────────────────────────────
     model = HRNetHeatmap(
@@ -228,10 +240,10 @@ def main():
             )
             pred_hm, _ = model(imgs)
 
-            # Paper-faithful: heatmap MSE only with visibility masking.
-            # No coordinate loss — paper trains purely on heatmap targets.
-            visible = (target_hm.sum(dim=(-2, -1)) > 0).float().unsqueeze(-1).unsqueeze(-1)
-            loss    = (criterion(pred_hm, target_hm) * visible).sum() / visible.sum().clamp(min=1)
+            # Plain MSE matching the paper exactly — no visibility masking.
+            # All 98 WFLW landmarks are always annotated so masking is not needed
+            # and the incorrect per-channel normalization it introduced hurt training.
+            loss = criterion(pred_hm, target_hm)
 
             optimizer.zero_grad()
             loss.backward()
@@ -262,10 +274,10 @@ def main():
                 # rather than soft-argmax which averages over diffuse peaks.
                 coords_pred = hard_argmax(pred_hm)
                 nme_total += compute_nme_batch(coords_pred, coords_gt)
-                # Avg pixel error reported in 512px space to match GCN logs.
-                # Coords are in [0,1] — multiply by 512 regardless of input_size
-                # so numbers are directly comparable across models.
-                px_err_total += (coords_pred - coords_gt).norm(dim=-1).mean().item() * 512 * imgs.size(0)
+                # Per-sample mean pixel error in 512px space, summed over batch
+                px_err_total += (
+                    (coords_pred - coords_gt).norm(dim=-1).mean(dim=-1).sum().item() * 512
+                )
 
         val_loss  /= len(val_dataset)
         val_nme    = nme_total / len(val_dataset)
@@ -276,7 +288,7 @@ def main():
             f"Train Loss: {train_loss:.6f}, "
             f"Val Loss: {val_loss:.6f}, "
             f"Val NME: {val_nme:.4f}, "
-            f"Avg Pixel Error (512px): {val_px_err:.2f}"
+            f"Val Pixel Error (512px): {val_px_err:.2f}"
         )
 
         scheduler.step()
@@ -298,6 +310,46 @@ def main():
             )
 
     logging.info(f"Training complete. Best val NME: {best_nme:.4f}")
+
+    # ── Test set evaluation ────────────────────────────────────────────────
+    # Load the best checkpoint and evaluate on the held-out official test split.
+    # This is the number that should be compared against the paper's 4.6 NME —
+    # not the val NME logged during training, which uses a sampled subset.
+    if test_loader is not None:
+        best_ckpt = str(ckpt_dir / f"{MODEL_NAME}_best.pth")
+        logging.info(f"Loading best checkpoint for test evaluation: {best_ckpt}")
+        model.load_state_dict(torch.load(best_ckpt, map_location=device))
+        model.eval()
+
+        test_nme_total = 0.0
+        test_px_total  = 0.0
+
+        with torch.no_grad():
+            for imgs, coords_gt, _, _flipped in test_loader:
+                imgs      = imgs.to(device)
+                coords_gt = coords_gt.to(device)
+
+                pred_hm, _ = model(imgs)
+                coords_pred = hard_argmax(pred_hm)
+
+                test_nme_total += compute_nme_batch(coords_pred, coords_gt)
+                test_px_total  += (
+                    (coords_pred - coords_gt).norm(dim=-1).mean(dim=-1).sum().item() * 512
+                )
+
+        test_nme = test_nme_total / len(test_dataset)
+        test_px  = test_px_total  / len(test_dataset)
+
+        logging.info(
+            f"Test NME: {test_nme:.4f}, "
+            f"Test Pixel Error (512px): {test_px:.2f} "
+            f"[{len(test_dataset)} samples]"
+        )
+    else:
+        logging.warning(
+            "No 'test' key in split JSON — skipping test evaluation. "
+            "Re-run generate_split.py to include a test set."
+        )
 
 
 if __name__ == "__main__":
