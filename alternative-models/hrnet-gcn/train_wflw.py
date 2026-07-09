@@ -188,6 +188,7 @@ def main():
     config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
     config.use_coarse_init  = cfg.get("use_coarse_init", True)       # learned global initializer
     config.coarse_init_ramp = cfg.get("coarse_init_ramp", 20)        # epochs to ramp coarse loss 0→1
+    config.rot_factor       = cfg.get("rot_factor", 0)               # rotation augmentation (0=off)
     config.lr_milestones    = cfg.get("lr_milestones", [60, 90])     # epochs to drop LR
     config.lr_gamma         = cfg.get("lr_gamma", 0.1)               # LR multiplier at each milestone
     config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
@@ -244,6 +245,7 @@ def main():
         input_size=config.input_size,
         num_landmarks=config.num_landmarks,
         augment=True,
+        rot_factor=config.rot_factor,
     )
     val_dataset = WFLWDataset(
         split_data["val"],
@@ -344,17 +346,24 @@ def main():
         model.train()
         epoch_loss = 0.0
 
-        for imgs, coords, _, flipped in train_loader:
+        for batch in train_loader:
+            if config.rot_factor > 0:
+                imgs, coords, _, flipped, _rot_angles = batch
+            else:
+                imgs, coords, _, flipped = batch
+
             imgs = imgs.to(device)
             coords = coords.to(device)
             B = imgs.shape[0]
 
             # Per-sample mean shape: use flipped mean shape for flipped samples.
-            # This ensures the GCN initialization matches each sample's orientation,
-            # which is critical for tightly-clustered landmarks like eye contours.
-            ms_base = mean_shape.unsqueeze(0).expand(B, -1, -1)        # (B, N, 2)
+            # When rotation augmentation is active the mean shape stays upright —
+            # the GCN must learn to recover from the mismatch, which is the
+            # rotation robustness we want. At inference there is no angle to
+            # provide so training with an upright prior matches inference.
+            ms_base = mean_shape.unsqueeze(0).expand(B, -1, -1)
             ms_flip = mean_shape_flipped.unsqueeze(0).expand(B, -1, -1)
-            flip_mask = flipped.to(device).view(B, 1, 1).float()        # (B, 1, 1)
+            flip_mask = flipped.to(device).view(B, 1, 1).float()
             ms = ms_flip * flip_mask + ms_base * (1.0 - flip_mask)
 
             noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma

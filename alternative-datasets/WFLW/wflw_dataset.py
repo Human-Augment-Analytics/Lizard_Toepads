@@ -11,12 +11,15 @@ Coordinate convention:
 Augmentation:
   Geometric augmentation requires landmark-aware handling:
     - HorizontalFlip: x coords mirrored AND landmarks reordered via WFLW_FLIP_PAIRS
-    - Affine (scale/translate only, no rotation): albumentations handles keypoints
-    - No rotation: the mean-shape GCN init assumes upright faces; rotation would
-      require rotating the mean shape too, deferred to a future experiment.
+    - Affine (scale/translate, no rotation by default)
+    - Rotation (optional via rot_factor > 0): both image and coords rotated
+      by the same angle. The training loop must also rotate the mean shape
+      initialization by the same angle — the rotation angle is returned as
+      the 5th element of the tuple when rot_factor > 0.
   Image-only augmentation (brightness/contrast) needs no special handling.
 """
 import sys
+import math
 from pathlib import Path
 import random
 
@@ -49,21 +52,28 @@ _FLIP_PERM_98 = _build_flip_permutation(WFLW_FLIP_PAIRS, 98)
 
 class WFLWDataset(Dataset):
     def __init__(self, pt_paths, input_size=512, num_landmarks=98,
-                 augment=True, flip_prob=0.5):
+                 augment=True, flip_prob=0.5, rot_factor=0, rot_prob=0.6):
         """
         Args:
             pt_paths:      List of .pt file paths.
-            input_size:    Expected image size (square). .pt files are already
-                           letterbox-cropped to this size by preprocess.py.
+            input_size:    Expected image size (square).
             num_landmarks: Number of landmarks (default 98 for WFLW).
             augment:       Whether to apply augmentation (disable for val/test).
             flip_prob:     Probability of horizontal flip when augment=True.
+            rot_factor:    Max rotation angle in degrees (0 = disabled).
+                           When > 0, the dataset returns a 5-tuple:
+                           (img, coords, orig_size, flipped, rot_angle_deg)
+                           and the training loop must rotate the mean shape
+                           by the same angle before passing to the GCN.
+            rot_prob:      Probability of applying rotation when rot_factor > 0.
         """
         self.paths = pt_paths
         self.input_size = input_size
         self.num_landmarks = num_landmarks
         self.augment = augment
         self.flip_prob = flip_prob
+        self.rot_factor = rot_factor
+        self.rot_prob = rot_prob
 
         # Use the pre-built 98-point permutation or build one for other counts
         if num_landmarks == 98:
@@ -102,26 +112,28 @@ class WFLWDataset(Dataset):
         orig_size = data.get("orig_size", torch.tensor([img.shape[0], img.shape[1]]))
 
         was_flipped = False
+        rot_angle = 0.0
         if self.augment:
-            img, coords, was_flipped = self._augment(img, coords)
+            img, coords, was_flipped, rot_angle = self._augment(img, coords)
 
         # Resize to input_size if different from native 512px crop size
         if self.resize_transform is not None:
             resized = self.resize_transform(image=img)
             img = resized["image"]
-            # Coords are already in [0,1] relative to 512px; they remain valid
-            # after letterbox resize since the relative positions are preserved.
 
         img_norm = self.normalize(image=img)["image"]
         img_tensor = torch.from_numpy(img_norm).permute(2, 0, 1).float()
         coords_tensor = torch.from_numpy(coords).float()
         flipped_tensor = torch.tensor(was_flipped, dtype=torch.bool)
 
+        if self.rot_factor > 0:
+            return img_tensor, coords_tensor, orig_size, flipped_tensor, torch.tensor(rot_angle, dtype=torch.float32)
         return img_tensor, coords_tensor, orig_size, flipped_tensor
 
     def _augment(self, img: np.ndarray, coords: np.ndarray):
-        """Apply augmentation. Returns (img, coords, was_flipped)."""
+        """Apply augmentation. Returns (img, coords, was_flipped, rot_angle_deg)."""
         was_flipped = False
+        rot_angle = 0.0
 
         # ── Horizontal flip ───────────────────────────────────────────────
         if random.random() < self.flip_prob:
@@ -130,25 +142,16 @@ class WFLWDataset(Dataset):
             coords = coords[self.flip_perm]
             was_flipped = True
 
-        # ── Affine (scale + translate, no rotation) ───────────────────────
-        # Implemented manually so we can reject transforms that push any
-        # landmark out of [0,1] bounds rather than clipping — clipping
-        # multiple landmarks to the same border coordinate causes centroid
-        # collapse during training.
+        # ── Affine (scale + translate) ────────────────────────────────────
         if random.random() < 0.7:
             for _ in range(10):
                 scale = random.uniform(0.90, 1.10)
-                tx = random.uniform(-0.05, 0.05)  # fraction of image width
+                tx = random.uniform(-0.05, 0.05)
                 ty = random.uniform(-0.05, 0.05)
-
-                # Transform coords: scale around centre, then translate
                 new_coords = (coords - 0.5) * scale + 0.5
                 new_coords[:, 0] += tx
                 new_coords[:, 1] += ty
-
-                # Only accept if all landmarks stay within bounds
                 if new_coords.min() >= 0.0 and new_coords.max() <= 1.0:
-                    # Apply same transform to image via OpenCV
                     cx, cy = self.input_size / 2, self.input_size / 2
                     M = cv2.getRotationMatrix2D((cx, cy), 0, scale)
                     M[0, 2] += tx * self.input_size
@@ -156,14 +159,36 @@ class WFLWDataset(Dataset):
                     img = cv2.warpAffine(
                         img, M, (self.input_size, self.input_size),
                         flags=cv2.INTER_LINEAR,
-                        borderMode=cv2.BORDER_CONSTANT,
-                        borderValue=0,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=0,
                     )
                     coords = new_coords
                     break
-            # If no valid transform found after 10 tries, skip affine
+
+        # ── In-plane rotation (optional) ──────────────────────────────────
+        if self.rot_factor > 0 and random.random() < self.rot_prob:
+            for _ in range(10):
+                angle = random.uniform(-self.rot_factor, self.rot_factor)
+                theta = math.radians(angle)
+                cos_t, sin_t = math.cos(theta), math.sin(theta)
+                # Rotate coords around image centre (0.5, 0.5)
+                x = coords[:, 0] - 0.5
+                y = coords[:, 1] - 0.5
+                x_rot = cos_t * x - sin_t * y + 0.5
+                y_rot = sin_t * x + cos_t * y + 0.5
+                new_coords = np.stack([x_rot, y_rot], axis=-1).astype(np.float32)
+                if new_coords.min() >= 0.0 and new_coords.max() <= 1.0:
+                    cx, cy = self.input_size / 2, self.input_size / 2
+                    M = cv2.getRotationMatrix2D((cx, cy), -angle, 1.0)
+                    img = cv2.warpAffine(
+                        img, M, (self.input_size, self.input_size),
+                        flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+                    )
+                    coords = new_coords
+                    rot_angle = angle
+                    break
 
         # ── Color jitter ──────────────────────────────────────────────────
         img = self.color_transform(image=img)["image"]
 
-        return img, coords, was_flipped
+        return img, coords, was_flipped, rot_angle
