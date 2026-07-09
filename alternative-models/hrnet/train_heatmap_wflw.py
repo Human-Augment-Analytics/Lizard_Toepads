@@ -37,6 +37,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 import argparse
 import json
 import logging
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -46,22 +47,14 @@ import torch.nn.functional as F
 
 from hrnet_heatmap import HRNetHeatmap, make_gaussian_heatmaps, hard_argmax
 
-# Load WFLWDataset the same way train_wflw.py does — handles case differences
-import importlib.util as _ilu
-_wflw_dataset_path = None
-for _candidate in ["wflw", "WFLW"]:
-    _p = _ALT_DATASETS / _candidate / "wflw_dataset.py"
-    if _p.exists():
-        _wflw_dataset_path = _p
-        break
-if _wflw_dataset_path is None:
-    raise FileNotFoundError(
-        f"wflw_dataset.py not found under {_ALT_DATASETS}/wflw/ or WFLW/"
-    )
-_ds_spec = _ilu.spec_from_file_location("wflw_dataset", str(_wflw_dataset_path))
-_ds_mod = _ilu.module_from_spec(_ds_spec)
-_ds_spec.loader.exec_module(_ds_mod)
-WFLWDataset = _ds_mod.WFLWDataset
+# WFLWHeatmapDataset: paper-faithful augmentation (flip + rotation + scale)
+# Used instead of WFLWDataset which lacks rotation.
+import importlib.util as _ilu2
+_hm_ds_path = Path(_SCRIPT_DIR) / "wflw_heatmap_dataset.py"
+_hm_spec = _ilu2.spec_from_file_location("wflw_heatmap_dataset", str(_hm_ds_path))
+_hm_mod = _ilu2.module_from_spec(_hm_spec)
+_hm_spec.loader.exec_module(_hm_mod)
+WFLWHeatmapDataset = _hm_mod.WFLWHeatmapDataset
 
 MODEL_NAME = "hrnet_heatmap_wflw"
 SCRIPT_DIR = _SCRIPT_DIR
@@ -163,11 +156,11 @@ def main():
     with open(split_path) as f:
         split_data = json.load(f)
 
-    train_dataset = WFLWDataset(
+    train_dataset = WFLWHeatmapDataset(
         split_data["train"], input_size=input_size,
         num_landmarks=num_landmarks, augment=True,
     )
-    val_dataset = WFLWDataset(
+    val_dataset = WFLWHeatmapDataset(
         split_data["val"], input_size=input_size,
         num_landmarks=num_landmarks, augment=False,
     )
