@@ -183,6 +183,17 @@ def main():
             num_iters=config.num_iters,
         )
         logging.info("Model: HRNetGNN_Coord (single-scale + coordinate embedding)")
+    elif config.model_variant == "fused":
+        from hrnet_gcn_fused import HRNetGNN_Fused
+        model = HRNetGNN_Fused(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        )
+        logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",
