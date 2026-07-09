@@ -190,11 +190,12 @@ def main():
         f"heatmap_size={heatmap_size} | sigma={sigma}"
     )
 
-    # Separate LR: backbone fine-tunes slowly, head trains from scratch
-    optimizer = torch.optim.AdamW([
-        {"params": model.backbone.parameters(), "lr": cfg["lr_backbone"]},
-        {"params": model.head.parameters(),     "lr": cfg["lr_head"]},
-    ], weight_decay=cfg["weight_decay"])
+    # Plain Adam matching paper exactly (WD=0, no weight decay)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=cfg["lr_backbone"],
+        weight_decay=cfg["weight_decay"],
+    )
 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=cfg["lr_milestones"], gamma=cfg["lr_gamma"]
@@ -225,16 +226,12 @@ def main():
             target_hm = make_gaussian_heatmaps(
                 coords_gt, heatmap_size=heatmap_size, sigma=sigma
             )
-            pred_hm, coords_soft = model(imgs)
+            pred_hm, _ = model(imgs)
 
-            # Paper-faithful JointsMSELoss: MSE only on visible landmarks
-            # (where target > 0). This is the implicit masking the paper uses
-            # by skipping landmarks outside the image in generate_target.
-            # Combined with coordinate MSE for stable gradient through soft-argmax.
-            visible    = (target_hm.sum(dim=(-2, -1)) > 0).float().unsqueeze(-1).unsqueeze(-1)
-            hm_loss    = (criterion(pred_hm, target_hm) * visible).sum() / visible.sum().clamp(min=1)
-            coord_loss = F.mse_loss(coords_soft, coords_gt)
-            loss       = hm_loss + coord_loss
+            # Paper-faithful: heatmap MSE only with visibility masking.
+            # No coordinate loss — paper trains purely on heatmap targets.
+            visible = (target_hm.sum(dim=(-2, -1)) > 0).float().unsqueeze(-1).unsqueeze(-1)
+            loss    = (criterion(pred_hm, target_hm) * visible).sum() / visible.sum().clamp(min=1)
 
             optimizer.zero_grad()
             loss.backward()
@@ -258,7 +255,7 @@ def main():
                 target_hm = make_gaussian_heatmaps(
                     coords_gt, heatmap_size=heatmap_size, sigma=sigma
                 )
-                pred_hm, coords_soft = model(imgs)
+                pred_hm, _ = model(imgs)
 
                 val_loss  += criterion(pred_hm, target_hm).item() * imgs.size(0)
                 # Use hard argmax for NME — matches paper's decode_preds (argmax)

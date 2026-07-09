@@ -194,6 +194,21 @@ def main():
             num_iters=config.num_iters,
         )
         logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
+    elif config.model_variant == "hinit":
+        from hrnet_gcn_hinit import HRNetGNN_HInit
+        heatmap_ckpt = cfg.get("heatmap_checkpoint")
+        if not heatmap_ckpt or not Path(heatmap_ckpt).exists():
+            logging.error(f"hinit requires heatmap_checkpoint: {heatmap_ckpt}")
+            sys.exit(1)
+        model = HRNetGNN_HInit(
+            heatmap_checkpoint=heatmap_ckpt,
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        )
+        logging.info("Model: HRNetGNN_HInit (frozen heatmap initializer + fused GCN)")
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",

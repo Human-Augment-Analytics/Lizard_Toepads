@@ -42,6 +42,7 @@ from hrnet_gcn import HRNetGNN
 from hrnet_gcn_ms import HRNetGNN_MS
 from hrnet_gcn_coord import HRNetGNN_Coord
 from hrnet_gcn_fused import HRNetGNN_Fused
+from hrnet_gcn_hinit import HRNetGNN_HInit
 
 # Locate wflw_dataset.py — handle case differences between systems
 # (repo uses lowercase 'wflw', cluster may have uppercase 'WFLW')
@@ -184,11 +185,12 @@ def main():
     config.graph_topology   = cfg.get("graph_topology", "wflw")
     config.mean_shape_path  = cfg.get("mean_shape_path", None)
     config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
-    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale" | "coord"
+    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale" | "coord" | "fused" | "hinit"
     config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
-    config.use_coarse_init  = cfg.get("use_coarse_init", True)       # learned global initializer
-    config.coarse_init_ramp = cfg.get("coarse_init_ramp", 20)        # epochs to ramp coarse loss 0→1
-    config.rot_factor       = cfg.get("rot_factor", 0)               # rotation augmentation (0=off)
+    config.use_coarse_init  = cfg.get("use_coarse_init", True)
+    config.coarse_init_ramp = cfg.get("coarse_init_ramp", 20)
+    config.rot_factor       = cfg.get("rot_factor", 0)
+    config.heatmap_checkpoint = cfg.get("heatmap_checkpoint", None)  # for "hinit" variant
     config.lr_milestones    = cfg.get("lr_milestones", [60, 90])     # epochs to drop LR
     config.lr_gamma         = cfg.get("lr_gamma", 0.1)               # LR multiplier at each milestone
     config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
@@ -305,6 +307,26 @@ def main():
             num_iters=config.num_iters,
         ).to(device)
         logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
+    elif config.model_variant == "hinit":
+        if not config.heatmap_checkpoint or not Path(config.heatmap_checkpoint).exists():
+            logging.error(
+                f"hinit variant requires heatmap_checkpoint in config. "
+                f"Got: {config.heatmap_checkpoint}"
+            )
+            sys.exit(1)
+        model = HRNetGNN_HInit(
+            heatmap_checkpoint=config.heatmap_checkpoint,
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        ).to(device)
+        logging.info(
+            f"Model: HRNetGNN_HInit (frozen heatmap initializer + fused GCN)\n"
+            f"  heatmap_checkpoint: {config.heatmap_checkpoint}"
+        )
     else:
         model = HRNetGNN(
             hrnet_backbone="hrnet_w18",

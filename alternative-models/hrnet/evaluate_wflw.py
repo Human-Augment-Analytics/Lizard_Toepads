@@ -139,10 +139,12 @@ def main():
             img_t    = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
 
             heatmaps, _ = model(img_t)
-            # Use hard argmax with sub-pixel refinement — matches training NME
-            # computation. Soft-argmax on raw logits averages toward center
-            # when peaks are sharp/narrow, giving inflated NME.
+            # Use hard argmax with sub-pixel refinement
             coords = hard_argmax(heatmaps)
+            # Both pred and gt are in [0,1] relative to the same coordinate
+            # space — the .pt files store tps normalized to [0,1] on 512px,
+            # and the model was trained with the same normalization.
+            # Use TARGET_SIZE for both to get absolute pixel distances.
             pred_px = coords[0].cpu().numpy() * TARGET_SIZE
             gt_px   = gt_norm * TARGET_SIZE
 
