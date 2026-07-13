@@ -28,6 +28,7 @@ import sys
 import argparse
 import json
 import logging
+import warnings
 from pathlib import Path
 
 import cv2
@@ -270,6 +271,14 @@ def main():
     )
 
     criterion = torch.nn.MSELoss()
+
+    # Suppress the "scheduler.step() before optimizer.step()" warning —
+    # this is intentional to match reference tools/train.py behaviour.
+    warnings.filterwarnings(
+        "ignore",
+        message="Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`",
+        category=UserWarning,
+    )
 
     ckpt_dir = SCRIPT_DIR / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)

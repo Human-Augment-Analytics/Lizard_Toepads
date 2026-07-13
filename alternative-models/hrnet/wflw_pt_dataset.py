@@ -5,14 +5,19 @@ Reads our existing pre-cropped 512x512 .pt files and presents the reference
 (img_tensor, target_hm, meta) interface expected by train_heatmap_wflw_ref.py.
 
 Key design:
-- Uses the patched reference crop(), generate_target(), fliplr_joints(),
-  transform_pixel() from HRNet-Facial-Landmark-Detection/lib/utils/transforms.py
+- Uses crop_compat() — a NumPy-2.0-safe reimplementation of the reference
+  crop() that uses cv2 throughout instead of scipy.misc / np.math.
+  The reference crop() has NumPy 2.0 incompatibilities (np.math removed)
+  and scipy.misc incompatibilities (imresize/imrotate removed in SciPy 1.3).
+  crop_compat() produces geometrically identical results.
+- generate_target() and transform_pixel() from the reference repo are imported
+  directly (they have no compatibility issues).
 - Fixed center=(256, 256) and scale=512/200=2.56 — valid because all .pt files
-  are pre-cropped 512x512 affine squares
+  are pre-cropped 512x512 affine squares.
 - Augmentation: flip (p=0.5), scale jitter (+-25%), rotation (+-30 deg, p=0.6)
-  applied to the 512px image before crop() resizes to 256x256, recovering
-  the context-rich augmentation behaviour of the reference pipeline
-- meta dict contains center, scale, pts (512px) for decode_preds + compute_nme
+  applied to the 512px image before crop resizes to 256x256, recovering
+  the context-rich augmentation behaviour of the reference pipeline.
+- meta dict contains center, scale, pts (512px) for decode_preds + compute_nme.
 
 Returns: (img_tensor, target_hm, meta)
   img_tensor: (3, 256, 256) float32, ImageNet-normalised
@@ -21,9 +26,11 @@ Returns: (img_tensor, target_hm, meta)
               pts (Tensor[98,2] in 512px space), tpts (Tensor[98,2] in 64px space)
 """
 import sys
+import math
 import random
 from pathlib import Path
 
+import cv2
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -47,21 +54,83 @@ _REF_ROOT = str(_REF_REPO)
 if _REF_ROOT not in sys.path:
     sys.path.insert(0, _REF_ROOT)
 
-from lib.utils.transforms import crop, generate_target, fliplr_joints, transform_pixel
+# Import only the functions that are NumPy 2.0 safe.
+# We do NOT import crop() — it uses np.math (removed in NumPy 2.0) and
+# scipy.misc (removed in SciPy 1.3). We use crop_compat() below instead.
+from lib.utils.transforms import (
+    generate_target,
+    fliplr_joints,
+    transform_pixel,
+    get_affine_transform,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-# All .pt crops are 512x512 affine-cropped squares.
-# center = geometric image centre; scale so that scale*200 = 512 px.
 _FIXED_CENTER = torch.Tensor([256.0, 256.0])
 _FIXED_SCALE  = 512.0 / 200.0   # = 2.56
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
-_INPUT_SIZE   = [256, 256]   # crop() output size
-_HEATMAP_SIZE = [64, 64]     # generate_target() output size
-_SIGMA        = 1.5          # Gaussian sigma in heatmap pixels (paper: 1.5)
+_INPUT_SIZE    = [256, 256]
+_HEATMAP_SIZE  = [64, 64]
+_SIGMA         = 1.5
 _NUM_LANDMARKS = 98
+
+
+def crop_compat(img, center, scale, output_size, rot=0):
+    """NumPy-2.0-safe replacement for the reference crop() function.
+
+    The reference crop() uses np.math.floor (removed in NumPy 2.0) and
+    scipy.misc.imresize/imrotate (removed in SciPy 1.3). This implementation
+    is geometrically identical but uses only cv2 and standard math.
+
+    For our use case (512px input, scale=2.56, output_size=[256,256]):
+      sf = scale * 200 / output_size[0] = 2.56 * 200 / 256 = 2.0
+    This hits the sf >= 2 branch in the original, which downsizes the source
+    image before extracting the crop. We replicate that exactly.
+
+    Args:
+        img:         (H, W, 3) float32 HWC array
+        center:      torch.Tensor([cx, cy]) in pixel space
+        scale:       float — face size = scale * 200 pixels
+        output_size: [W, H] of the output crop (both 256 for us)
+        rot:         rotation angle in degrees (0 for val/test)
+
+    Returns:
+        (output_size[1], output_size[0], 3) uint8 HWC array
+    """
+    ht, wd = img.shape[0], img.shape[1]
+    sf = scale * 200.0 / output_size[0]
+
+    if sf >= 2:
+        # Downsample source image for efficiency (matches reference behaviour)
+        new_ht = int(math.floor(ht / sf))
+        new_wd = int(math.floor(wd / sf))
+        if max(new_ht, new_wd) < 2:
+            # Degenerate case — return zeros
+            return np.zeros((output_size[1], output_size[0], img.shape[2]),
+                            dtype=np.uint8)
+        img = cv2.resize(img.astype(np.uint8), (new_wd, new_ht),
+                         interpolation=cv2.INTER_LINEAR)
+        center_ds = center.clone()
+        center_ds[0] = center_ds[0] / sf
+        center_ds[1] = center_ds[1] / sf
+        scale_ds = scale / sf
+    else:
+        center_ds = center
+        scale_ds = scale
+
+    # Use get_affine_transform from the reference repo (no compatibility issues)
+    # to compute the 2x3 affine matrix, then warp directly.
+    trans = get_affine_transform(center_ds, scale_ds, rot, output_size)
+    dst = cv2.warpAffine(
+        img.astype(np.uint8), trans,
+        (int(output_size[0]), int(output_size[1])),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    return dst
 
 
 class WFLWPtDataset(data.Dataset):
@@ -129,10 +198,11 @@ class WFLWPtDataset(data.Dataset):
             if random.random() <= 0.6:
                 r = random.uniform(-self.rot_factor, self.rot_factor)
 
-        # ── Step 4: Crop to 256x256 using reference crop() ───────────────
-        # crop() expects a float32 HWC array and a torch.Tensor center.
-        img_cropped = crop(img, center, scale, _INPUT_SIZE, rot=r)
-        # img_cropped: (256, 256, 3) float32
+        # ── Step 4: Crop to 256x256 using crop_compat() ─────────────────
+        # crop_compat() is our cv2-based replacement for the reference crop()
+        # which has NumPy 2.0 (np.math) and SciPy (scipy.misc) incompatibilities.
+        img_cropped = crop_compat(img, center, scale, _INPUT_SIZE, rot=r)
+        # img_cropped: (256, 256, 3) uint8
 
         # ── Step 5: Transform landmarks to 64px heatmap space ─────────────
         # transform_pixel maps a point from original image space to the
