@@ -143,9 +143,10 @@ class WFLWDataset(Dataset):
             was_flipped = True
 
         # ── Affine (scale + translate) ────────────────────────────────────
+        # Scale range matches the reference pipeline (SCALE_FACTOR: 0.25 → ±25%).
         if random.random() < 0.7:
             for _ in range(10):
-                scale = random.uniform(0.90, 1.10)
+                scale = random.uniform(0.75, 1.25)
                 tx = random.uniform(-0.05, 0.05)
                 ty = random.uniform(-0.05, 0.05)
                 new_coords = (coords - 0.5) * scale + 0.5

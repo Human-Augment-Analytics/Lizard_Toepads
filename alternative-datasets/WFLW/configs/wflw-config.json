@@ -19,7 +19,7 @@
     "scale_indices": [3],
     "use_coarse_init": false,
     "coarse_init_ramp": 20,
-    "rot_factor": 0,
+    "rot_factor": 30,
     "lr_milestones": [60, 90],
     "lr_gamma": 0.1,
     "grad_clip": 0.5

@@ -196,6 +196,11 @@ def main():
     config.grad_clip        = cfg.get("grad_clip", 0.5)              # gradient norm clip
     config.lr_backbone      = cfg.get("lr_backbone", 1e-5)           # backbone fine-tune LR
     config.weight_decay     = cfg.get("weight_decay", 1e-4)          # L2 reg on GCN head only
+    # Optional: path to a .pth checkpoint whose backbone weights should replace
+    # timm's ImageNet init. Accepts HRNetHeatmap checkpoints (trained via the
+    # reference pipeline) or any state_dict containing "backbone.*" keys.
+    # GCN head weights are always initialised from scratch regardless.
+    config.backbone_pretrained_path = cfg.get("backbone_pretrained_path", None)
 
     setup_logging()
 
@@ -338,9 +343,53 @@ def main():
         ).to(device)
         logging.info("Model: HRNetGNN (standard, single scale)")
 
+    # ── Optional backbone weight replacement ───────────────────────────────
+    # If backbone_pretrained_path is set, load backbone weights from an external
+    # checkpoint (e.g. a trained HRNetHeatmap .pth) instead of timm's ImageNet
+    # weights. Only keys matching "backbone.*" in the GCN model are replaced;
+    # GCN head weights (node_feat_proj, gnn_layers, delta_head, etc.) are
+    # always freshly initialised regardless.
+    if config.backbone_pretrained_path:
+        bp_path = Path(config.backbone_pretrained_path)
+        if not bp_path.exists():
+            logging.error(
+                f"backbone_pretrained_path not found: {bp_path}\n"
+                "Train the reference heatmap model first and update the config."
+            )
+            sys.exit(1)
+
+        ext_state = torch.load(bp_path, map_location=device)
+        # Support both raw state_dicts and checkpoint dicts with a "state_dict" key
+        if isinstance(ext_state, dict) and "state_dict" in ext_state:
+            ext_state = ext_state["state_dict"]
+
+        # Filter to backbone keys only, stripping the "backbone." prefix from
+        # the source so they align with model.backbone.state_dict() keys.
+        # The source .pth uses "backbone.<timm_key>" regardless of model variant.
+        backbone_state = model.backbone.state_dict()
+        matched, skipped = {}, []
+        for k, v in ext_state.items():
+            if k.startswith("backbone."):
+                inner_key = k[len("backbone."):]
+                if inner_key in backbone_state and backbone_state[inner_key].shape == v.shape:
+                    matched[inner_key] = v
+                else:
+                    skipped.append(k)
+
+        backbone_state.update(matched)
+        model.backbone.load_state_dict(backbone_state, strict=True)
+        logging.info(
+            f"Backbone weights loaded from: {bp_path}\n"
+            f"  Matched: {len(matched)} / {len(backbone_state)} backbone keys\n"
+            f"  Skipped (shape mismatch or missing): {len(skipped)}"
+        )
+        if len(matched) < len(backbone_state) * 0.9:
+            logging.warning(
+                f"Less than 90% of backbone keys matched — "
+                f"verify the source checkpoint is an HRNetHeatmap .pth."
+            )
+
     # Separate LR for backbone (fine-tune slowly) vs GCN head (train from scratch).
-    # Backbone uses a lower LR to preserve pretrained ImageNet features.
-    # Weight decay only on GCN head — backbone already has pretrained structure.
     backbone_params = list(model.backbone.parameters())
     backbone_ids    = {id(p) for p in backbone_params}
     head_params     = [p for p in model.parameters() if id(p) not in backbone_ids]

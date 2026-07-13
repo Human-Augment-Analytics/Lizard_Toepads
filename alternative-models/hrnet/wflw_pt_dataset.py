@@ -120,7 +120,7 @@ def crop_compat(img, center, scale, output_size, rot=0):
         center_np = center_np / sf
         scale = scale / sf
 
-    trans = get_affine_transform(center_np, scale, rot, output_size)
+    trans = get_affine_transform(center_np, np.array([scale, scale], dtype=np.float32), rot, output_size)
     dst = cv2.warpAffine(
         img.astype(np.uint8), trans,
         (int(output_size[0]), int(output_size[1])),
