@@ -31,21 +31,23 @@ import torch.utils.data as data
 # ── Import reference functions from the patched HRNet repo ───────────────────
 # Resolve relative to this file's location so the path works regardless of cwd.
 _HERE = Path(__file__).resolve().parent
-_REF_LIB = _HERE.parent.parent.parent / "HRNet-Facial-Landmark-Detection" / "lib"
+_REF_REPO = _HERE.parent.parent.parent / "HRNet-Facial-Landmark-Detection"
 
 # Fallback: walk up from cwd if __file__ resolution doesn't reach the workspace root
-if not _REF_LIB.exists():
+if not _REF_REPO.exists():
     _cwd = Path.cwd()
     for _candidate in [_cwd, _cwd.parent, _cwd.parent.parent]:
-        _try = _candidate / "HRNet-Facial-Landmark-Detection" / "lib"
+        _try = _candidate / "HRNet-Facial-Landmark-Detection"
         if _try.exists():
-            _REF_LIB = _try
+            _REF_REPO = _try
             break
 
-if str(_REF_LIB) not in sys.path:
-    sys.path.insert(0, str(_REF_LIB))
+# Add repo root (not lib/) so that relative imports inside the package resolve.
+_REF_ROOT = str(_REF_REPO)
+if _REF_ROOT not in sys.path:
+    sys.path.insert(0, _REF_ROOT)
 
-from utils.transforms import crop, generate_target, fliplr_joints, transform_pixel
+from lib.utils.transforms import crop, generate_target, fliplr_joints, transform_pixel
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 # All .pt crops are 512x512 affine-cropped squares.

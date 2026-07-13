@@ -38,36 +38,43 @@ from torch.utils.data import DataLoader
 # ── Resolve paths ────────────────────────────────────────────────────────────
 _SCRIPT_DIR  = Path(__file__).resolve().parent
 _WORKSPACE   = _SCRIPT_DIR.parent.parent.parent
-_REF_LIB     = _WORKSPACE / "HRNet-Facial-Landmark-Detection" / "lib"
+_REF_REPO    = _WORKSPACE / "HRNet-Facial-Landmark-Detection"
+_REF_LIB     = _REF_REPO / "lib"
 
 # Verify the path resolved correctly — fail early with a clear message if not
 if not _REF_LIB.exists():
     # Fallback: walk up from cwd looking for the reference repo
     _cwd = Path.cwd()
     for _candidate in [_cwd, _cwd.parent, _cwd.parent.parent]:
-        _try = _candidate / "HRNet-Facial-Landmark-Detection" / "lib"
+        _try = _candidate / "HRNet-Facial-Landmark-Detection"
         if _try.exists():
-            _REF_LIB = _try
+            _REF_REPO = _try
+            _REF_LIB  = _REF_REPO / "lib"
             break
     else:
         print(
-            f"ERROR: HRNet-Facial-Landmark-Detection/lib not found.\n"
-            f"  Tried: {_WORKSPACE / 'HRNet-Facial-Landmark-Detection' / 'lib'}\n"
+            f"ERROR: HRNet-Facial-Landmark-Detection not found.\n"
+            f"  Tried: {_WORKSPACE / 'HRNet-Facial-Landmark-Detection'}\n"
             f"  Ensure the reference repo is checked out alongside Lizard_Toepads.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-if str(_REF_LIB) not in sys.path:
-    sys.path.insert(0, str(_REF_LIB))
+# Add the REPO ROOT (parent of lib) to sys.path so that relative imports inside
+# the reference package (e.g. from ..utils.transforms import ...) resolve correctly.
+# With this, we import as: from lib.core.evaluation import decode_preds
+_REF_ROOT = str(_REF_REPO)
+if _REF_ROOT not in sys.path:
+    sys.path.insert(0, _REF_ROOT)
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-# Confirm resolution before attempting import
-print(f"[train_heatmap_wflw_ref] ref lib path: {_REF_LIB}", flush=True)
+print(f"[train_heatmap_wflw_ref] ref repo path: {_REF_REPO}", flush=True)
 
-# Reference evaluation functions
-from core.evaluation import decode_preds, compute_nme as ref_compute_nme
+# Reference evaluation functions — imported as lib.core.evaluation because
+# evaluation.py uses relative imports (from ..utils.transforms import ...)
+# which require lib to be a package, not a path entry.
+from lib.core.evaluation import decode_preds, compute_nme as ref_compute_nme
 
 from hrnet_heatmap import HRNetHeatmap, hard_argmax
 from wflw_pt_dataset import WFLWPtDataset
