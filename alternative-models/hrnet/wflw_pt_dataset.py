@@ -32,6 +32,16 @@ import torch.utils.data as data
 # Resolve relative to this file's location so the path works regardless of cwd.
 _HERE = Path(__file__).resolve().parent
 _REF_LIB = _HERE.parent.parent.parent / "HRNet-Facial-Landmark-Detection" / "lib"
+
+# Fallback: walk up from cwd if __file__ resolution doesn't reach the workspace root
+if not _REF_LIB.exists():
+    _cwd = Path.cwd()
+    for _candidate in [_cwd, _cwd.parent, _cwd.parent.parent]:
+        _try = _candidate / "HRNet-Facial-Landmark-Detection" / "lib"
+        if _try.exists():
+            _REF_LIB = _try
+            break
+
 if str(_REF_LIB) not in sys.path:
     sys.path.insert(0, str(_REF_LIB))
 

@@ -40,10 +40,31 @@ _SCRIPT_DIR  = Path(__file__).resolve().parent
 _WORKSPACE   = _SCRIPT_DIR.parent.parent.parent
 _REF_LIB     = _WORKSPACE / "HRNet-Facial-Landmark-Detection" / "lib"
 
+# Verify the path resolved correctly — fail early with a clear message if not
+if not _REF_LIB.exists():
+    # Fallback: walk up from cwd looking for the reference repo
+    _cwd = Path.cwd()
+    for _candidate in [_cwd, _cwd.parent, _cwd.parent.parent]:
+        _try = _candidate / "HRNet-Facial-Landmark-Detection" / "lib"
+        if _try.exists():
+            _REF_LIB = _try
+            break
+    else:
+        print(
+            f"ERROR: HRNet-Facial-Landmark-Detection/lib not found.\n"
+            f"  Tried: {_WORKSPACE / 'HRNet-Facial-Landmark-Detection' / 'lib'}\n"
+            f"  Ensure the reference repo is checked out alongside Lizard_Toepads.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 if str(_REF_LIB) not in sys.path:
     sys.path.insert(0, str(_REF_LIB))
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
+
+# Confirm resolution before attempting import
+print(f"[train_heatmap_wflw_ref] ref lib path: {_REF_LIB}", flush=True)
 
 # Reference evaluation functions
 from core.evaluation import decode_preds, compute_nme as ref_compute_nme
