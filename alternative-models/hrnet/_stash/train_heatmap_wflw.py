@@ -240,9 +240,7 @@ def main():
             )
             pred_hm, _ = model(imgs)
 
-            # Plain MSE matching the paper exactly — no visibility masking.
-            # All 98 WFLW landmarks are always annotated so masking is not needed
-            # and the incorrect per-channel normalization it introduced hurt training.
+            # Paper-faithful: heatmap MSE only, no coordinate loss.
             loss = criterion(pred_hm, target_hm)
 
             optimizer.zero_grad()

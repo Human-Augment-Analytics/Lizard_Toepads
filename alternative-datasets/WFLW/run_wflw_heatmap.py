@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 SCRIPT_DIR    = Path(__file__).parent.resolve()
 ALT_MODELS    = SCRIPT_DIR.parent.parent / "alternative-models"
 HRNET_DIR     = ALT_MODELS / "hrnet"
-TRAIN_SCRIPT  = "train_heatmap_wflw.py"
+TRAIN_SCRIPT  = "train_heatmap_wflw_ref.py"
 DEFAULT_CONFIG = str(HRNET_DIR / "configs" / "wflw-config.json")
 MODEL_NAME    = "hrnet_heatmap_wflw"
 
