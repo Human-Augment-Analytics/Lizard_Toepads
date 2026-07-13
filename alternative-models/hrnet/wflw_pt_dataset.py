@@ -91,7 +91,7 @@ def crop_compat(img, center, scale, output_size, rot=0):
 
     Args:
         img:         (H, W, 3) float32 HWC array
-        center:      torch.Tensor([cx, cy]) in pixel space
+        center:      torch.Tensor([cx, cy]) or numpy array in pixel space
         scale:       float — face size = scale * 200 pixels
         output_size: [W, H] of the output crop (both 256 for us)
         rot:         rotation angle in degrees (0 for val/test)
@@ -99,6 +99,12 @@ def crop_compat(img, center, scale, output_size, rot=0):
     Returns:
         (output_size[1], output_size[0], 3) uint8 HWC array
     """
+    # get_affine_transform expects a numpy array, not a torch.Tensor
+    if hasattr(center, 'numpy'):
+        center_np = center.numpy().astype(np.float32)
+    else:
+        center_np = np.array(center, dtype=np.float32)
+
     ht, wd = img.shape[0], img.shape[1]
     sf = scale * 200.0 / output_size[0]
 
@@ -107,22 +113,14 @@ def crop_compat(img, center, scale, output_size, rot=0):
         new_ht = int(math.floor(ht / sf))
         new_wd = int(math.floor(wd / sf))
         if max(new_ht, new_wd) < 2:
-            # Degenerate case — return zeros
             return np.zeros((output_size[1], output_size[0], img.shape[2]),
                             dtype=np.uint8)
         img = cv2.resize(img.astype(np.uint8), (new_wd, new_ht),
                          interpolation=cv2.INTER_LINEAR)
-        center_ds = center.clone()
-        center_ds[0] = center_ds[0] / sf
-        center_ds[1] = center_ds[1] / sf
-        scale_ds = scale / sf
-    else:
-        center_ds = center
-        scale_ds = scale
+        center_np = center_np / sf
+        scale = scale / sf
 
-    # Use get_affine_transform from the reference repo (no compatibility issues)
-    # to compute the 2x3 affine matrix, then warp directly.
-    trans = get_affine_transform(center_ds, scale_ds, rot, output_size)
+    trans = get_affine_transform(center_np, scale, rot, output_size)
     dst = cv2.warpAffine(
         img.astype(np.uint8), trans,
         (int(output_size[0]), int(output_size[1])),
