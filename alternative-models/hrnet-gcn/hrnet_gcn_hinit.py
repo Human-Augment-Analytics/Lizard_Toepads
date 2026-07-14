@@ -95,6 +95,10 @@ class HRNetGNN_HInit(nn.Module):
             num_iters=num_iters,
         )
 
+        # Expose the GCN's backbone as a top-level attribute so that
+        # train_wflw.py can access model.backbone for differential LR setup.
+        self.backbone = self.gcn.backbone
+
     def forward(
         self,
         x: torch.Tensor,
