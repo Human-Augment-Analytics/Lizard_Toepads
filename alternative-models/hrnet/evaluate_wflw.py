@@ -30,7 +30,19 @@ ALT_DATASETS = SCRIPT_DIR.parent.parent / "alternative-datasets"
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ALT_DATASETS))
 
-from hrnet_heatmap import HRNetHeatmap, hard_argmax
+# Import reference decode_preds + compute_nme for paper-faithful evaluation
+_REF_REPO = SCRIPT_DIR.parent.parent.parent / "HRNet-Facial-Landmark-Detection"
+if not _REF_REPO.exists():
+    _cwd = Path.cwd()
+    for _c in [_cwd, _cwd.parent, _cwd.parent.parent]:
+        if (_c / "HRNet-Facial-Landmark-Detection").exists():
+            _REF_REPO = _c / "HRNet-Facial-Landmark-Detection"
+            break
+if str(_REF_REPO) not in sys.path:
+    sys.path.insert(0, str(_REF_REPO))
+
+from lib.core.evaluation import decode_preds as ref_decode_preds, compute_nme as ref_compute_nme
+from hrnet_heatmap import HRNetHeatmap
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -139,13 +151,14 @@ def main():
             img_t    = torch.from_numpy(img_norm).permute(2, 0, 1).unsqueeze(0).float().to(device)
 
             heatmaps, _ = model(img_t)
-            # Use hard argmax with sub-pixel refinement
-            coords = hard_argmax(heatmaps)
-            # Both pred and gt are in [0,1] relative to the same coordinate
-            # space — the .pt files store tps normalized to [0,1] on 512px,
-            # and the model was trained with the same normalization.
-            # Use TARGET_SIZE for both to get absolute pixel distances.
-            pred_px = coords[0].cpu().numpy() * TARGET_SIZE
+            # Paper-faithful evaluation: use decode_preds (argmax + sub-pixel
+            # refinement + inverse affine to 512px space) — same as training script.
+            score_map = heatmaps.cpu()
+            center = torch.Tensor([256.0, 256.0])
+            scale  = 512.0 / 200.0  # = 2.56, fixed for pre-cropped 512px images
+            preds = ref_decode_preds(score_map, center.unsqueeze(0), torch.tensor([scale]), [64, 64])
+            # preds: (1, 98, 2) in 512px space
+            pred_px = preds[0].numpy()
             gt_px   = gt_norm * TARGET_SIZE
 
             nme = compute_nme(pred_px, gt_px)

@@ -484,6 +484,8 @@ def main():
         model.eval()
         val_loss_total = 0.0
         pxerr_total = 0.0
+        nme_sum = 0.0
+        nme_count = 0
 
         with torch.no_grad():
             for imgs, coords, orig_size, _ in val_loader:
@@ -512,8 +514,19 @@ def main():
                 val_loss_total += landmark_loss(pred_coords, coords).item() * imgs.size(0)
                 pxerr_total += compute_rescaled_pixel_error(pred_coords, coords, orig_size, device)
 
+                # NME: same formula as paper — sum(||pred-gt||) / (IOD × N) per sample
+                pred_px = pred_coords * 512.0
+                gt_px   = coords * 512.0
+                for i in range(B):
+                    iod = (gt_px[i, 60] - gt_px[i, 72]).norm().item()
+                    if iod > 0:
+                        dists = (pred_px[i] - gt_px[i]).norm(dim=-1)
+                        nme_sum += (dists.sum().item() / (iod * config.num_landmarks))
+                        nme_count += 1
+
         val_loss = val_loss_total / len(val_dataset)
         pix_err = pxerr_total / len(val_dataset)
+        val_nme = nme_sum / max(nme_count, 1)
 
         # Also log raw 512-space pixel error for reference (no rescaling)
         pix_err_512 = (
@@ -524,6 +537,7 @@ def main():
             f"Epoch {epoch}/{config.epochs}, "
             f"Train Loss: {epoch_loss:.6f}, "
             f"Val Loss: {val_loss:.6f}, "
+            f"Val NME: {val_nme:.4f}, "
             f"Avg Pixel Error (orig px): {pix_err:.2f}, "
             f"Avg Pixel Error (512px): {pix_err_512:.2f}"
         )
