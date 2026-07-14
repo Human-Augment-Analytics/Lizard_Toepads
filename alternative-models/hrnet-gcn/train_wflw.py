@@ -42,6 +42,7 @@ from hrnet_gcn import HRNetGNN
 from hrnet_gcn_ms import HRNetGNN_MS
 from hrnet_gcn_coord import HRNetGNN_Coord
 from hrnet_gcn_fused import HRNetGNN_Fused
+from hrnet_gcn_fused_global import HRNetGNN_FusedGlobal
 from hrnet_gcn_hinit import HRNetGNN_HInit
 
 # Locate wflw_dataset.py — handle case differences between systems
@@ -312,6 +313,16 @@ def main():
             num_iters=config.num_iters,
         ).to(device)
         logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
+    elif config.model_variant == "fused_global":
+        model = HRNetGNN_FusedGlobal(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        ).to(device)
+        logging.info("Model: HRNetGNN_FusedGlobal (fused + GAP global + landmark embeddings)")
     elif config.model_variant == "hinit":
         if not config.heatmap_checkpoint or not Path(config.heatmap_checkpoint).exists():
             logging.error(
