@@ -194,6 +194,17 @@ def main():
             num_iters=config.num_iters,
         )
         logging.info("Model: HRNetGNN_Fused (pre-fused multi-scale feature map)")
+    elif config.model_variant == "fused_global":
+        from hrnet_gcn_fused_global import HRNetGNN_FusedGlobal
+        model = HRNetGNN_FusedGlobal(
+            hrnet_backbone="hrnet_w18",
+            feat_dim=config.feat_dim,
+            gnn_hidden=config.gnn_hidden,
+            num_layers=config.num_layers,
+            num_landmarks=config.num_landmarks,
+            num_iters=config.num_iters,
+        )
+        logging.info("Model: HRNetGNN_FusedGlobal (fused + GAP global + landmark embeddings)")
     elif config.model_variant == "hinit":
         from hrnet_gcn_hinit import HRNetGNN_HInit
         heatmap_ckpt = cfg.get("heatmap_checkpoint")
