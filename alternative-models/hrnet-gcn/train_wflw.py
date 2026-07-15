@@ -186,7 +186,8 @@ def main():
     config.graph_topology   = cfg.get("graph_topology", "wflw")
     config.mean_shape_path  = cfg.get("mean_shape_path", None)
     config.init_noise_sigma = cfg.get("init_noise_sigma", 0.05)
-    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale" | "coord" | "fused" | "hinit"
+    config.init_mode        = cfg.get("init_mode", "mean")  # "mean" | "gt_noise"
+    config.model_variant    = cfg.get("model_variant", "standard")  # "standard" | "multiscale" | "coord" | "fused" | "fused_global" | "hinit"
     config.scale_indices    = cfg.get("scale_indices", [0, 1, 2, 3])
     config.use_coarse_init  = cfg.get("use_coarse_init", True)
     config.coarse_init_ramp = cfg.get("coarse_init_ramp", 20)
@@ -443,13 +444,20 @@ def main():
             # the GCN must learn to recover from the mismatch, which is the
             # rotation robustness we want. At inference there is no angle to
             # provide so training with an upright prior matches inference.
-            ms_base = mean_shape.unsqueeze(0).expand(B, -1, -1)
-            ms_flip = mean_shape_flipped.unsqueeze(0).expand(B, -1, -1)
-            flip_mask = flipped.to(device).view(B, 1, 1).float()
-            ms = ms_flip * flip_mask + ms_base * (1.0 - flip_mask)
-
-            noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
-            initial_coords = ms + noise
+            if config.init_mode == "gt_noise":
+                # Ground truth + noise: gives the GCN a near-perfect starting
+                # point so it only learns fine-grained refinement. Useful for
+                # measuring the GCN's refinement ceiling.
+                noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
+                initial_coords = coords + noise
+            else:
+                # Default: mean shape initialization
+                ms_base = mean_shape.unsqueeze(0).expand(B, -1, -1)
+                ms_flip = mean_shape_flipped.unsqueeze(0).expand(B, -1, -1)
+                flip_mask = flipped.to(device).view(B, 1, 1).float()
+                ms = ms_flip * flip_mask + ms_base * (1.0 - flip_mask)
+                noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
+                initial_coords = ms + noise
 
             # Forward pass — coord variant returns (gcn_coords, coarse_coords)
             # when use_coarse_init=True, otherwise just gcn_coords.
