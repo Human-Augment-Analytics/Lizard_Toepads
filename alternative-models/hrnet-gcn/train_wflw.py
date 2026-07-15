@@ -514,7 +514,11 @@ def main():
                     coarse_init = torch.sigmoid(coarse_flat.view(B, model.num_landmarks, 2))
                     initial_coords = coarse_init.detach()
                 else:
-                    initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
+                    if config.init_mode == "gt_noise":
+                        noise = torch.randn(B, config.num_landmarks, 2, device=device) * config.init_noise_sigma
+                        initial_coords = coords + noise
+                    else:
+                        initial_coords = mean_shape.unsqueeze(0).repeat(B, 1, 1)
 
                 out = model(imgs, initial_coords, edge_index)
                 pred_coords = out[0] if isinstance(out, tuple) else out
