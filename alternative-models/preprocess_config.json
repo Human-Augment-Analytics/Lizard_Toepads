@@ -3,5 +3,5 @@
     "imgdir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/miami_fall_24_jpgs",
     "tps_data_dir": "/storage/ice-shared/cs8903onl/hourglass-data/raw_data/tps_files",
     "data_dir": "/storage/ice-shared/cs8903onl/alternative-models/data",
-    "ruler_mm": 10.0
+    "ruler_mm": 1.0
 }
