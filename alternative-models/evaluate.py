@@ -19,7 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from common.tps_utils import get_tps_coords
+from common.tps_utils import get_tps_coords, get_ruler_distance
 
 try:
     import dlib
@@ -490,15 +490,30 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir, ruler
             per_landmark_errors[lm].append(dists[lm])
 
         # Convert pixel error to mm if ruler info is available
+        ruler_px_val = None
         ruler_px = data.get("ruler_px", None)
-        if ruler_px is not None and ruler_mm is not None:
+        if ruler_px is not None:
             ruler_px_val = ruler_px.item() if hasattr(ruler_px, 'item') else float(ruler_px)
-            if ruler_px_val > 0:
-                mm_per_px = ruler_mm / ruler_px_val
-                dists_mm = dists * mm_per_px
-                errors_mm.append(np.mean(dists_mm))
-                for lm in range(9):
-                    per_landmark_errors_mm[lm].append(dists_mm[lm])
+            if ruler_px_val <= 0:
+                ruler_px_val = None
+
+        # Fallback: compute ruler distance on-the-fly from TPS files
+        if ruler_px_val is None and ruler_mm is not None:
+            try:
+                ruler_dists = get_ruler_distance(imgid, img, tps_data_dir)
+                ruler_px_val = ruler_dists.get(class_name) if class_name else None
+                if ruler_px_val is None:
+                    # Try either class
+                    ruler_px_val = ruler_dists.get("finger") or ruler_dists.get("toe")
+            except Exception:
+                ruler_px_val = None
+
+        if ruler_px_val is not None and ruler_px_val > 0 and ruler_mm is not None:
+            mm_per_px = ruler_mm / ruler_px_val
+            dists_mm = dists * mm_per_px
+            errors_mm.append(np.mean(dists_mm))
+            for lm in range(9):
+                per_landmark_errors_mm[lm].append(dists_mm[lm])
 
         # Collect full per-landmark diagnostic for first _DIAG_MAX valid crops
         if len(diag_samples) < _DIAG_MAX:
