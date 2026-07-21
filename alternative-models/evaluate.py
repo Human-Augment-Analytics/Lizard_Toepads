@@ -242,8 +242,20 @@ def run_hrnet_heatmap(model_dir, ckpt_path, test_files):
         sys.path.pop(0)
 
     # Determine num_landmarks from checkpoint
+    # head is nn.Sequential: [Conv2d, BN, ReLU, Conv2d] — final conv is index 3
     state = torch.load(str(ckpt_path), map_location="cpu")
-    num_landmarks = state["head.weight"].shape[0]
+    if "head.weight" in state:
+        num_landmarks = state["head.weight"].shape[0]
+    elif "head.3.weight" in state:
+        num_landmarks = state["head.3.weight"].shape[0]
+    else:
+        # Fallback: search for the last head conv key
+        head_keys = [k for k in state.keys() if k.startswith("head") and k.endswith(".weight") and "bn" not in k.lower()]
+        if head_keys:
+            num_landmarks = state[head_keys[-1]].shape[0]
+        else:
+            logging.error("[hrnet_heatmap] Cannot determine num_landmarks from checkpoint keys")
+            return [None] * len(test_files)
 
     model = HRNetHeatmap(num_landmarks=num_landmarks, pretrained=False)
     model.load_state_dict(state)
@@ -1009,6 +1021,10 @@ def main():
                 f"tps_missing={cov.get('n_skip_tps_missing',0)}, "
                 f"gt_count={cov.get('n_skip_gt_count',0)})"
             )
+            if metrics.get("mean_mm") is not None:
+                logging.info(
+                    f"[{name}] Mean mm error: {metrics['mean_mm']:.3f}, Median: {metrics['median_mm']:.3f}"
+                )
 
         logging.info(f"[{name}] Generating test overlays...")
         overlays = generate_overlays(predictions, test_files, overlay_dir, name)
