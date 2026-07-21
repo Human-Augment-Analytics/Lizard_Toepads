@@ -13,7 +13,7 @@ import albumentations as A
 from sklearn.model_selection import train_test_split
 from ultralytics import YOLO
 
-from common.tps_utils import get_tps_coords
+from common.tps_utils import get_tps_coords, get_ruler_distance
 from common.obb_utils import crop_toe_boxes_obb
 from common.heatmap_utils import tps_to_heatmap
 
@@ -80,6 +80,7 @@ def process_image_annotated(imgid, model, config, output_dir):
         return 0, 0
 
     tps = get_tps_coords(imgid, img, config["tps_data_dir"])
+    ruler_distances = get_ruler_distance(imgid, img, config["tps_data_dir"])
 
     results = model(img, verbose=False)
     if results[0].obb is None:
@@ -130,6 +131,7 @@ def process_image_annotated(imgid, model, config, output_dir):
         heatmap_chw = np.transpose(heatmap, (2, 0, 1))
 
         out_path = os.path.join(output_dir, f"{imgid}_{i}.pt")
+        ruler_px = ruler_distances.get(class_name, None)
         torch.save(
             {
                 "image": torch.from_numpy(img_aug).permute(2, 0, 1).to(torch.uint8),
@@ -140,6 +142,7 @@ def process_image_annotated(imgid, model, config, output_dir):
                 "scale": torch.tensor(scale, dtype=torch.float32),
                 "pad": torch.tensor([pad_x, pad_y], dtype=torch.float32),
                 "class_name": class_name,
+                "ruler_px": torch.tensor(ruler_px if ruler_px is not None else 0.0, dtype=torch.float32),
             },
             out_path,
         )

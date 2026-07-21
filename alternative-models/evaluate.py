@@ -402,9 +402,11 @@ RUNNERS = {
 }
 
 
-def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
+def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir, ruler_mm=None):
     errors = []
+    errors_mm = []
     per_landmark_errors = [[] for _ in range(9)]
+    per_landmark_errors_mm = [[] for _ in range(9)]
 
     # Diagnostic accumulators — first 8 valid crops with full per-landmark detail
     _DIAG_MAX = 8
@@ -475,6 +477,17 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         for lm in range(9):
             per_landmark_errors[lm].append(dists[lm])
 
+        # Convert pixel error to mm if ruler info is available
+        ruler_px = data.get("ruler_px", None)
+        if ruler_px is not None and ruler_mm is not None:
+            ruler_px_val = ruler_px.item() if hasattr(ruler_px, 'item') else float(ruler_px)
+            if ruler_px_val > 0:
+                mm_per_px = ruler_mm / ruler_px_val
+                dists_mm = dists * mm_per_px
+                errors_mm.append(np.mean(dists_mm))
+                for lm in range(9):
+                    per_landmark_errors_mm[lm].append(dists_mm[lm])
+
         # Collect full per-landmark diagnostic for first _DIAG_MAX valid crops
         if len(diag_samples) < _DIAG_MAX:
             lm_detail = []
@@ -516,7 +529,19 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
 
     if not errors:
         return {"mean": None, "median": None, "std": None, "p25": None, "p75": None, "p90": None,
-                "per_landmark": [None] * 9, "diag_samples": diag_samples, "coverage": coverage}
+                "per_landmark": [None] * 9,
+                "mean_mm": None, "median_mm": None, "per_landmark_mm": [None] * 9,
+                "diag_samples": diag_samples, "coverage": coverage}
+
+    mm_stats = {}
+    if errors_mm:
+        mm_stats = {
+            "mean_mm": float(np.mean(errors_mm)),
+            "median_mm": float(np.median(errors_mm)),
+            "per_landmark_mm": [float(np.mean(e)) if e else None for e in per_landmark_errors_mm],
+        }
+    else:
+        mm_stats = {"mean_mm": None, "median_mm": None, "per_landmark_mm": [None] * 9}
 
     return {
         "mean": float(np.mean(errors)),
@@ -526,6 +551,7 @@ def compute_metrics(predictions, test_files, tps_data_dir, raw_images_dir):
         "p75": float(np.percentile(errors, 75)),
         "p90": float(np.percentile(errors, 90)),
         "per_landmark": [float(np.mean(e)) if e else None for e in per_landmark_errors],
+        **mm_stats,
         "diag_samples": diag_samples,
         "coverage": coverage,
     }
@@ -624,6 +650,18 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
             f"<td>{_f('std')}</td><td>{_f('p25')}</td><td>{_f('p75')}</td><td>{_f('p90')}</td></tr>"
         )
     sections.append("</table>")
+
+    # --- MM error table (only if ruler_mm was provided) ---
+    has_mm = any(m.get("mean_mm") is not None for m in all_metrics.values())
+    if has_mm:
+        sections.append("<h2>Per-Model Error in Millimeters (Original Image Space)</h2>")
+        sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
+        sections.append("<tr><th>Model</th><th>Mean (mm)</th><th>Median (mm)</th></tr>")
+        for name, metrics in all_metrics.items():
+            mean_mm = f"{metrics['mean_mm']:.3f}" if metrics.get("mean_mm") is not None else "N/A"
+            median_mm = f"{metrics['median_mm']:.3f}" if metrics.get("median_mm") is not None else "N/A"
+            sections.append(f"<tr><td>{name}</td><td>{mean_mm}</td><td>{median_mm}</td></tr>")
+        sections.append("</table>")
 
     # --- Wall-clock timing table ---
     if all_perf:
@@ -779,6 +817,19 @@ def build_html_report(all_metrics, all_overlays, all_unannotated_overlays, outpu
         sections.append(row)
     sections.append("</table>")
 
+    if has_mm:
+        sections.append("<h2>Per-Landmark Mean Error (mm)</h2>")
+        sections.append("<table border='1' cellpadding='6' cellspacing='0'>")
+        header = "<tr><th>Model</th>" + "".join(f"<th>LM {i}</th>" for i in range(9)) + "</tr>"
+        sections.append(header)
+        for name, metrics in all_metrics.items():
+            row = f"<tr><td>{name}</td>"
+            for v in metrics.get("per_landmark_mm", [None] * 9):
+                row += f"<td>{v:.3f}</td>" if v is not None else "<td>N/A</td>"
+            row += "</tr>"
+            sections.append(row)
+        sections.append("</table>")
+
     sections.append("<h2>Landmark Overlays (Test Set — Annotated)</h2>")
     for name, paths in all_overlays.items():
         sections.append(f"<h3>{name}</h3>")
@@ -831,6 +882,19 @@ def build_markdown_summary(all_metrics, all_perf=None, n_test=0):
         def _f(k): return f"{metrics[k]:.2f}" if metrics.get(k) is not None else "N/A"
         lines.append(f"| {name} | {_f('mean')} | {_f('median')} | {_f('std')} | {_f('p25')} | {_f('p75')} | {_f('p90')} |")
 
+    has_mm = any(m.get("mean_mm") is not None for m in all_metrics.values())
+    if has_mm:
+        lines += [
+            "",
+            "## Error in Millimeters\n",
+            "| Model | Mean (mm) | Median (mm) |",
+            "|---|---|---|",
+        ]
+        for name, metrics in all_metrics.items():
+            mean_mm = f"{metrics['mean_mm']:.3f}" if metrics.get("mean_mm") is not None else "N/A"
+            median_mm = f"{metrics['median_mm']:.3f}" if metrics.get("median_mm") is not None else "N/A"
+            lines.append(f"| {name} | {mean_mm} | {median_mm} |")
+
     if all_perf:
         lines += [
             "",
@@ -875,6 +939,8 @@ def main():
     parser.add_argument("--output-dir", type=str, default=str(ALT_MODELS_DIR / "benchmarking" / "report"))
     parser.add_argument("--tps-data-dir", type=str, default=TPS_FILES_DIR)
     parser.add_argument("--raw-images-dir", type=str, default=RAW_IMAGES_DIR)
+    parser.add_argument("--ruler-mm", type=float, default=None,
+                        help="Physical length of the ruler in mm (enables pixel-to-mm conversion)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -930,7 +996,8 @@ def main():
         # ----------------------------------------
 
         logging.info(f"[{name}] Computing metrics...")
-        metrics = compute_metrics(predictions, test_files, args.tps_data_dir, args.raw_images_dir)
+        metrics = compute_metrics(predictions, test_files, args.tps_data_dir, args.raw_images_dir,
+                                  ruler_mm=args.ruler_mm)
         all_metrics[name] = metrics
 
         if metrics["mean"] is not None:
