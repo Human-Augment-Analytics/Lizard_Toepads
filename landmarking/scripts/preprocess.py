@@ -81,10 +81,25 @@ def main(argv=None):
     elif dataset_name == "wflw":
         from ..datasets.wflw.preprocess import preprocess_wflw
 
+        data_dir = config.dataset.data_dir
+        ann_dir = data_dir + "/WFLW_annotations/list_98pt_rect_attr_train_test"
+        image_root = data_dir + "/WFLW_images"
+        output_dir = data_dir + "/pt_crops"
+
+        # Preprocess train split
+        logger.info("Preprocessing WFLW train split...")
         preprocess_wflw(
-            annotation_file=config.dataset.data_dir + "/list_98pt_rect_attr_train.txt",
-            image_root=config.dataset.data_dir + "/WFLW_images",
-            output_dir=config.paths.output_root + "/wflw/preprocessed",
+            annotation_file=ann_dir + "/list_98pt_rect_attr_train.txt",
+            image_root=image_root,
+            output_dir=output_dir + "/train",
+        )
+
+        # Preprocess test split
+        logger.info("Preprocessing WFLW test split...")
+        preprocess_wflw(
+            annotation_file=ann_dir + "/list_98pt_rect_attr_test.txt",
+            image_root=image_root,
+            output_dir=output_dir + "/test",
         )
     else:
         logger.error(f"Unknown dataset: {dataset_name}")
