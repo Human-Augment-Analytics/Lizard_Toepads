@@ -124,6 +124,108 @@ class TrainingEngine:
             f"Milestones: {cfg.training.lr_milestones}"
         )
 
+        # Create dataloaders from split
+        self._create_dataloaders()
+
+    def _create_dataloaders(self):
+        """Create train and validation dataloaders from split file.
+
+        If no split_path is configured, auto-discovers .pt files from data_dir
+        and uses an 80/20 train/val split.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        cfg = self.config
+        dataset_name = cfg.dataset.name
+
+        # Load split or auto-discover
+        if cfg.dataset.split_path and _Path(cfg.dataset.split_path).exists():
+            with open(cfg.dataset.split_path) as f:
+                split_data = _json.load(f)
+            train_paths = split_data.get("train", [])
+            val_paths = split_data.get("val", [])
+        else:
+            # Auto-discover from data_dir/pt_crops/train (WFLW) or data_dir/train (Lizard)
+            data_dir = _Path(cfg.dataset.data_dir)
+            candidates = [
+                data_dir / "pt_crops" / "train",  # WFLW layout
+                data_dir / "train",                # Lizard layout
+            ]
+            pt_dir = None
+            for c in candidates:
+                if c.exists():
+                    pt_dir = c
+                    break
+            if pt_dir is None:
+                raise FileNotFoundError(
+                    f"No training data found. Searched: {[str(c) for c in candidates]}. "
+                    f"Run preprocessing first, or set dataset.split_path in config."
+                )
+            all_paths = sorted([str(p) for p in pt_dir.glob("*.pt")])
+            if not all_paths:
+                raise FileNotFoundError(f"No .pt files found in {pt_dir}")
+
+            # 80/20 split
+            import random
+            rng = random.Random(cfg.training.seed)
+            rng.shuffle(all_paths)
+            split_idx = int(len(all_paths) * 0.8)
+            train_paths = sorted(all_paths[:split_idx])
+            val_paths = sorted(all_paths[split_idx:])
+            logging.info(
+                f"Auto-split: {len(train_paths)} train, {len(val_paths)} val "
+                f"from {pt_dir}"
+            )
+
+        if not train_paths:
+            raise ValueError("Train set is empty. Check split file or data directory.")
+        if not val_paths:
+            raise ValueError("Val set is empty. Check split file or data directory.")
+
+        logging.info(f"Train: {len(train_paths)} samples, Val: {len(val_paths)} samples")
+
+        # Create dataset instances
+        if dataset_name == "wflw":
+            from ..datasets.wflw.dataset import WFLWDataset
+
+            train_ds = WFLWDataset(
+                pt_paths=train_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=True,
+                rot_factor=cfg.training.rot_factor,
+            )
+            val_ds = WFLWDataset(
+                pt_paths=val_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=False,
+            )
+        else:
+            # Lizard or generic
+            from ..datasets.lizard.dataset import LizardDataset
+
+            train_ds = LizardDataset(
+                pt_paths=train_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=True,
+            )
+            val_ds = LizardDataset(
+                pt_paths=val_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=False,
+            )
+
+        self.train_loader = DataLoader(
+            train_ds, batch_size=cfg.training.batch_size, shuffle=True, num_workers=4
+        )
+        self.val_loader = DataLoader(
+            val_ds, batch_size=cfg.training.val_batch_size, shuffle=False, num_workers=4
+        )
+
     def train(self):
         """Main training loop.
 
