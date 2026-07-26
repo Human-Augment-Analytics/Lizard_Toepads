@@ -48,6 +48,8 @@ class ModelConfig:
     use_coarse_init: bool = True
     heatmap_checkpoint: str = ""
     backbone_pretrained_path: str = ""
+    heatmap_size: int = 64
+    sigma: float = 1.5
 
 
 @dataclass

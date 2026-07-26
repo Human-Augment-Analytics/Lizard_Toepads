@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from .loss import landmark_loss
+from .loss import landmark_loss, heatmap_loss
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
 
@@ -85,11 +85,15 @@ class TrainingEngine:
         # Instantiate model from registry
         model_kwargs = {
             "num_landmarks": cfg.dataset.num_landmarks,
-            "feat_dim": cfg.model.feat_dim,
-            "gnn_hidden": cfg.model.gnn_hidden,
-            "num_layers": cfg.model.num_layers,
-            "num_iters": cfg.model.num_iters,
         }
+        # GCN-specific kwargs
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit"):
+            model_kwargs.update({
+                "feat_dim": cfg.model.feat_dim,
+                "gnn_hidden": cfg.model.gnn_hidden,
+                "num_layers": cfg.model.num_layers,
+                "num_iters": cfg.model.num_iters,
+            })
         # Add variant-specific kwargs
         if cfg.model.variant in ("multiscale", "fused"):
             model_kwargs["scale_indices"] = cfg.model.scale_indices
@@ -97,6 +101,11 @@ class TrainingEngine:
             model_kwargs["use_coarse_init"] = cfg.model.use_coarse_init
         if cfg.model.variant == "hinit":
             model_kwargs["heatmap_checkpoint"] = cfg.model.heatmap_checkpoint
+        if cfg.model.variant == "heatmap":
+            model_kwargs["heatmap_size"] = getattr(cfg.model, "heatmap_size", 64)
+
+        # Determine if this is a heatmap-style model (different forward signature)
+        self._is_heatmap_model = cfg.model.variant in ("heatmap",)
 
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)
@@ -284,16 +293,21 @@ class TrainingEngine:
             coords = coords.to(self.device)
             B = imgs.shape[0]
 
-            # Build initial coordinates
-            initial_coords = self._get_initial_coords(B, coords, epoch)
-
-            # Forward pass
-            out = self.model(imgs, initial_coords, self.edge_index)
-            if isinstance(out, tuple):
-                pred_coords = out[0]
-                loss = landmark_loss(pred_coords, coords)
+            # Forward pass — branch on model type
+            if self._is_heatmap_model:
+                # Heatmap model: forward(x) → (heatmaps, coords)
+                pred_heatmaps, pred_coords = self.model(imgs)
+                hm_size = getattr(cfg.model, "heatmap_size", 64)
+                sigma = getattr(cfg.model, "sigma", 1.5)
+                loss = heatmap_loss(pred_heatmaps, pred_coords, coords, hm_size, sigma)
             else:
-                pred_coords = out
+                # GCN model: forward(x, initial_coords, edge_index) → coords
+                initial_coords = self._get_initial_coords(B, coords, epoch)
+                out = self.model(imgs, initial_coords, self.edge_index)
+                if isinstance(out, tuple):
+                    pred_coords = out[0]
+                else:
+                    pred_coords = out
                 loss = landmark_loss(pred_coords, coords)
 
             self.optimizer.zero_grad()
@@ -330,13 +344,20 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
-                # Use mean shape for validation
-                initial_coords = self._get_initial_coords(B, coords, epoch)
+                # Forward pass — branch on model type
+                if self._is_heatmap_model:
+                    pred_heatmaps, pred_coords = self.model(imgs)
+                    hm_size = getattr(cfg.model, "heatmap_size", 64)
+                    sigma = getattr(cfg.model, "sigma", 1.5)
+                    val_loss_total += heatmap_loss(
+                        pred_heatmaps, pred_coords, coords, hm_size, sigma
+                    ).item() * B
+                else:
+                    initial_coords = self._get_initial_coords(B, coords, epoch)
+                    out = self.model(imgs, initial_coords, self.edge_index)
+                    pred_coords = out[0] if isinstance(out, tuple) else out
+                    val_loss_total += landmark_loss(pred_coords, coords).item() * B
 
-                out = self.model(imgs, initial_coords, self.edge_index)
-                pred_coords = out[0] if isinstance(out, tuple) else out
-
-                val_loss_total += landmark_loss(pred_coords, coords).item() * B
                 n_samples += B
 
                 # Store last batch for visualization

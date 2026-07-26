@@ -1,0 +1,48 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs",
+    "yolo_obb_model": ""
+  },
+  "dataset": {
+    "name": "wflw",
+    "num_landmarks": 98,
+    "input_size": 256,
+    "graph_topology": "wflw",
+    "mean_shape_path": "",
+    "flip_pairs": [],
+    "data_dir": "",
+    "split_path": ""
+  },
+  "model": {
+    "variant": "heatmap",
+    "feat_dim": 64,
+    "gnn_hidden": 128,
+    "num_layers": 3,
+    "num_iters": 4,
+    "scale_indices": [0, 1, 2, 3],
+    "use_coarse_init": false,
+    "heatmap_checkpoint": "",
+    "backbone_pretrained_path": "",
+    "heatmap_size": 64,
+    "sigma": 1.5
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 16,
+    "val_batch_size": 32,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [30, 50],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "init_noise_sigma": 0.0,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda"
+  }
+}

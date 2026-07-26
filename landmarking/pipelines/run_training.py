@@ -52,6 +52,12 @@ def parse_args(argv=None):
         default=None,
         help="Override number of training epochs.",
     )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default=None,
+        help="Override model variant (e.g., 'fused', 'heatmap', 'multiscale').",
+    )
     return parser.parse_args(argv)
 
 
@@ -71,6 +77,8 @@ def main(argv=None):
         config.training.seed = args.seed
     if args.epochs is not None:
         config.training.epochs = args.epochs
+    if args.variant is not None:
+        config.model.variant = args.variant
 
     logger.info(
         f"Training: dataset={config.dataset.name}, "
