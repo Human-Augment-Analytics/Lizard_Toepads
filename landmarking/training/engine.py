@@ -9,6 +9,7 @@ checkpoint saving, and overlay visualization.
 import json
 import logging
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -114,11 +115,18 @@ class TrainingEngine:
         if cfg.model.backbone_pretrained_path:
             self._load_backbone_weights(cfg.model.backbone_pretrained_path)
 
-        # Optimizer with differential LR
-        param_groups = make_param_groups(
-            self.model, cfg.training.lr, cfg.training.lr_backbone
-        )
-        self.optimizer = torch.optim.Adam(param_groups)
+        # Optimizer — heatmap variant uses single Adam (all params same LR),
+        # other variants use differential LR for backbone vs head.
+        if self._is_heatmap_model:
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(), lr=cfg.training.lr,
+                weight_decay=cfg.training.weight_decay,
+            )
+        else:
+            param_groups = make_param_groups(
+                self.model, cfg.training.lr, cfg.training.lr_backbone
+            )
+            self.optimizer = torch.optim.Adam(param_groups)
 
         # MultiStepLR scheduler
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -126,6 +134,15 @@ class TrainingEngine:
             milestones=cfg.training.lr_milestones,
             gamma=cfg.training.lr_gamma,
         )
+
+        # For heatmap variant, suppress the scheduler.step() before optimizer.step()
+        # warning — this is intentional to match reference tools/train.py behaviour.
+        if self._is_heatmap_model:
+            warnings.filterwarnings(
+                "ignore",
+                message="Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`",
+                category=UserWarning,
+            )
 
         logging.info(
             f"Model: {cfg.model.variant}, "
@@ -196,21 +213,34 @@ class TrainingEngine:
 
         # Create dataset instances
         if dataset_name == "wflw":
-            from ..datasets.wflw.dataset import WFLWDataset
+            if cfg.model.variant == "heatmap":
+                # Use the reference HRNet dataset for paper-matching results
+                from ..datasets.wflw.dataset_ref import WFLWRefDataset
 
-            train_ds = WFLWDataset(
-                pt_paths=train_paths,
-                input_size=cfg.dataset.input_size,
-                num_landmarks=cfg.dataset.num_landmarks,
-                augment=True,
-                rot_factor=cfg.training.rot_factor,
-            )
-            val_ds = WFLWDataset(
-                pt_paths=val_paths,
-                input_size=cfg.dataset.input_size,
-                num_landmarks=cfg.dataset.num_landmarks,
-                augment=False,
-            )
+                train_ds = WFLWRefDataset(
+                    pt_paths=train_paths,
+                    augment=True,
+                )
+                val_ds = WFLWRefDataset(
+                    pt_paths=val_paths,
+                    augment=False,
+                )
+            else:
+                from ..datasets.wflw.dataset import WFLWDataset
+
+                train_ds = WFLWDataset(
+                    pt_paths=train_paths,
+                    input_size=cfg.dataset.input_size,
+                    num_landmarks=cfg.dataset.num_landmarks,
+                    augment=True,
+                    rot_factor=cfg.training.rot_factor,
+                )
+                val_ds = WFLWDataset(
+                    pt_paths=val_paths,
+                    input_size=cfg.dataset.input_size,
+                    num_landmarks=cfg.dataset.num_landmarks,
+                    augment=False,
+                )
         else:
             # Lizard or generic
             from ..datasets.lizard.dataset import LizardDataset
@@ -240,27 +270,53 @@ class TrainingEngine:
 
         Iterates over epochs, calling _train_epoch and _validate,
         saving checkpoints and overlays at configured intervals.
+
+        For heatmap variant: scheduler.step() at epoch START (before training),
+        best checkpoint based on val NME.
+        For other variants: scheduler.step() at epoch END, best checkpoint based
+        on val loss.
         """
         cfg = self.config
         best_val = float("inf")
+        best_nme = float("inf")
 
         for epoch in range(1, cfg.training.epochs + 1):
+            # Heatmap variant: step LR at epoch start (matches reference)
+            if self._is_heatmap_model:
+                self.scheduler.step()
+
             epoch_loss = self._train_epoch(epoch)
             metrics = self._validate(epoch)
             val_loss = metrics.get("val_loss", float("inf"))
+            val_nme = metrics.get("val_nme", None)
 
-            logging.info(
-                f"Epoch {epoch}/{cfg.training.epochs}, "
-                f"Train Loss: {epoch_loss:.6f}, "
-                f"Val Loss: {val_loss:.6f}"
-            )
+            if self._is_heatmap_model and val_nme is not None:
+                logging.info(
+                    f"Epoch {epoch}/{cfg.training.epochs}, "
+                    f"Train Loss: {epoch_loss:.6f}, "
+                    f"Val NME: {val_nme:.4f}, "
+                    f"Val Pixel Error (512px): {metrics.get('val_px_err', 0):.2f}"
+                )
+                # Save best based on NME
+                is_best = val_nme < best_nme
+                if is_best:
+                    best_nme = val_nme
+            else:
+                logging.info(
+                    f"Epoch {epoch}/{cfg.training.epochs}, "
+                    f"Train Loss: {epoch_loss:.6f}, "
+                    f"Val Loss: {val_loss:.6f}"
+                )
+                # Save best based on val loss
+                is_best = val_loss < best_val
+                if is_best:
+                    best_val = val_loss
 
-            self.scheduler.step()
+            # Non-heatmap: step scheduler at end
+            if not self._is_heatmap_model:
+                self.scheduler.step()
 
             # Save checkpoint
-            is_best = val_loss < best_val
-            if is_best:
-                best_val = val_loss
             if is_best or epoch % cfg.training.checkpoint_interval == 0:
                 self._save_checkpoint(epoch, is_best)
 
@@ -288,19 +344,22 @@ class TrainingEngine:
         n_samples = 0
 
         for batch in self.train_loader:
-            imgs, coords, *rest = batch
-            imgs = imgs.to(self.device)
-            coords = coords.to(self.device)
-            B = imgs.shape[0]
-
-            # Forward pass — branch on model type
             if self._is_heatmap_model:
-                # Heatmap model: forward(x) → (heatmaps, coords)
-                pred_heatmaps, pred_coords = self.model(imgs)
-                hm_size = getattr(cfg.model, "heatmap_size", 64)
-                sigma = getattr(cfg.model, "sigma", 1.5)
-                loss = heatmap_loss(pred_heatmaps, pred_coords, coords, hm_size, sigma)
+                # Reference heatmap pipeline: (img, target_hm, meta)
+                imgs, target_hm, meta = batch
+                imgs = imgs.to(self.device)
+                target_hm = target_hm.to(self.device)
+                B = imgs.shape[0]
+
+                pred_heatmaps, _ = self.model(imgs)
+                # Pure heatmap MSE loss — no coordinate loss
+                loss = torch.nn.functional.mse_loss(pred_heatmaps, target_hm)
             else:
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
                 # GCN model: forward(x, initial_coords, edge_index) → coords
                 initial_coords = self._get_initial_coords(B, coords, epoch)
                 out = self.model(imgs, initial_coords, self.edge_index)
@@ -329,13 +388,19 @@ class TrainingEngine:
             epoch: Current epoch number.
 
         Returns:
-            Dict with validation metrics.
+            Dict with validation metrics. For heatmap variant, includes
+            val_nme and val_px_err. For other variants, includes val_loss.
         """
         self.model.eval()
         cfg = self.config
+        self._last_vis_data = None
+
+        if self._is_heatmap_model:
+            return self._validate_heatmap(epoch)
+
+        # Standard coordinate-based validation
         val_loss_total = 0.0
         n_samples = 0
-        self._last_vis_data = None
 
         with torch.no_grad():
             for batch in self.val_loader:
@@ -344,19 +409,10 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
-                # Forward pass — branch on model type
-                if self._is_heatmap_model:
-                    pred_heatmaps, pred_coords = self.model(imgs)
-                    hm_size = getattr(cfg.model, "heatmap_size", 64)
-                    sigma = getattr(cfg.model, "sigma", 1.5)
-                    val_loss_total += heatmap_loss(
-                        pred_heatmaps, pred_coords, coords, hm_size, sigma
-                    ).item() * B
-                else:
-                    initial_coords = self._get_initial_coords(B, coords, epoch)
-                    out = self.model(imgs, initial_coords, self.edge_index)
-                    pred_coords = out[0] if isinstance(out, tuple) else out
-                    val_loss_total += landmark_loss(pred_coords, coords).item() * B
+                initial_coords = self._get_initial_coords(B, coords, epoch)
+                out = self.model(imgs, initial_coords, self.edge_index)
+                pred_coords = out[0] if isinstance(out, tuple) else out
+                val_loss_total += landmark_loss(pred_coords, coords).item() * B
 
                 n_samples += B
 
@@ -370,6 +426,69 @@ class TrainingEngine:
 
         val_loss = val_loss_total / max(n_samples, 1)
         return {"val_loss": val_loss}
+
+    def _validate_heatmap(self, epoch: int) -> dict:
+        """Heatmap-specific validation with NME evaluation.
+
+        Uses decode_preds + compute_nme from the local evaluation module
+        to compute paper-matching NME in 512px space.
+
+        Returns:
+            Dict with val_nme and val_px_err.
+        """
+        from ..evaluation.decode_preds import decode_preds, compute_nme
+        from ..models.hrnet_heatmap import hard_argmax
+
+        cfg = self.config
+        heatmap_size = [
+            getattr(cfg.model, "heatmap_size", 64),
+            getattr(cfg.model, "heatmap_size", 64),
+        ]
+        nme_sum = 0.0
+        nme_count = 0
+        px_sum = 0.0
+
+        with torch.no_grad():
+            for batch in self.val_loader:
+                imgs, target_hm, meta = batch
+                imgs = imgs.to(self.device)
+                B = imgs.shape[0]
+
+                pred_hm, _ = self.model(imgs)
+                score_map = pred_hm.cpu()
+
+                # decode_preds: argmax + sub-pixel refinement + inverse affine
+                preds = decode_preds(
+                    score_map,
+                    meta["center"],
+                    meta["scale"],
+                    heatmap_size,
+                )  # (B, 98, 2) in 512px space
+
+                # compute_nme: normalises by inter-ocular distance
+                nme_batch = compute_nme(preds, meta)  # (B,) per-sample NME
+                nme_sum += nme_batch.sum()
+                nme_count += B
+
+                # Also track pixel error in 512px space
+                coords_norm = hard_argmax(pred_hm)  # (B, 98, 2) in [0,1]
+                gt_norm = meta["pts"].to(self.device) / 512.0
+                px_sum += (
+                    (coords_norm - gt_norm).norm(dim=-1)
+                    .mean(dim=-1).sum().item() * 512
+                )
+
+                # Store last batch for visualization
+                if self._last_vis_data is None:
+                    self._last_vis_data = (
+                        imgs.detach(),
+                        coords_norm.detach(),
+                        gt_norm.detach(),
+                    )
+
+        nme_avg = nme_sum / max(nme_count, 1)
+        px_avg = px_sum / max(nme_count, 1)
+        return {"val_nme": nme_avg, "val_px_err": px_avg, "val_loss": nme_avg}
 
     def _get_initial_coords(
         self, batch_size: int, gt_coords: torch.Tensor, epoch: int
