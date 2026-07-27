@@ -40,7 +40,7 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from ..evaluation.metrics_wflw import compute_nme, compute_fr, compute_auc
+from ..evaluation.metrics_wflw import compute_nme, compute_fr, compute_auc, get_iod_indices_in_subset
 from ..training.utils import set_seed, get_device
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -63,7 +63,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_landmarks):
+def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_landmarks, iod_left=60, iod_right=72):
     """Evaluate a GCN model on WFLW test set. Returns NME/FR/AUC."""
     model.eval()
     nme_buckets = {name: [] for name in ["full"] + ATTR_NAMES}
@@ -89,7 +89,7 @@ def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_la
             gt_px = coords.cpu().numpy() * 512.0
 
             for i in range(B):
-                nme = compute_nme(pred_px[i], gt_px[i])
+                nme = compute_nme(pred_px[i], gt_px[i], iod_left=iod_left, iod_right=iod_right)
                 if nme is None:
                     continue
                 nme_buckets["full"].append(nme)
@@ -247,7 +247,11 @@ def main(argv=None):
     # Build test dataloader
     if is_heatmap and config.dataset.name == "wflw":
         from ..datasets.wflw.dataset_ref import WFLWRefDataset
-        test_ds = WFLWRefDataset(pt_paths=test_paths, augment=False)
+        test_ds = WFLWRefDataset(
+            pt_paths=test_paths,
+            augment=False,
+            landmark_indices=config.dataset.landmark_indices or None,
+        )
     elif config.dataset.name == "wflw":
         from ..datasets.wflw.dataset import WFLWDataset
         test_ds = WFLWDataset(
@@ -255,6 +259,7 @@ def main(argv=None):
             input_size=config.dataset.input_size,
             num_landmarks=config.dataset.num_landmarks,
             augment=False,
+            landmark_indices=config.dataset.landmark_indices or None,
         )
     else:
         from ..datasets.lizard.dataset import LizardDataset
@@ -271,12 +276,21 @@ def main(argv=None):
     if is_heatmap and config.dataset.name == "wflw":
         results = evaluate_wflw_heatmap(model, test_loader, device, config.model.heatmap_size)
     elif config.dataset.name == "wflw":
+        # Determine IOD positions (handle subsets)
+        if config.dataset.landmark_indices:
+            iod_left, iod_right = get_iod_indices_in_subset(config.dataset.landmark_indices)
+        else:
+            iod_left, iod_right = 60, 72
+
         # Load mean shape for GCN
         mean_shape = None
         if config.dataset.mean_shape_path and Path(config.dataset.mean_shape_path).exists():
             mean_shape = torch.load(config.dataset.mean_shape_path, map_location=device, weights_only=False)
+            # Subsample mean shape for subsets
+            if config.dataset.landmark_indices:
+                mean_shape = mean_shape[config.dataset.landmark_indices]
         edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks).to(device)
-        results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks)
+        results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right)
     else:
         # Lizard evaluation — pixel error
         from ..evaluation.metrics_lizard import compute_pixel_error

@@ -66,12 +66,14 @@ class WFLWRefDataset(data.Dataset):
         flip_prob=0.5,
         scale_factor=0.25,
         rot_factor=30,
+        landmark_indices=None,
     ):
         self.paths = list(pt_paths)
         self.augment = augment
         self.flip_prob = flip_prob
         self.scale_factor = scale_factor
         self.rot_factor = rot_factor
+        self.landmark_indices = landmark_indices or []
 
     def __len__(self):
         return len(self.paths)
@@ -134,15 +136,19 @@ class WFLWRefDataset(data.Dataset):
                 )
 
         # Step 6: Generate Gaussian heatmap targets (3σ truncated)
+        # When landmark_indices is active, only generate heatmaps for selected indices
+        active_indices = self.landmark_indices if self.landmark_indices else list(range(_NUM_LANDMARKS))
+        n_active = len(active_indices)
+
         target = np.zeros(
-            (_NUM_LANDMARKS, _HEATMAP_SIZE[0], _HEATMAP_SIZE[1]),
+            (n_active, _HEATMAP_SIZE[0], _HEATMAP_SIZE[1]),
             dtype=np.float32,
         )
-        for i in range(_NUM_LANDMARKS):
-            if tpts[i, 1] > 0:
-                target[i] = generate_target(
-                    target[i],
-                    tpts[i] - 1,  # -1: back to 0-indexed for generate_target
+        for out_i, src_i in enumerate(active_indices):
+            if tpts[src_i, 1] > 0:
+                target[out_i] = generate_target(
+                    target[out_i],
+                    tpts[src_i] - 1,  # -1: back to 0-indexed for generate_target
                     _SIGMA,
                 )
 
@@ -151,13 +157,16 @@ class WFLWRefDataset(data.Dataset):
         img_norm = (img_norm - _IMAGENET_MEAN) / _IMAGENET_STD
         img_tensor = torch.from_numpy(img_norm.transpose(2, 0, 1)).float()
 
-        # Step 8: Build meta dict
+        # Step 8: Build meta dict — slice pts/tpts when subset is active
+        pts_out = pts[active_indices] if self.landmark_indices else pts
+        tpts_out = tpts[active_indices] if self.landmark_indices else tpts
+
         meta = {
             "index": idx,
             "center": center,       # Tensor[2], post-flip
             "scale": scale,         # float, post-jitter
-            "pts": torch.Tensor(pts),    # (98,2) 512px, post-flip
-            "tpts": torch.Tensor(tpts),  # (98,2) 64px heatmap space
+            "pts": torch.Tensor(pts_out),    # (N,2) 512px, post-flip
+            "tpts": torch.Tensor(tpts_out),  # (N,2) 64px heatmap space
         }
         # Include attributes for per-subset evaluation
         if "attrs" in data_dict:

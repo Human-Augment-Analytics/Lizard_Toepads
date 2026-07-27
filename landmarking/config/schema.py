@@ -33,6 +33,7 @@ class DatasetConfig:
     flip_pairs: list = field(default_factory=list)
     data_dir: str = ""
     split_path: str = ""
+    landmark_indices: list = field(default_factory=list)
 
 
 @dataclass
@@ -120,6 +121,9 @@ class LandmarkingConfig:
         overrides corresponding fields. Also resolves dataset data_dir
         from data_root if not explicitly set.
 
+        When landmark_indices is non-empty, auto-sets num_landmarks to
+        the length of that list.
+
         Returns:
             self (mutated in place for convenience).
         """
@@ -137,7 +141,26 @@ class LandmarkingConfig:
         else:
             self.dataset.data_dir = resolve_path("DATA_DIR", self.dataset.data_dir)
 
+        # Auto-set num_landmarks from landmark_indices when non-empty
+        if self.dataset.landmark_indices:
+            self.dataset.num_landmarks = len(self.dataset.landmark_indices)
+
         return self
+
+    def validate(self) -> None:
+        """Validate configuration values.
+
+        Raises:
+            ValueError: If landmark_indices contains invalid values or duplicates.
+        """
+        if self.dataset.landmark_indices:
+            for idx in self.dataset.landmark_indices:
+                if not isinstance(idx, int) or idx < 0 or idx > 97:
+                    raise ValueError(
+                        f"Invalid landmark index: {idx}. Must be int in [0, 97]."
+                    )
+            if len(self.dataset.landmark_indices) != len(set(self.dataset.landmark_indices)):
+                raise ValueError("landmark_indices contains duplicates")
 
     def to_dict(self) -> dict:
         """Serialize configuration to a dictionary."""

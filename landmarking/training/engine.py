@@ -71,6 +71,11 @@ class TrainingEngine:
         # Save resolved config for reproducibility
         cfg.to_json(str(Path(self.output_dir) / "config.json"))
 
+        # Sparsity: force chain topology when landmark_indices is non-empty
+        landmark_indices = cfg.dataset.landmark_indices
+        if landmark_indices:
+            cfg.dataset.graph_topology = "chain"
+
         # Build edge index
         self.edge_index = get_edge_index(
             cfg.dataset.graph_topology, cfg.dataset.num_landmarks
@@ -82,6 +87,13 @@ class TrainingEngine:
                 cfg.dataset.mean_shape_path, map_location=self.device, weights_only=False
             )
             logging.info(f"Loaded mean shape: {self.mean_shape.shape}")
+
+        # Sparsity: subsample mean_shape to match landmark_indices
+        if self.mean_shape is not None and landmark_indices:
+            self.mean_shape = self.mean_shape[landmark_indices]
+
+        # Determine if this is a coord-only model (image-only forward, no edge_index)
+        self._is_coord_only_model = cfg.model.variant in ("hrnet_coord",)
 
         # Instantiate model from registry
         model_kwargs = {
@@ -233,10 +245,12 @@ class TrainingEngine:
                 train_ds = WFLWRefDataset(
                     pt_paths=train_paths,
                     augment=True,
+                    landmark_indices=cfg.dataset.landmark_indices or None,
                 )
                 val_ds = WFLWRefDataset(
                     pt_paths=val_paths,
                     augment=False,
+                    landmark_indices=cfg.dataset.landmark_indices or None,
                 )
             else:
                 from ..datasets.wflw.dataset import WFLWDataset
@@ -247,12 +261,14 @@ class TrainingEngine:
                     num_landmarks=cfg.dataset.num_landmarks,
                     augment=True,
                     rot_factor=cfg.training.rot_factor,
+                    landmark_indices=cfg.dataset.landmark_indices or None,
                 )
                 val_ds = WFLWDataset(
                     pt_paths=val_paths,
                     input_size=cfg.dataset.input_size,
                     num_landmarks=cfg.dataset.num_landmarks,
                     augment=False,
+                    landmark_indices=cfg.dataset.landmark_indices or None,
                 )
         else:
             # Lizard or generic
@@ -367,6 +383,15 @@ class TrainingEngine:
                 pred_heatmaps, _ = self.model(imgs)
                 # Pure heatmap MSE loss — no coordinate loss
                 loss = torch.nn.functional.mse_loss(pred_heatmaps, target_hm)
+            elif self._is_coord_only_model:
+                # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                pred_coords = self.model(imgs)
+                loss = landmark_loss(pred_coords, coords)
             else:
                 imgs, coords, *rest = batch
                 imgs = imgs.to(self.device)
@@ -422,9 +447,12 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
-                initial_coords = self._get_initial_coords(B, coords, epoch)
-                out = self.model(imgs, initial_coords, self.edge_index)
-                pred_coords = out[0] if isinstance(out, tuple) else out
+                if self._is_coord_only_model:
+                    pred_coords = self.model(imgs)
+                else:
+                    initial_coords = self._get_initial_coords(B, coords, epoch)
+                    out = self.model(imgs, initial_coords, self.edge_index)
+                    pred_coords = out[0] if isinstance(out, tuple) else out
                 val_loss_total += landmark_loss(pred_coords, coords).item() * B
 
                 n_samples += B

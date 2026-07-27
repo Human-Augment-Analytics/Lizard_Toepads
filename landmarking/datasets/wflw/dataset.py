@@ -44,6 +44,7 @@ class WFLWDataset(BaseDataset):
         flip_prob: float = 0.5,
         rot_factor: float = 0,
         rot_prob: float = 0.6,
+        landmark_indices: list = None,
     ):
         self.paths = pt_paths
         self.input_size = input_size
@@ -52,9 +53,13 @@ class WFLWDataset(BaseDataset):
         self.flip_prob = flip_prob
         self.rot_factor = rot_factor
         self.rot_prob = rot_prob
+        self.landmark_indices = landmark_indices or []
 
         # Use pre-built 98-point permutation or build one for other counts
-        if num_landmarks == 98:
+        # When subset is active, disable flip (use identity permutation)
+        if self.landmark_indices:
+            self.flip_perm = np.arange(len(self.landmark_indices), dtype=np.int64)
+        elif num_landmarks == 98:
             self.flip_perm = FLIP_PERM_98
         else:
             self.flip_perm = np.arange(num_landmarks, dtype=np.int64)
@@ -95,6 +100,10 @@ class WFLWDataset(BaseDataset):
         orig_size = data.get(
             "orig_size", torch.tensor([img.shape[0], img.shape[1]])
         )
+
+        # Slice coordinates to subset when landmark_indices is active
+        if self.landmark_indices:
+            coords = coords[self.landmark_indices]
 
         was_flipped = False
         rot_angle = 0.0

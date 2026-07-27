@@ -4,7 +4,7 @@ Implements NME (Normalized Mean Error), FR (Failure Rate), and AUC
 (Area Under CED Curve) as used in the WFLW benchmark.
 """
 
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -18,16 +18,44 @@ AUC_THRESHOLD = 0.10
 AUC_STEPS = 1000
 
 
-def compute_nme(pred_px: np.ndarray, gt_px: np.ndarray) -> Optional[float]:
+def get_iod_indices_in_subset(landmark_indices: List[int]) -> Tuple[int, int]:
+    """Find positions of IOD landmarks 60 and 72 within a sorted subset.
+
+    Args:
+        landmark_indices: Sorted list of original landmark indices in the subset.
+
+    Returns:
+        (pos_left, pos_right) — indices into the subset array where
+        landmarks 60 and 72 are located.
+
+    Raises:
+        ValueError: If 60 or 72 is not in the subset.
+    """
+    sorted_indices = sorted(landmark_indices)
+    if 60 not in sorted_indices:
+        raise ValueError("IOD landmark 60 not found in subset")
+    if 72 not in sorted_indices:
+        raise ValueError("IOD landmark 72 not found in subset")
+    return sorted_indices.index(60), sorted_indices.index(72)
+
+
+def compute_nme(
+    pred_px: np.ndarray,
+    gt_px: np.ndarray,
+    iod_left: int = IOD_LM_LEFT,
+    iod_right: int = IOD_LM_RIGHT,
+) -> Optional[float]:
     """Per-image NME normalized by inter-ocular distance.
 
     NME = mean(||pred_i - gt_i||) / IOD
 
-    where IOD = ||gt[60] - gt[72]|| (outer eye corners).
+    where IOD = ||gt[iod_left] - gt[iod_right]||.
 
     Args:
         pred_px: (N, 2) predicted landmarks in pixel space.
         gt_px: (N, 2) ground truth landmarks in pixel space.
+        iod_left: Index of the left IOD landmark in the coordinate array.
+        iod_right: Index of the right IOD landmark in the coordinate array.
 
     Returns:
         NME value, or None if inter-ocular distance is zero.
@@ -35,7 +63,7 @@ def compute_nme(pred_px: np.ndarray, gt_px: np.ndarray) -> Optional[float]:
     pred_px = np.asarray(pred_px, dtype=np.float64)
     gt_px = np.asarray(gt_px, dtype=np.float64)
 
-    iod = float(np.linalg.norm(gt_px[IOD_LM_LEFT] - gt_px[IOD_LM_RIGHT]))
+    iod = float(np.linalg.norm(gt_px[iod_left] - gt_px[iod_right]))
     if iod <= 0:
         return None
 
