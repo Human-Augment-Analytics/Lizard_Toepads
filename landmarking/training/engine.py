@@ -103,6 +103,14 @@ class TrainingEngine:
         if self.mean_shape is not None and landmark_indices:
             self.mean_shape = self.mean_shape[landmark_indices]
 
+        # Compute flipped mean shape for flip-aware GCN initialization
+        self.mean_shape_flipped = None
+        if self.mean_shape is not None and cfg.dataset.name == "wflw":
+            from .flip_utils import compute_flipped_mean_shape
+            self.mean_shape_flipped = compute_flipped_mean_shape(
+                self.mean_shape, cfg.dataset.num_landmarks, landmark_indices or None
+            )
+
         # Determine if this is a coord-only model (image-only forward, no edge_index)
         self._is_coord_only_model = cfg.model.variant in ("hrnet_coord",)
 
@@ -420,8 +428,15 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
+                # Extract flip flag from metadata for flip-aware init
+                flipped = None
+                if rest and isinstance(rest[0], dict) and "was_flipped" in rest[0]:
+                    flipped = rest[0]["was_flipped"]
+                elif rest and hasattr(rest[0], "get"):
+                    flipped = rest[0].get("was_flipped")
+
                 # GCN model: forward(x, initial_coords, edge_index) → coords
-                initial_coords = self._get_initial_coords(B, coords, epoch)
+                initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)
                 out = self.model(imgs, initial_coords, self.edge_index)
                 if isinstance(out, tuple):
                     pred_coords = out[0]
@@ -482,10 +497,17 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
+                # Extract flip flag from metadata
+                flipped = None
+                if rest and isinstance(rest[0], dict) and "was_flipped" in rest[0]:
+                    flipped = rest[0]["was_flipped"]
+                elif rest and hasattr(rest[0], "get"):
+                    flipped = rest[0].get("was_flipped")
+
                 if self._is_coord_only_model:
                     pred_coords = self.model(imgs)
                 else:
-                    initial_coords = self._get_initial_coords(B, coords, epoch)
+                    initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)
                     out = self.model(imgs, initial_coords, self.edge_index)
                     pred_coords = out[0] if isinstance(out, tuple) else out
                 val_loss_total += landmark_loss(pred_coords, coords).item() * B
@@ -587,12 +609,17 @@ class TrainingEngine:
         return {"val_nme": nme_avg, "val_px_err": px_avg, "val_loss": nme_avg}
 
     def _get_initial_coords(
-        self, batch_size: int, gt_coords: torch.Tensor, epoch: int
+        self, batch_size: int, gt_coords: torch.Tensor, epoch: int,
+        flipped: torch.Tensor = None,
     ) -> torch.Tensor:
         """Generate initial coordinate estimates for the GCN.
 
         Supports mean shape initialization (with noise) or
         ground-truth + noise initialization.
+
+        When flipped is provided and mean_shape_flipped exists, uses the
+        flipped mean shape for horizontally-flipped samples. This matches
+        the reference train_wflw.py behavior.
         """
         cfg = self.config
 
@@ -605,9 +632,17 @@ class TrainingEngine:
             )
             return gt_coords + noise
 
-        # Default: mean shape + noise
+        # Default: mean shape + noise, flip-aware
         if self.mean_shape is not None:
-            ms = self.mean_shape.unsqueeze(0).expand(batch_size, -1, -1)
+            ms_base = self.mean_shape.unsqueeze(0).expand(batch_size, -1, -1)
+
+            # Per-sample flip-aware initialization
+            if flipped is not None and self.mean_shape_flipped is not None:
+                ms_flip = self.mean_shape_flipped.unsqueeze(0).expand(batch_size, -1, -1)
+                flip_mask = flipped.to(self.device).view(batch_size, 1, 1).float()
+                ms = ms_flip * flip_mask + ms_base * (1.0 - flip_mask)
+            else:
+                ms = ms_base
         else:
             ms = torch.full(
                 (batch_size, cfg.dataset.num_landmarks, 2),
