@@ -192,7 +192,7 @@ class TrainingEngine:
             if not all_paths:
                 raise FileNotFoundError(f"No .pt files found in {pt_dir}")
 
-            # 80/20 split
+            # 80/20 train/val split from the training pool
             import random
             rng = random.Random(cfg.training.seed)
             rng.shuffle(all_paths)
@@ -203,6 +203,19 @@ class TrainingEngine:
                 f"Auto-split: {len(train_paths)} train, {len(val_paths)} val "
                 f"from {pt_dir}"
             )
+
+            # For WFLW: always include the official test set from pt_crops/test/
+            if dataset_name == "wflw":
+                test_dir = data_dir / "pt_crops" / "test"
+                if test_dir.exists():
+                    test_paths = sorted([str(p) for p in test_dir.glob("*.pt")])
+                    if test_paths:
+                        logging.info(
+                            f"Official WFLW test set: {len(test_paths)} samples "
+                            f"from {test_dir}"
+                        )
+                        # Store for evaluation access
+                        self._test_paths = test_paths
 
         if not train_paths:
             raise ValueError("Train set is empty. Check split file or data directory.")
@@ -530,10 +543,15 @@ class TrainingEngine:
     def _save_checkpoint(self, epoch: int, is_best: bool) -> None:
         """Save model checkpoint.
 
+        Only saves the best checkpoint to conserve disk space.
+
         Args:
             epoch: Current epoch number.
             is_best: Whether this is the best model so far.
         """
+        if not is_best:
+            return
+
         ckpt_dir = Path(self.output_dir) / "checkpoints"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -543,10 +561,7 @@ class TrainingEngine:
             "optimizer": self.optimizer.state_dict(),
         }
 
-        if is_best:
-            torch.save(state, str(ckpt_dir / "best.pth"))
-
-        torch.save(state, str(ckpt_dir / f"epoch_{epoch:04d}.pth"))
+        torch.save(state, str(ckpt_dir / "best.pth"))
 
     def _load_backbone_weights(self, path: str) -> None:
         """Load backbone weights from an external checkpoint."""

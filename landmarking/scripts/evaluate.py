@@ -169,14 +169,31 @@ def main(argv=None):
 
     # Load split
     split_path = args.split or config.dataset.split_path
-    if not split_path or not Path(split_path).exists():
-        logger.error(f"Split file not found: {split_path}")
-        sys.exit(1)
-    with open(split_path) as f:
-        split_data = json.load(f)
-    test_paths = split_data.get("test", [])
+    if split_path and Path(split_path).exists():
+        with open(split_path) as f:
+            split_data = json.load(f)
+        test_paths = split_data.get("test", [])
+    else:
+        # Auto-discover test set from data directory
+        data_dir = Path(config.dataset.data_dir)
+        if config.dataset.name == "wflw":
+            # WFLW always uses the official test set from pt_crops/test/
+            test_dir = data_dir / "pt_crops" / "test"
+        else:
+            test_dir = data_dir / "test"
+
+        if test_dir.exists():
+            test_paths = sorted([str(p) for p in test_dir.glob("*.pt")])
+            logger.info(f"Auto-discovered test set from: {test_dir}")
+        else:
+            logger.error(
+                f"No split file and no test directory found at {test_dir}. "
+                f"Provide --split or ensure test data exists."
+            )
+            sys.exit(1)
+
     if not test_paths:
-        logger.error("No test files in split JSON.")
+        logger.error("No test files found.")
         sys.exit(1)
     logger.info(f"Test set: {len(test_paths)} samples")
 
