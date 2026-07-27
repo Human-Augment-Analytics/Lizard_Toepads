@@ -159,5 +159,8 @@ class WFLWRefDataset(data.Dataset):
             "pts": torch.Tensor(pts),    # (98,2) 512px, post-flip
             "tpts": torch.Tensor(tpts),  # (98,2) 64px heatmap space
         }
+        # Include attributes for per-subset evaluation
+        if "attrs" in data_dict:
+            meta["attrs"] = data_dict["attrs"]
 
         return img_tensor, torch.Tensor(target), meta

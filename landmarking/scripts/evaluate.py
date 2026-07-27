@@ -120,7 +120,7 @@ def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size):
     from ..evaluation.decode_preds import decode_preds, compute_nme as compute_nme_ref
 
     model.eval()
-    nme_list = []
+    nme_buckets = {name: [] for name in ["full"] + ATTR_NAMES}
 
     with torch.no_grad():
         for batch in test_loader:
@@ -137,14 +137,31 @@ def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size):
             )
 
             nme_batch = compute_nme_ref(preds, meta)
-            nme_list.extend(nme_batch.tolist())
 
-    nme_arr = np.array(nme_list)
+            # Bucket by full + per-attribute subset
+            for i in range(B):
+                nme_val = float(nme_batch[i])
+                nme_buckets["full"].append(nme_val)
+
+                if "attrs" in meta:
+                    attrs = meta["attrs"]
+                    if hasattr(attrs, "numpy"):
+                        attrs_i = attrs[i].numpy() if attrs.dim() > 1 else attrs.numpy()
+                    elif isinstance(attrs, torch.Tensor):
+                        attrs_i = attrs[i].numpy()
+                    else:
+                        attrs_i = np.array(attrs[i]) if isinstance(attrs, list) else None
+                    if attrs_i is not None:
+                        for j, attr_name in enumerate(ATTR_NAMES):
+                            if j < len(attrs_i) and attrs_i[j] == 1:
+                                nme_buckets[attr_name].append(nme_val)
+
+    subset_keys = ["full"] + ATTR_NAMES
     results = {
-        "nme": {"full": float(nme_arr.mean())},
-        "fr": {"full": compute_fr(nme_list)},
-        "auc": {"full": compute_auc(nme_list)},
-        "counts": {"full": len(nme_list)},
+        "nme": {k: float(np.mean(nme_buckets[k])) if nme_buckets[k] else None for k in subset_keys},
+        "fr": {k: compute_fr(nme_buckets[k]) for k in subset_keys},
+        "auc": {k: compute_auc(nme_buckets[k]) for k in subset_keys},
+        "counts": {k: len(nme_buckets[k]) for k in subset_keys},
     }
     return results
 
