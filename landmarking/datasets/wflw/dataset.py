@@ -56,9 +56,19 @@ class WFLWDataset(BaseDataset):
         self.landmark_indices = landmark_indices or []
 
         # Use pre-built 98-point permutation or build one for other counts
-        # When subset is active, disable flip (use identity permutation)
+        # When subset is active, build a subset-specific flip permutation
         if self.landmark_indices:
-            self.flip_perm = np.arange(len(self.landmark_indices), dtype=np.int64)
+            from .topology import WFLW_FLIP_PAIRS
+            sorted_indices = sorted(self.landmark_indices)
+            idx_set = set(sorted_indices)
+            orig_to_pos = {orig: pos for pos, orig in enumerate(sorted_indices)}
+            n = len(sorted_indices)
+            perm = list(range(n))
+            for i, j in WFLW_FLIP_PAIRS:
+                if i in idx_set and j in idx_set and i != j:
+                    perm[orig_to_pos[i]] = orig_to_pos[j]
+                    perm[orig_to_pos[j]] = orig_to_pos[i]
+            self.flip_perm = np.array(perm, dtype=np.int64)
         elif num_landmarks == 98:
             self.flip_perm = FLIP_PERM_98
         else:
