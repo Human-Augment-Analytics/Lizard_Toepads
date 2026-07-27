@@ -330,6 +330,17 @@ class TrainingEngine:
                 is_best = val_nme < best_nme
                 if is_best:
                     best_nme = val_nme
+            elif val_nme is not None:
+                logging.info(
+                    f"Epoch {epoch}/{cfg.training.epochs}, "
+                    f"Train Loss: {epoch_loss:.6f}, "
+                    f"Val Loss: {val_loss:.6f}, "
+                    f"Val NME: {val_nme:.4f}"
+                )
+                # Save best based on val loss (GCN/coord)
+                is_best = val_loss < best_val
+                if is_best:
+                    best_val = val_loss
             else:
                 logging.info(
                     f"Epoch {epoch}/{cfg.training.epochs}, "
@@ -437,8 +448,21 @@ class TrainingEngine:
             return self._validate_heatmap(epoch)
 
         # Standard coordinate-based validation
+        from ..evaluation.metrics_wflw import compute_nme as compute_nme_metrics, get_iod_indices_in_subset
+
         val_loss_total = 0.0
         n_samples = 0
+        nme_sum = 0.0
+        nme_count = 0
+
+        # Determine IOD positions for NME
+        landmark_indices = cfg.dataset.landmark_indices
+        if landmark_indices:
+            iod_left, iod_right = get_iod_indices_in_subset(landmark_indices)
+        elif cfg.dataset.name == "wflw":
+            iod_left, iod_right = 60, 72
+        else:
+            iod_left, iod_right = None, None  # Lizard: no NME
 
         with torch.no_grad():
             for batch in self.val_loader:
@@ -455,6 +479,16 @@ class TrainingEngine:
                     pred_coords = out[0] if isinstance(out, tuple) else out
                 val_loss_total += landmark_loss(pred_coords, coords).item() * B
 
+                # Compute NME per sample (WFLW only)
+                if iod_left is not None and iod_right is not None:
+                    pred_px = pred_coords.cpu().numpy() * 512.0
+                    gt_px = coords.cpu().numpy() * 512.0
+                    for i in range(B):
+                        nme = compute_nme_metrics(pred_px[i], gt_px[i], iod_left=iod_left, iod_right=iod_right)
+                        if nme is not None:
+                            nme_sum += nme
+                            nme_count += 1
+
                 n_samples += B
 
                 # Store last batch for visualization
@@ -466,7 +500,10 @@ class TrainingEngine:
                     )
 
         val_loss = val_loss_total / max(n_samples, 1)
-        return {"val_loss": val_loss}
+        result = {"val_loss": val_loss}
+        if nme_count > 0:
+            result["val_nme"] = nme_sum / nme_count
+        return result
 
     def _validate_heatmap(self, epoch: int) -> dict:
         """Heatmap-specific validation with NME evaluation.
