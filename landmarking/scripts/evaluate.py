@@ -289,7 +289,7 @@ def main(argv=None):
             # Subsample mean shape for subsets
             if config.dataset.landmark_indices:
                 mean_shape = mean_shape[config.dataset.landmark_indices]
-        edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks).to(device)
+        edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks, landmark_indices=config.dataset.landmark_indices or None).to(device)
         results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right)
     else:
         # Lizard evaluation — pixel error

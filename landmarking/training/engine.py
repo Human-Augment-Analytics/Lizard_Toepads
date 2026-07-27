@@ -71,14 +71,14 @@ class TrainingEngine:
         # Save resolved config for reproducibility
         cfg.to_json(str(Path(self.output_dir) / "config.json"))
 
-        # Sparsity: force chain topology when landmark_indices is non-empty
+        # Sparsity: when landmark_indices is set, keep wflw topology
+        # (the subsampled version preserves anatomical groupings)
         landmark_indices = cfg.dataset.landmark_indices
-        if landmark_indices:
-            cfg.dataset.graph_topology = "chain"
 
-        # Build edge index
+        # Build edge index — pass landmark_indices for subsampled WFLW graph
         self.edge_index = get_edge_index(
-            cfg.dataset.graph_topology, cfg.dataset.num_landmarks
+            cfg.dataset.graph_topology, cfg.dataset.num_landmarks,
+            landmark_indices=landmark_indices or None,
         ).to(self.device)
 
         # Load mean shape if specified
