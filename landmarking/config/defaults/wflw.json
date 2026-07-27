@@ -9,7 +9,7 @@
     "num_landmarks": 98,
     "input_size": 512,
     "graph_topology": "wflw",
-    "mean_shape_path": "",
+    "mean_shape_path": "./runs/wflw/mean_shapes/mean_shape_wflw.pt",
     "flip_pairs": [],
     "data_dir": "",
     "split_path": ""

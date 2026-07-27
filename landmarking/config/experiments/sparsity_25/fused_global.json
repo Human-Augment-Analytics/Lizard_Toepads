@@ -8,7 +8,7 @@
     "num_landmarks": 25,
     "input_size": 512,
     "graph_topology": "chain",
-    "mean_shape_path": "/home/hice1/axu39/scratch/WFLW_data/mean_shapes/mean_shape_wflw.pt",
+    "mean_shape_path": "./runs/wflw/mean_shapes/mean_shape_wflw.pt",
     "landmark_indices": [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96]
   },
   "model": {

@@ -87,6 +87,17 @@ class TrainingEngine:
                 cfg.dataset.mean_shape_path, map_location=self.device, weights_only=False
             )
             logging.info(f"Loaded mean shape: {self.mean_shape.shape}")
+        elif cfg.dataset.mean_shape_path:
+            logging.warning(
+                f"mean_shape_path specified but file not found: {cfg.dataset.mean_shape_path}. "
+                f"Falling back to constant (0.5, 0.5) initialization."
+            )
+        elif not self._is_heatmap_model and cfg.model.variant not in ("hrnet_coord", "stacked_hourglass", "vit"):
+            logging.warning(
+                "No mean_shape_path set for GCN model. Using constant (0.5, 0.5) initialization. "
+                "This will likely result in very poor initial NME. "
+                "Generate a mean shape with: python -m landmarking.datasets.wflw.compute_mean_shape"
+            )
 
         # Sparsity: subsample mean_shape to match landmark_indices
         if self.mean_shape is not None and landmark_indices:
