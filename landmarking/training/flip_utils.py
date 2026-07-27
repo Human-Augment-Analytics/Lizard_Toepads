@@ -9,31 +9,12 @@ the training engine.
 import numpy as np
 import torch
 
-# WFLW 98-point flip pairs (same as in ref_transforms.py / graph_topology.py)
-WFLW_FLIP_PAIRS = [
-    [0, 32], [1, 31], [2, 30], [3, 29], [4, 28], [5, 27], [6, 26],
-    [7, 25], [8, 24], [9, 23], [10, 22], [11, 21], [12, 20], [13, 19],
-    [14, 18], [15, 17],
-    [33, 46], [34, 45], [35, 44], [36, 43], [37, 42], [38, 50],
-    [39, 49], [40, 48], [41, 47],
-    [60, 72], [61, 71], [62, 70], [63, 69], [64, 68], [65, 75],
-    [66, 74], [67, 73],
-    [55, 59], [56, 58],
-    [76, 82], [77, 81], [78, 80], [87, 83], [86, 84],
-    [88, 92], [89, 91], [95, 93], [96, 97],
-]
+# Import the canonical flip pairs from the dataset topology module
+# This ensures the mean shape flip uses the SAME permutation as the dataset
+from ..datasets.wflw.topology import WFLW_FLIP_PAIRS, build_flip_permutation
 
-
-def _build_flip_perm_98() -> np.ndarray:
-    """Build the 98-point flip permutation array."""
-    perm = np.arange(98, dtype=np.int64)
-    for i, j in WFLW_FLIP_PAIRS:
-        perm[i] = j
-        perm[j] = i
-    return perm
-
-
-FLIP_PERM_98 = _build_flip_perm_98()
+# Pre-build the 98-point flip permutation using the canonical pairs
+FLIP_PERM_98 = build_flip_permutation(WFLW_FLIP_PAIRS, 98)
 
 
 def compute_flipped_mean_shape(
