@@ -92,17 +92,21 @@ def decode_preds(batch_heatmaps, center, scale, heatmap_size):
     return preds
 
 
-def compute_nme(preds, meta):
+def compute_nme(preds, meta, iod_left=None, iod_right=None):
     """Compute per-sample Normalized Mean Error.
 
     NME is normalised by inter-ocular distance (IOD), computed as the
-    Euclidean distance between landmarks 60 and 72 (WFLW convention).
+    Euclidean distance between two eye corner landmarks.
 
     Args:
-        preds: (B, 98, 2) numpy array or tensor of predicted landmarks
+        preds: (B, N, 2) numpy array or tensor of predicted landmarks
                in 512px space.
-        meta: Dict with 'pts' key containing (B, 98, 2) ground truth
+        meta: Dict with 'pts' key containing (B, N, 2) ground truth
               landmarks in 512px space.
+        iod_left: Index of left IOD landmark within the coordinate array.
+                  If None, auto-detected from landmark count.
+        iod_right: Index of right IOD landmark within the coordinate array.
+                   If None, auto-detected from landmark count.
 
     Returns:
         (B,) numpy array of per-sample NME values.
@@ -122,7 +126,10 @@ def compute_nme(preds, meta):
     for i in range(N):
         pts_pred = preds[i]
         pts_gt = target[i]
-        if L == 98:
+
+        if iod_left is not None and iod_right is not None:
+            interocular = np.linalg.norm(pts_gt[iod_left] - pts_gt[iod_right])
+        elif L == 98:
             interocular = np.linalg.norm(pts_gt[60, ] - pts_gt[72, ])
         elif L == 68:
             interocular = np.linalg.norm(pts_gt[36, ] - pts_gt[45, ])
@@ -131,7 +138,15 @@ def compute_nme(preds, meta):
         elif L == 29:
             interocular = np.linalg.norm(pts_gt[8, ] - pts_gt[9, ])
         else:
-            raise ValueError(f'Unsupported number of landmarks: {L}')
+            raise ValueError(
+                f'Unsupported number of landmarks: {L}. '
+                f'Pass iod_left and iod_right explicitly for custom landmark counts.'
+            )
+
+        if interocular <= 0:
+            rmse[i] = 0.0
+            continue
+
         rmse[i] = np.sum(
             np.linalg.norm(pts_pred - pts_gt, axis=1)
         ) / (interocular * L)

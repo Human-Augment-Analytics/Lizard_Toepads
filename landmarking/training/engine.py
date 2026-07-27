@@ -507,7 +507,14 @@ class TrainingEngine:
                 )  # (B, 98, 2) in 512px space
 
                 # compute_nme: normalises by inter-ocular distance
-                nme_batch = compute_nme(preds, meta)  # (B,) per-sample NME
+                # For subsets, pass IOD positions explicitly
+                landmark_indices = cfg.dataset.landmark_indices
+                if landmark_indices:
+                    from ..evaluation.metrics_wflw import get_iod_indices_in_subset
+                    iod_l, iod_r = get_iod_indices_in_subset(landmark_indices)
+                    nme_batch = compute_nme(preds, meta, iod_left=iod_l, iod_right=iod_r)
+                else:
+                    nme_batch = compute_nme(preds, meta)  # (B,) per-sample NME
                 nme_sum += nme_batch.sum()
                 nme_count += B
 
