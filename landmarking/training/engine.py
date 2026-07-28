@@ -92,7 +92,7 @@ class TrainingEngine:
                 f"mean_shape_path specified but file not found: {cfg.dataset.mean_shape_path}. "
                 f"Falling back to constant (0.5, 0.5) initialization."
             )
-        elif not self._is_heatmap_model and cfg.model.variant not in ("hrnet_coord", "stacked_hourglass", "vit"):
+        elif cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit"):
             logging.warning(
                 "No mean_shape_path set for GCN model. Using constant (0.5, 0.5) initialization. "
                 "This will likely result in very poor initial NME. "
