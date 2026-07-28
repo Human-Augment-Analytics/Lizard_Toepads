@@ -126,6 +126,17 @@ def make_subsampled_wflw_edge_index(landmark_indices: list) -> torch.Tensor:
     # Cross-group edges (pupil → eye center)
     cross_edges = [(96, 64), (97, 72)]
 
+    # Anatomical cross-group anchoring: connect eyebrows and nose to
+    # nearest eye landmarks for information flow. This prevents isolated
+    # nodes in sparse subsets. Uses explicit landmark pairs that are
+    # spatially close on the face.
+    # Right eyebrow endpoints → right eye landmarks
+    cross_edges += [(36, 60), (40, 64)]
+    # Left eyebrow endpoints → left eye landmarks
+    cross_edges += [(44, 68), (48, 72)]
+    # Nose bridge/base → eye landmarks (central anchoring)
+    cross_edges += [(52, 60), (52, 68), (56, 60), (56, 72)]
+
     edges = []
 
     def add_edge(u_subset, v_subset):

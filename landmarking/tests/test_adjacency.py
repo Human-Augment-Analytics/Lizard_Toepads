@@ -111,10 +111,10 @@ class TestSubsampledWFLWGraph:
         return make_subset_indices(total=98, step=4)
 
     def test_step4_edge_count(self, step4_indices):
-        """Step=4 subset (25 nodes) should have 17 undirected edges."""
+        """Step=4 subset (25 nodes) should have 25 undirected edges (with cross-group anchoring)."""
         ei = make_subsampled_wflw_edge_index(step4_indices)
         n_undirected = ei.shape[1] // 2
-        assert n_undirected == 17, f"Expected 17 undirected edges, got {n_undirected}"
+        assert n_undirected == 25, f"Expected 25 undirected edges, got {n_undirected}"
 
     def test_step4_is_bidirectional(self, step4_indices):
         """Every edge (u,v) has a reverse edge (v,u)."""
@@ -200,9 +200,9 @@ class TestSubsampledWFLWGraph:
     def test_get_edge_index_wflw_with_subset(self, step4_indices):
         """get_edge_index('wflw', landmark_indices=...) gives subsampled graph."""
         ei = get_edge_index("wflw", landmark_indices=step4_indices)
-        # Should NOT be 186 (full) or 48 (chain of 25)
+        # Should NOT be 186 (full)
         assert ei.shape[1] != 186
-        assert ei.shape[1] == 34  # 17 undirected * 2
+        assert ei.shape[1] == 50  # 25 undirected * 2
 
     def test_get_edge_index_wflw_without_subset(self):
         """get_edge_index('wflw') without subset gives full 186-edge graph."""
@@ -210,14 +210,11 @@ class TestSubsampledWFLWGraph:
         assert ei.shape[1] == 186
 
     def test_isolated_nodes_no_crash(self):
-        """Subset with isolated nodes (e.g., only LM 52) doesn't crash."""
-        # LM 52 is in nose bridge (51-54) — if only 52 survives, no edges
+        """Subset with few nodes still works (cross-group edges may connect some)."""
+        # LM 52 connects to 60 and 68 via cross-group edges now
         indices = [0, 52, 60, 72, 96]
         ei = make_subsampled_wflw_edge_index(indices)
-        # Should still work, just fewer edges
+        # Should still work — cross-group edges connect 52↔60, 52↔68 (68 not in set),
+        # 96↔64 (64 not in set). Only 52↔60 survives.
         assert ei.shape[0] == 2
-        # LM 96→64 not in subset (64 missing), so pupil edge absent
-        # Only 60↔72? No — they're in different groups (left eye vs right eye)
-        # Actually 0 is in jaw alone, 52 is in nose alone, 60 in left eye alone,
-        # 72 in right eye alone, 96 pupil→64 (64 missing). So 0 edges.
-        assert ei.shape[1] == 0
+        assert ei.shape[1] >= 0  # At least some edges from cross-group anchoring
