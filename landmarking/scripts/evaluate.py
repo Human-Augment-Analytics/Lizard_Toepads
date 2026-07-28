@@ -115,7 +115,7 @@ def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_la
     return results
 
 
-def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size):
+def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size, iod_left=None, iod_right=None):
     """Evaluate a heatmap model on WFLW test set using reference decode_preds."""
     from ..evaluation.decode_preds import decode_preds, compute_nme as compute_nme_ref
 
@@ -136,7 +136,7 @@ def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size):
                 [heatmap_size, heatmap_size],
             )
 
-            nme_batch = compute_nme_ref(preds, meta)
+            nme_batch = compute_nme_ref(preds, meta, iod_left=iod_left, iod_right=iod_right)
 
             # Bucket by full + per-attribute subset
             for i in range(B):
@@ -274,7 +274,12 @@ def main(argv=None):
 
     # Run evaluation
     if is_heatmap and config.dataset.name == "wflw":
-        results = evaluate_wflw_heatmap(model, test_loader, device, config.model.heatmap_size)
+        # Compute IOD positions for subset
+        if config.dataset.landmark_indices:
+            iod_left, iod_right = get_iod_indices_in_subset(config.dataset.landmark_indices)
+        else:
+            iod_left, iod_right = None, None
+        results = evaluate_wflw_heatmap(model, test_loader, device, config.model.heatmap_size, iod_left=iod_left, iod_right=iod_right)
     elif config.dataset.name == "wflw":
         # Determine IOD positions (handle subsets)
         if config.dataset.landmark_indices:
