@@ -1,0 +1,34 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "wflw",
+    "num_landmarks": 18,
+    "input_size": 512,
+    "graph_topology": "wflw",
+    "mean_shape_path": "./runs/wflw/mean_shapes/mean_shape_wflw.pt",
+    "landmark_indices": [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 96, 97]
+  },
+  "model": {
+    "variant": "fused_global",
+    "feat_dim": 64,
+    "gnn_hidden": 128,
+    "num_layers": 3,
+    "num_iters": 4
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [60, 90],
+    "lr_gamma": 0.1,
+    "grad_clip": 0.5,
+    "init_noise_sigma": 0.03,
+    "rot_factor": 30.0,
+    "seed": 42
+  }
+}

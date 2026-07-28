@@ -1,0 +1,24 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "wflw",
+    "num_landmarks": 18,
+    "input_size": 256,
+    "graph_topology": "wflw",
+    "landmark_indices": [60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 96, 97]
+  },
+  "model": {
+    "variant": "heatmap",
+    "heatmap_size": 64
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 16,
+    "lr_milestones": [30, 50],
+    "lr_gamma": 0.1,
+    "seed": 42
+  }
+}
