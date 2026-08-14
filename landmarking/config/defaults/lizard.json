@@ -1,6 +1,6 @@
 {
   "paths": {
-    "data_root": "/home/hice1/axu39/scratch/Lizard_data/",
+    "data_root": "/home/hice1/axu39/scratch/",
     "output_root": "./runs",
     "yolo_obb_model": ""
   },
@@ -11,7 +11,7 @@
     "graph_topology": "chain",
     "mean_shape_path": "",
     "flip_pairs": [],
-    "data_dir": "",
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard",
     "split_path": ""
   },
   "model": {
