@@ -9,7 +9,7 @@
     "num_landmarks": 9,
     "input_size": 512,
     "graph_topology": "chain",
-    "mean_shape_path": "",
+    "mean_shape_path": "./runs/lizard/mean_shapes/mean_shape_lizard.pt",
     "flip_pairs": [],
     "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard",
     "split_path": ""
