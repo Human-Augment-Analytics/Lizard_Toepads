@@ -370,7 +370,9 @@ class TrainingEngine:
                     f"Epoch {epoch}/{cfg.training.epochs}, "
                     f"Train Loss: {epoch_loss:.6f}, "
                     f"Val Loss: {val_loss:.6f}, "
-                    f"Val NME: {val_nme:.4f}"
+                    f"Val NME: {val_nme:.4f}, "
+                    f"Val Pixel Error ({cfg.dataset.input_size}px): "
+                    f"{metrics.get('val_px_err', 0):.2f}"
                 )
                 # Save best based on val loss (GCN/coord)
                 is_best = val_loss < best_val
@@ -380,7 +382,9 @@ class TrainingEngine:
                 logging.info(
                     f"Epoch {epoch}/{cfg.training.epochs}, "
                     f"Train Loss: {epoch_loss:.6f}, "
-                    f"Val Loss: {val_loss:.6f}"
+                    f"Val Loss: {val_loss:.6f}, "
+                    f"Val Pixel Error ({cfg.dataset.input_size}px): "
+                    f"{metrics.get('val_px_err', 0):.2f}"
                 )
                 # Save best based on val loss
                 is_best = val_loss < best_val
@@ -520,6 +524,7 @@ class TrainingEngine:
         n_samples = 0
         nme_sum = 0.0
         nme_count = 0
+        px_err_sum = 0.0
 
         # Determine IOD positions for NME
         landmark_indices = cfg.dataset.landmark_indices
@@ -556,6 +561,14 @@ class TrainingEngine:
                     pred_coords = out[0] if isinstance(out, tuple) else out
                 val_loss_total += landmark_loss(pred_coords, coords).item() * B
 
+                # Compute pixel error (all datasets)
+                pred_px = pred_coords.cpu().numpy() * cfg.dataset.input_size
+                gt_px = coords.cpu().numpy() * cfg.dataset.input_size
+                px_err_sum += float(
+                    ((pred_coords - coords).norm(dim=-1).mean(dim=-1).sum().item())
+                    * cfg.dataset.input_size
+                )
+
                 # Compute NME per sample (WFLW only)
                 if iod_left is not None and iod_right is not None:
                     pred_px = pred_coords.cpu().numpy() * 512.0
@@ -578,6 +591,7 @@ class TrainingEngine:
 
         val_loss = val_loss_total / max(n_samples, 1)
         result = {"val_loss": val_loss}
+        result["val_px_err"] = px_err_sum / max(n_samples, 1)
         if nme_count > 0:
             result["val_nme"] = nme_sum / nme_count
         return result
