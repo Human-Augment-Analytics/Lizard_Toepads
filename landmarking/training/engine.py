@@ -144,7 +144,14 @@ class TrainingEngine:
             })
 
         # Determine if this is a heatmap-style model (different forward signature)
-        self._is_heatmap_model = cfg.model.variant in ("heatmap",)
+        # Only True for WFLW heatmap variant which uses WFLWRefDataset with pre-generated target heatmaps
+        self._is_heatmap_model = (
+            cfg.model.variant in ("heatmap",) and cfg.dataset.name == "wflw"
+        )
+        # Heatmap on Lizard: uses standard dataset + heatmap_loss (same path as graph_cond_heatmap)
+        self._is_heatmap_on_coords = (
+            cfg.model.variant in ("heatmap",) and cfg.dataset.name != "wflw"
+        )
         # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output)
         self._is_graph_cond_heatmap = cfg.model.variant == "graph_cond_heatmap"
 
@@ -434,6 +441,18 @@ class TrainingEngine:
                     pred_heatmaps, pred_coords, coords,
                     cfg.model.heatmap_size, cfg.model.sigma,
                 )
+            elif self._is_heatmap_on_coords:
+                # Heatmap model on non-WFLW dataset: forward(imgs) → (heatmaps, coords)
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                pred_heatmaps, pred_coords = self.model(imgs)
+                loss = heatmap_loss(
+                    pred_heatmaps, pred_coords, coords,
+                    cfg.model.heatmap_size, cfg.model.sigma,
+                )
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch
@@ -527,6 +546,8 @@ class TrainingEngine:
 
                 if self._is_graph_cond_heatmap:
                     _, pred_coords = self.model(imgs, self.edge_index)
+                elif self._is_heatmap_on_coords:
+                    _, pred_coords = self.model(imgs)
                 elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)
                 else:
