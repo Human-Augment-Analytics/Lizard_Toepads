@@ -1,6 +1,6 @@
 {
   "paths": {
-    "data_root": "/home/hice1/axu39/scratch/",
+    "data_root": "/home/hice1/axu39/scratch/Lizard_data/",
     "output_root": "./runs",
     "yolo_obb_model": ""
   },
