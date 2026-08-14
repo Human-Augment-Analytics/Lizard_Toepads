@@ -1,0 +1,6 @@
+{
+  "yolo_obb_path": "./yolo26n.pt",
+  "imgdir": "/home/hice1/axu39/scratch/Lizard_data/raw_data/miami_fall_24_jpgs",
+  "tps_data_dir": "/home/hice1/axu39/scratch/Lizard_data/raw_data/tps_files",
+  "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+}
