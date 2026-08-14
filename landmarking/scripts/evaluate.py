@@ -298,9 +298,10 @@ def main(argv=None):
         results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right)
     else:
         # Lizard evaluation — pixel error
-        from ..evaluation.metrics_lizard import compute_pixel_error
+        from ..evaluation.metrics_lizard import compute_pixel_error, pixel_to_mm
         model.eval()
         errors = []
+        mm_errors = []
         edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks).to(device)
         mean_shape = None
         if config.dataset.mean_shape_path and Path(config.dataset.mean_shape_path).exists():
@@ -319,13 +320,30 @@ def main(argv=None):
                 pred = out[0] if isinstance(out, tuple) else out
                 pred_px = pred.cpu().numpy() * config.dataset.input_size
                 gt_px = coords.cpu().numpy() * config.dataset.input_size
+
+                # Extract metadata (ruler_px for mm conversion)
+                metadata = rest[0] if rest else {}
+
                 for i in range(B):
-                    errors.append(compute_pixel_error(pred_px[i], gt_px[i]).mean())
+                    px_err = compute_pixel_error(pred_px[i], gt_px[i])
+                    errors.append(px_err.mean())
+
+                    # Convert to mm if ruler_px is available
+                    if "ruler_px" in metadata:
+                        ruler_val = float(metadata["ruler_px"][i])
+                        if ruler_val > 0:
+                            mm_err = pixel_to_mm(px_err, ruler_val, ruler_mm=10.0)
+                            mm_errors.append(mm_err.mean())
+
         results = {
             "mean_px_error": float(np.mean(errors)),
             "median_px_error": float(np.median(errors)),
             "n_evaluated": len(errors),
         }
+        if mm_errors:
+            results["mean_mm_error"] = float(np.mean(mm_errors))
+            results["median_mm_error"] = float(np.median(mm_errors))
+            results["n_mm_samples"] = len(mm_errors)
 
     # Log results
     logger.info("=" * 50)
@@ -341,6 +359,10 @@ def main(argv=None):
     else:
         logger.info(f"  Mean pixel error: {results['mean_px_error']:.2f}")
         logger.info(f"  Median pixel error: {results['median_px_error']:.2f}")
+        if "mean_mm_error" in results:
+            logger.info(f"  Mean mm error: {results['mean_mm_error']:.3f}")
+            logger.info(f"  Median mm error: {results['median_mm_error']:.3f}")
+            logger.info(f"  Samples with ruler: {results['n_mm_samples']}")
         logger.info(f"  Samples evaluated: {results['n_evaluated']}")
     logger.info("=" * 50)
 
