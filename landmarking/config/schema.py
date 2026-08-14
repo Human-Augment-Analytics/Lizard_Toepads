@@ -50,6 +50,7 @@ class ModelConfig:
     heatmap_checkpoint: str = ""
     backbone_pretrained_path: str = ""
     heatmap_size: int = 64
+    num_heads: int = 4
     sigma: float = 1.5
 
 

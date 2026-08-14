@@ -92,7 +92,7 @@ class TrainingEngine:
                 f"mean_shape_path specified but file not found: {cfg.dataset.mean_shape_path}. "
                 f"Falling back to constant (0.5, 0.5) initialization."
             )
-        elif cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit"):
+        elif cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap"):
             logging.warning(
                 "No mean_shape_path set for GCN model. Using constant (0.5, 0.5) initialization. "
                 "This will likely result in very poor initial NME. "
@@ -119,7 +119,7 @@ class TrainingEngine:
             "num_landmarks": cfg.dataset.num_landmarks,
         }
         # GCN-specific kwargs
-        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit"):
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap"):
             model_kwargs.update({
                 "feat_dim": cfg.model.feat_dim,
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -135,9 +135,18 @@ class TrainingEngine:
             model_kwargs["heatmap_checkpoint"] = cfg.model.heatmap_checkpoint
         if cfg.model.variant == "heatmap":
             model_kwargs["heatmap_size"] = getattr(cfg.model, "heatmap_size", 64)
+        if cfg.model.variant == "graph_cond_heatmap":
+            model_kwargs.update({
+                "gnn_hidden": cfg.model.gnn_hidden,
+                "num_layers": cfg.model.num_layers,
+                "num_heads": getattr(cfg.model, "num_heads", 4),
+                "heatmap_size": cfg.model.heatmap_size,
+            })
 
         # Determine if this is a heatmap-style model (different forward signature)
         self._is_heatmap_model = cfg.model.variant in ("heatmap",)
+        # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output)
+        self._is_graph_cond_heatmap = cfg.model.variant == "graph_cond_heatmap"
 
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)
@@ -413,6 +422,18 @@ class TrainingEngine:
                 pred_heatmaps, _ = self.model(imgs)
                 # Pure heatmap MSE loss — no coordinate loss
                 loss = torch.nn.functional.mse_loss(pred_heatmaps, target_hm)
+            elif self._is_graph_cond_heatmap:
+                # Graph-conditioned heatmap: forward(imgs, edge_index) → (heatmaps, coords)
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                pred_heatmaps, pred_coords = self.model(imgs, self.edge_index)
+                loss = heatmap_loss(
+                    pred_heatmaps, pred_coords, coords,
+                    cfg.model.heatmap_size, cfg.model.sigma,
+                )
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch
@@ -504,7 +525,9 @@ class TrainingEngine:
                 elif rest and hasattr(rest[0], "get"):
                     flipped = rest[0].get("was_flipped")
 
-                if self._is_coord_only_model:
+                if self._is_graph_cond_heatmap:
+                    _, pred_coords = self.model(imgs, self.edge_index)
+                elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)
                 else:
                     initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)

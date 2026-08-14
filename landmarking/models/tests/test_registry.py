@@ -22,6 +22,7 @@ ALL_VARIANTS = [
     "fused",
     "fused_global",
     "hinit",
+    "graph_cond_heatmap",
     "heatmap",
     "hrnet_coord",
     "stacked_hourglass",
@@ -32,7 +33,7 @@ ALL_VARIANTS = [
 CORE_VARIANTS = ["heatmap", "hrnet_coord", "stacked_hourglass", "vit"]
 
 # Variants that require torch_geometric
-GCN_VARIANTS = ["standard", "multiscale", "coord", "fused", "fused_global", "hinit"]
+GCN_VARIANTS = ["standard", "multiscale", "coord", "fused", "fused_global", "hinit", "graph_cond_heatmap"]
 
 
 def _has_torch_geometric():
@@ -61,7 +62,7 @@ class TestModelRegistry:
         reason="torch_geometric not installed"
     )
     def test_all_10_variants_registered_with_torch_geometric(self):
-        """All 10 variant keys should be in the registry when deps available."""
+        """All 11 variant keys should be in the registry when deps available."""
         import landmarking.models  # noqa: F401
 
         for variant in ALL_VARIANTS:
