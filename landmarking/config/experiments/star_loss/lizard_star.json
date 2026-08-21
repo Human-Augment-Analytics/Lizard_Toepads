@@ -1,0 +1,43 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "fused_global_star",
+    "feat_dim": 64,
+    "gnn_hidden": 128,
+    "num_layers": 2,
+    "num_iters": 4
+  },
+  "training": {
+    "epochs": 250,
+    "batch_size": 8,
+    "val_batch_size": 16,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [150, 180],
+    "lr_gamma": 0.2,
+    "grad_clip": 5.0,
+    "init_noise_sigma": 0.05,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "loss_type": "star",
+    "star_omega": 1.0,
+    "star_eigenvalue_clamp": 3.0
+  }
+}
