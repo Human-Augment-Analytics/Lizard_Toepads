@@ -74,6 +74,9 @@ class TrainingConfig:
     vis_interval: int = 10
     seed: int = 42
     device: str = "cuda"
+    loss_type: str = "mse"
+    star_omega: float = 1.0
+    star_eigenvalue_clamp: float = 6.0
 
 
 @dataclass

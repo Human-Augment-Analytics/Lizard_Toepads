@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from .loss import landmark_loss, heatmap_loss
+from .loss import landmark_loss, heatmap_loss, star_loss
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
 
@@ -113,6 +113,10 @@ class TrainingEngine:
 
         # Determine if this is a coord-only model (image-only forward, no edge_index)
         self._is_coord_only_model = cfg.model.variant in ("hrnet_coord",)
+
+        # Determine if this is a STAR loss model (returns coords + log_sigma)
+        self._is_star_model = cfg.model.variant in ("fused_global_star",)
+        self._use_star_loss = cfg.training.loss_type == "star" or self._is_star_model
 
         # Instantiate model from registry
         model_kwargs = {
@@ -482,11 +486,20 @@ class TrainingEngine:
                 # GCN model: forward(x, initial_coords, edge_index) → coords
                 initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)
                 out = self.model(imgs, initial_coords, self.edge_index)
-                if isinstance(out, tuple):
+                if isinstance(out, tuple) and len(out) == 2 and self._use_star_loss:
+                    # STAR model: returns (coords, log_sigma)
+                    pred_coords, log_sigma = out
+                    loss = star_loss(
+                        pred_coords, coords, log_sigma,
+                        omega=cfg.training.star_omega,
+                        eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
+                    )
+                elif isinstance(out, tuple):
                     pred_coords = out[0]
+                    loss = landmark_loss(pred_coords, coords)
                 else:
                     pred_coords = out
-                loss = landmark_loss(pred_coords, coords)
+                    loss = landmark_loss(pred_coords, coords)
 
             self.optimizer.zero_grad()
             loss.backward()
