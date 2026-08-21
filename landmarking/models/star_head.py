@@ -1,12 +1,12 @@
-"""STAR Head — Wraps any coordinate-producing model with anisotropic uncertainty.
+"""STAR Head — GCN with STAR uncertainty + intermediate supervision.
 
-Adds a lightweight head that predicts per-landmark Cholesky covariance
-parameters alongside coordinates. Used with STAR loss for adaptive
-ambiguity reduction (Zhou et al., CVPR 2023).
+Extends fused_global with:
+1. Per-iteration coordinate outputs for intermediate MSE supervision
+2. STAR uncertainty head on the final iteration for adaptive ambiguity reduction
+3. Configurable gnn_hidden (default 256 for richer representations)
 
-This is a model-agnostic wrapper: it takes an existing model that produces
-(B, N, 2) coordinates and adds a branch predicting (B, N, 3) Cholesky
-parameters from the same intermediate features.
+Training mode returns all intermediate coords + final sigma.
+Eval mode returns only final coords + sigma (same interface as before).
 """
 
 import torch
@@ -15,18 +15,22 @@ import torch.nn.functional as F
 
 from .registry import register_model
 
+COORD_EMBED_DIM = 16
+LANDMARK_EMBED_DIM = 32
+GLOBAL_EMBED_DIM = 64
+
 
 @register_model("fused_global_star")
 class HRNetGNN_FusedGlobal_STAR(nn.Module):
-    """GCN fused_global model with STAR uncertainty head.
+    """GCN fused_global with STAR uncertainty and intermediate supervision.
 
-    Identical architecture to fused_global but additionally predicts
-    per-landmark anisotropic covariance via a Cholesky parameterization.
-    The covariance head branches off the final GCN node features.
+    Forward returns (training):
+        all_coords: list of (B, N, 2) per iteration (length = num_iters)
+        log_sigma: (B, N, 3) Cholesky parameters from final iteration
 
-    Forward returns:
-        coords: (B, N, 2) predicted landmark coordinates.
-        log_sigma: (B, N, 3) Cholesky parameters [log_L11, L21, log_L22].
+    Forward returns (eval):
+        coords: (B, N, 2) final predicted coordinates
+        log_sigma: (B, N, 3) Cholesky parameters
     """
 
     def __init__(
@@ -45,10 +49,6 @@ class HRNetGNN_FusedGlobal_STAR(nn.Module):
 
         import timm
         from torch_geometric.nn import GCNConv
-
-        COORD_EMBED_DIM = 16
-        LANDMARK_EMBED_DIM = 32
-        GLOBAL_EMBED_DIM = 64
 
         self.backbone = timm.create_model(
             "hrnet_w18",
@@ -80,12 +80,11 @@ class HRNetGNN_FusedGlobal_STAR(nn.Module):
             [GCNConv(gnn_hidden, gnn_hidden) for _ in range(num_layers)]
         )
 
-        # Coordinate prediction head (same as fused_global)
+        # Coordinate prediction head
         self.delta_head = nn.Linear(gnn_hidden, 2)
 
         # STAR uncertainty head: predicts Cholesky parameters per landmark
         # Output: [log_L11, L21, log_L22] — 3 values per landmark
-        # Initialized to predict isotropic unit variance (zeros → L=I → Σ=I)
         self.sigma_head = nn.Sequential(
             nn.Linear(gnn_hidden, gnn_hidden // 2),
             nn.ReLU(inplace=True),
@@ -112,23 +111,21 @@ class HRNetGNN_FusedGlobal_STAR(nn.Module):
         return sampled.squeeze(-1).permute(0, 2, 1)
 
     def forward(self, x, initial_coords, edge_index):
-        """Forward pass with coordinate + uncertainty prediction.
+        """Forward pass with intermediate supervision + STAR uncertainty.
 
         Args:
             x: (B, 3, H, W) input images.
             initial_coords: (B, N, 2) initial landmark coordinates.
             edge_index: (2, E) graph edge index.
 
-        Returns:
-            coords: (B, N, 2) predicted coordinates.
-            log_sigma: (B, N, 3) Cholesky covariance parameters.
+        Returns (training mode):
+            all_coords: list of (B, N, 2) — one per iteration
+            log_sigma: (B, N, 3) Cholesky covariance parameters (final iter)
+
+        Returns (eval mode):
+            coords: (B, N, 2) final coordinates only
+            log_sigma: (B, N, 3) Cholesky covariance parameters
         """
-        from torch_geometric.nn import GCNConv
-
-        COORD_EMBED_DIM = 16
-        LANDMARK_EMBED_DIM = 32
-        GLOBAL_EMBED_DIM = 64
-
         fused_map = self.get_fused_map(x)
         coords = initial_coords.clone()
         B = x.shape[0]
@@ -141,7 +138,8 @@ class HRNetGNN_FusedGlobal_STAR(nn.Module):
         lm_ids = torch.arange(N, device=x.device)
         lm_emb = self.landmark_embed(lm_ids).unsqueeze(0).expand(B, -1, -1)
 
-        h_final = None  # Store final GCN features for sigma head
+        all_coords = []
+        h_final = None
 
         for it in range(self.num_iters):
             img_feats = self.sample_features(fused_map, coords)
@@ -162,12 +160,15 @@ class HRNetGNN_FusedGlobal_STAR(nn.Module):
 
             delta = self.delta_head(h).view(B, N, 2)
             coords = torch.clamp(coords + delta, 0.0, 1.0)
+            all_coords.append(coords)
 
-            # Keep final iteration features for uncertainty estimation
             if it == self.num_iters - 1:
                 h_final = h
 
         # Predict per-landmark anisotropic uncertainty from final GCN features
         log_sigma = self.sigma_head(h_final).view(B, N, 3)
 
-        return coords, log_sigma
+        if self.training:
+            return all_coords, log_sigma
+        else:
+            return coords, log_sigma

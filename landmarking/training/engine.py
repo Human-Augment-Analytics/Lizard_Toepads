@@ -487,13 +487,38 @@ class TrainingEngine:
                 initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)
                 out = self.model(imgs, initial_coords, self.edge_index)
                 if isinstance(out, tuple) and len(out) == 2 and self._use_star_loss:
-                    # STAR model: returns (coords, log_sigma)
-                    pred_coords, log_sigma = out
-                    loss = star_loss(
-                        pred_coords, coords, log_sigma,
-                        omega=cfg.training.star_omega,
-                        eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
-                    )
+                    # STAR model with intermediate supervision:
+                    # Training: out = (all_coords_list, log_sigma)
+                    # Eval: out = (final_coords, log_sigma)
+                    first_elem, log_sigma = out
+                    if isinstance(first_elem, list):
+                        # Intermediate supervision: MSE on early iters, STAR on final
+                        all_coords_list = first_elem
+                        num_iters = len(all_coords_list)
+                        # Linearly increasing weights for intermediate MSE
+                        inter_weights = [
+                            (i + 1) / num_iters * 0.5
+                            for i in range(num_iters - 1)
+                        ]
+                        loss = sum(
+                            w * landmark_loss(c, coords)
+                            for w, c in zip(inter_weights, all_coords_list[:-1])
+                        )
+                        # STAR loss on final iteration (full weight)
+                        pred_coords = all_coords_list[-1]
+                        loss = loss + star_loss(
+                            pred_coords, coords, log_sigma,
+                            omega=cfg.training.star_omega,
+                            eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
+                        )
+                    else:
+                        # Eval mode or non-list: single coords tensor
+                        pred_coords = first_elem
+                        loss = star_loss(
+                            pred_coords, coords, log_sigma,
+                            omega=cfg.training.star_omega,
+                            eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
+                        )
                 elif isinstance(out, tuple):
                     pred_coords = out[0]
                     loss = landmark_loss(pred_coords, coords)
