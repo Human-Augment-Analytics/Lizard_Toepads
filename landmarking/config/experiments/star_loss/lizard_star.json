@@ -15,19 +15,19 @@
   "model": {
     "variant": "fused_global_star",
     "feat_dim": 64,
-    "gnn_hidden": 128,
+    "gnn_hidden": 256,
     "num_layers": 2,
     "num_iters": 3
   },
   "training": {
-    "epochs": 250,
+    "epochs": 140,
     "batch_size": 8,
     "val_batch_size": 16,
     "lr": 1e-4,
     "lr_backbone": 1e-4,
     "weight_decay": 0.0,
-    "lr_milestones": [150, 180],
-    "lr_gamma": 0.2,
+    "lr_milestones": [100],
+    "lr_gamma": 0.1,
     "grad_clip": 5.0,
     "init_noise_sigma": 0.0,
     "init_mode": "mean",
