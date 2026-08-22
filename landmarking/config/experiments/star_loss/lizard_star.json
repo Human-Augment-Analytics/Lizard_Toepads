@@ -17,7 +17,7 @@
     "feat_dim": 64,
     "gnn_hidden": 128,
     "num_layers": 2,
-    "num_iters": 4
+    "num_iters": 3
   },
   "training": {
     "epochs": 250,
@@ -29,7 +29,7 @@
     "lr_milestones": [150, 180],
     "lr_gamma": 0.2,
     "grad_clip": 5.0,
-    "init_noise_sigma": 0.05,
+    "init_noise_sigma": 0.0,
     "init_mode": "mean",
     "rot_factor": 0.0,
     "checkpoint_interval": 10,
