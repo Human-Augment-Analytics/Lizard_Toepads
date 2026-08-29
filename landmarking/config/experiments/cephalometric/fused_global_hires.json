@@ -1,0 +1,50 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs",
+    "yolo_obb_model": ""
+  },
+  "dataset": {
+    "name": "cephalometric",
+    "num_landmarks": 19,
+    "input_size": 1024,
+    "graph_topology": "cephalometric",
+    "mean_shape_path": "./runs/cephalometric/mean_shapes/mean_shape_cephalometric.pt",
+    "pixel_spacing": 0.1,
+    "flip_pairs": [],
+    "data_dir": "",
+    "split_path": ""
+  },
+  "model": {
+    "variant": "fused_global",
+    "feat_dim": 256,
+    "gnn_hidden": 256,
+    "num_layers": 3,
+    "num_iters": 4,
+    "scale_indices": [3],
+    "use_coarse_init": false,
+    "heatmap_checkpoint": "",
+    "backbone_pretrained_path": "",
+    "heatmap_size": 64,
+    "sigma": 1.5
+  },
+  "training": {
+    "epochs": 150,
+    "batch_size": 4,
+    "val_batch_size": 8,
+    "lr": 1e-4,
+    "lr_backbone": 1e-5,
+    "weight_decay": 1e-4,
+    "lr_milestones": [60, 90],
+    "lr_gamma": 0.1,
+    "grad_clip": 0.5,
+    "init_noise_sigma": 0.0,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "loss_type": "mse"
+  }
+}
