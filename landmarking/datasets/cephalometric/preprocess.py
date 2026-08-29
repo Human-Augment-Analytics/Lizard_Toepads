@@ -275,17 +275,189 @@ def preprocess_cephalometric(
     )
 
 
+# ── Standard ISBI 2015 distribution layout driver ───────────────────────────
+
+# Maps the split name to (image subfolder, output subdir) for the standard
+# ISBI 2015 release. Image folders are pre-split, so the split is determined
+# by which folder a file lives in — not by parsing its filename number.
+ISBI_SPLIT_FOLDERS = {
+    "train": "TrainingData",
+    "test1": "Test1Data",
+    "test2": "Test2Data",
+}
+
+
+def preprocess_cephalometric_isbi(
+    data_root: str,
+    output_dir: str = None,
+    senior_subdir: str = "AnnotationsByMD/400_senior",
+    junior_subdir: str = "AnnotationsByMD/400_junior",
+    raw_image_subdir: str = "RawImage",
+    pixel_spacing: float = 0.1,
+    target_size: int = 512,
+) -> None:
+    """Preprocess the standard ISBI 2015 distribution layout.
+
+    Expects the standard release structure under ``data_root``::
+
+        <data_root>/
+            RawImage/ (or the split folders directly under data_root)
+                TrainingData/  Test1Data/  Test2Data/   (.bmp)
+            AnnotationsByMD/
+                400_senior/    400_junior/              (.txt)
+
+    The split is assigned by which image folder each file lives in, so no
+    filename-number parsing is required. Outputs one ``.pt`` per image into
+    ``<output_dir>/{train,test1,test2}`` (defaults to ``data_root``).
+
+    Args:
+        data_root: Root of the ISBI distribution.
+        output_dir: Where to write train/test1/test2 .pt dirs (default data_root).
+        senior_subdir: Senior annotations dir relative to data_root.
+        junior_subdir: Junior annotations dir relative to data_root.
+        raw_image_subdir: Image parent dir relative to data_root; the split
+            folders are searched here first, then directly under data_root.
+        pixel_spacing: mm per pixel (ISBI default 0.1).
+        target_size: Square canvas size for the stored image.
+    """
+    import cv2  # local import so helper-only imports never require cv2
+
+    data_root = Path(data_root)
+    output_dir = Path(output_dir) if output_dir else data_root
+    senior_dir = data_root / senior_subdir
+    junior_dir = data_root / junior_subdir
+
+    if not senior_dir.exists():
+        raise FileNotFoundError(f"Senior annotations dir not found: {senior_dir}")
+    if not junior_dir.exists():
+        raise FileNotFoundError(f"Junior annotations dir not found: {junior_dir}")
+
+    for split in ("train", "test1", "test2"):
+        (output_dir / split).mkdir(parents=True, exist_ok=True)
+
+    total_saved = 0
+    total_skipped = 0
+    img_exts = {".bmp", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+
+    for split, folder_name in ISBI_SPLIT_FOLDERS.items():
+        # Locate the image folder: try <data_root>/<raw_image_subdir>/<folder>
+        # then <data_root>/<folder>.
+        candidates = [
+            data_root / raw_image_subdir / folder_name,
+            data_root / folder_name,
+        ]
+        img_dir = next((c for c in candidates if c.exists()), None)
+        if img_dir is None:
+            logging.warning(
+                f"[{split}] image folder not found in "
+                f"{[str(c) for c in candidates]} — skipping split"
+            )
+            continue
+
+        image_paths = sorted(
+            p for p in img_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in img_exts
+        )
+        logging.info(
+            f"[{split}] processing {len(image_paths)} images from {img_dir}"
+        )
+
+        for img_path in image_paths:
+            stem = img_path.stem
+            senior_file = senior_dir / f"{stem}.txt"
+            junior_file = junior_dir / f"{stem}.txt"
+            if not senior_file.exists() or not junior_file.exists():
+                logging.warning(
+                    f"[{split}] {img_path.name}: missing annotator file(s)"
+                )
+                total_skipped += 1
+                continue
+
+            senior_xy = parse_annotation_file(senior_file)
+            junior_xy = parse_annotation_file(junior_file)
+            gt_xy = average_annotators(senior_xy, junior_xy)
+
+            gray = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+            if gray is None:
+                logging.warning(f"[{split}] {img_path.name}: cv2 failed to read")
+                total_skipped += 1
+                continue
+
+            orig_h, orig_w = gray.shape[:2]
+            coords_norm = normalize_coords(gt_xy, width=orig_w, height=orig_h)
+            resized = cv2.resize(
+                gray, (target_size, target_size), interpolation=cv2.INTER_LINEAR
+            )
+            img_chw = to_three_channel(resized)
+
+            pt_data = {
+                "image": torch.from_numpy(img_chw),
+                "tps": torch.from_numpy(coords_norm.astype(np.float32)),
+                "orig_size": torch.tensor([orig_h, orig_w], dtype=torch.float32),
+                "pixel_spacing": torch.tensor(float(pixel_spacing), dtype=torch.float32),
+                "split": split,
+            }
+            torch.save(pt_data, str(output_dir / split / f"{stem}.pt"))
+            total_saved += 1
+
+        logging.info(f"[{split}] done.")
+
+    logging.info(f"All splits done. Saved: {total_saved}, Skipped: {total_skipped}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert ISBI 2015 cephalometric images and annotations to .pt files"
     )
-    parser.add_argument("--image-root", type=str, required=True)
-    parser.add_argument("--senior-annotations", type=str, required=True)
-    parser.add_argument("--junior-annotations", type=str, required=True)
-    parser.add_argument("--output-dir", type=str, required=True)
+    # Layout A (standard ISBI distribution): a single --data-root with
+    # TrainingData/Test1Data/Test2Data + AnnotationsByMD/400_senior|400_junior.
+    parser.add_argument(
+        "--data-root", type=str, default=None,
+        help="Root of the standard ISBI distribution (auto-discovers "
+             "TrainingData/Test1Data/Test2Data + AnnotationsByMD).",
+    )
+    # Layout B (flat): explicit image + annotation dirs, split by filename number.
+    parser.add_argument("--image-root", type=str, default=None)
+    parser.add_argument("--senior-annotations", type=str, default=None)
+    parser.add_argument("--junior-annotations", type=str, default=None)
+    parser.add_argument(
+        "--output-dir", type=str, default=None,
+        help="Output root for train/test1/test2 (defaults to --data-root).",
+    )
     parser.add_argument("--pixel-spacing", type=float, default=0.1)
     parser.add_argument("--target-size", type=int, default=512)
     args = parser.parse_args()
+
+    if args.data_root:
+        # Standard ISBI distribution layout.
+        if not Path(args.data_root).exists():
+            print(f"ERROR: data root not found: {args.data_root}", file=sys.stderr)
+            sys.exit(1)
+        preprocess_cephalometric_isbi(
+            args.data_root,
+            output_dir=args.output_dir,
+            pixel_spacing=args.pixel_spacing,
+            target_size=args.target_size,
+        )
+        return
+
+    # Flat layout (requires image-root + both annotation dirs).
+    missing = [
+        name for name, val in [
+            ("--image-root", args.image_root),
+            ("--senior-annotations", args.senior_annotations),
+            ("--junior-annotations", args.junior_annotations),
+            ("--output-dir", args.output_dir),
+        ] if not val
+    ]
+    if missing:
+        print(
+            f"ERROR: provide --data-root for the standard ISBI layout, or all of "
+            f"--image-root/--senior-annotations/--junior-annotations/--output-dir "
+            f"for the flat layout. Missing: {missing}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if not Path(args.image_root).exists():
         print(f"ERROR: image root not found: {args.image_root}", file=sys.stderr)
