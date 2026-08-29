@@ -13,6 +13,7 @@ ENV_PREFIX = "LANDMARKING_"
 DATASET_DIR_MAPPING = {
     "lizard": "Lizard_data",
     "wflw": "WFLW_data",
+    "cephalometric": "Cephalometric_data",
 }
 
 

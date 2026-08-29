@@ -309,6 +309,34 @@ class TrainingEngine:
                     augment=False,
                     landmark_indices=cfg.dataset.landmark_indices or None,
                 )
+        elif dataset_name == "cephalometric":
+            from ..datasets.cephalometric.dataset import CephalometricDataset
+
+            ceph_mode = "heatmap" if cfg.model.variant == "heatmap" else "coord"
+            train_ds = CephalometricDataset(
+                pt_paths=train_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=True,
+                mode=ceph_mode,
+                heatmap_size=cfg.model.heatmap_size,
+                sigma=cfg.model.sigma,
+                pixel_spacing=cfg.dataset.pixel_spacing,
+                landmark_indices=cfg.dataset.landmark_indices or None,
+                split="train",
+            )
+            val_ds = CephalometricDataset(
+                pt_paths=val_paths,
+                input_size=cfg.dataset.input_size,
+                num_landmarks=cfg.dataset.num_landmarks,
+                augment=False,
+                mode=ceph_mode,
+                heatmap_size=cfg.model.heatmap_size,
+                sigma=cfg.model.sigma,
+                pixel_spacing=cfg.dataset.pixel_spacing,
+                landmark_indices=cfg.dataset.landmark_indices or None,
+                split="test1",
+            )
         else:
             # Lizard or generic
             from ..datasets.lizard.dataset import LizardDataset

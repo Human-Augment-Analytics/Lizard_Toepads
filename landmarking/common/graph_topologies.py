@@ -169,14 +169,129 @@ def make_subsampled_wflw_edge_index(landmark_indices: list) -> torch.Tensor:
     return torch.tensor(edges, dtype=torch.long).t().contiguous()
 
 
+def make_cephalometric_edge_index() -> torch.Tensor:
+    """Anatomically correct ISBI 2015 cephalometric 19-point landmark graph.
+
+    Encodes the lateral skull structures with bidirectional edges connecting
+    the cranial base, maxilla, mandible, dentition, and soft-tissue landmarks
+    into a single connected graph (no isolated node). Landmark order:
+      0 Sella, 1 Nasion, 2 Orbitale, 3 Porion, 4 A-point, 5 B-point,
+      6 Pogonion, 7 Menton, 8 Gnathion, 9 Gonion, 10 L1 tip, 11 U1 tip,
+      12 Upper Lip, 13 Lower Lip, 14 Subnasale, 15 Soft-tissue Pogonion,
+      16 PNS, 17 ANS, 18 Articulare.
+
+    The undirected edge list is de-duplicated before each pair is expanded
+    into two directed edges [u, v] and [v, u].
+
+    Returns:
+        Edge index tensor of shape (2, E), dtype torch.long.
+    """
+    # Undirected anatomical adjacency pairs (index-mapped from the design).
+    undirected = [
+        (0, 1), (0, 3), (3, 18), (18, 9), (0, 18),
+        (1, 2), (2, 3), (1, 17),
+        (17, 4), (4, 16), (16, 2), (17, 11), (16, 0),
+        (9, 7), (7, 8), (8, 6), (6, 5), (5, 10), (9, 18),
+        (7, 6), (8, 7),
+        (11, 10), (4, 11), (5, 10),
+        (14, 12), (12, 13), (13, 15), (15, 6),
+        (14, 17), (14, 4), (12, 11), (13, 10),
+    ]
+
+    # De-duplicate undirected pairs (treat (u,v) and (v,u) as the same edge).
+    seen = set()
+    edges = []
+    for u, v in undirected:
+        key = (u, v) if u <= v else (v, u)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append([u, v])
+        edges.append([v, u])
+
+    return torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+
+def make_subsampled_cephalometric_edge_index(landmark_indices: list) -> torch.Tensor:
+    """Create cephalometric topology for a subsampled landmark set.
+
+    Preserves the anatomical groupings from the full cephalometric graph. For
+    each region, finds which members survive in the subset and chains them in
+    sorted order (bidirectional). Cross-group anchor edges are kept if both
+    endpoints survive.
+
+    The output edge index uses 0-based indices into the subset (not original
+    19-point indices). E.g., if landmark_indices=[0, 3, 9, 18], then node 0 in
+    the subset is original LM 0, node 3 is original LM 18, etc.
+
+    Args:
+        landmark_indices: List of original landmark indices in the subset.
+
+    Returns:
+        Edge index tensor of shape (2, E), dtype torch.long, with indices into
+        the subset array [0, len(landmark_indices)-1].
+    """
+    # Map from original index → position in subset
+    idx_set = set(landmark_indices)
+    orig_to_subset = {orig: pos for pos, orig in enumerate(sorted(landmark_indices))}
+
+    # Define anatomical groups by original index
+    groups = [
+        [0, 1, 3, 18],       # Cranial base
+        [2, 4, 16, 17],      # Maxilla
+        [5, 6, 7, 8, 9],     # Mandible
+        [10, 11],            # Dentition
+        [12, 13, 14, 15],    # Soft tissue
+    ]
+
+    # Cross-group anchor edges (kept when both endpoints survive)
+    cross_edges = [
+        (0, 18), (3, 18), (18, 9), (1, 17), (17, 4), (16, 2), (16, 0),
+        (17, 11), (4, 11), (5, 10), (11, 10), (14, 17), (14, 4), (15, 6),
+        (12, 11), (13, 10),
+    ]
+
+    edges = []
+
+    def add_edge(u_subset, v_subset):
+        edges.append([u_subset, v_subset])
+        edges.append([v_subset, u_subset])
+
+    for members in groups:
+        # Find which members of this group survive in the subset (sorted order)
+        surviving = [m for m in sorted(members) if m in idx_set]
+        if len(surviving) < 2:
+            continue  # Single or no nodes — no edges possible
+
+        # Chain the survivors in order
+        for i in range(len(surviving) - 1):
+            add_edge(orig_to_subset[surviving[i]], orig_to_subset[surviving[i + 1]])
+
+    # Cross-group anchor edges
+    for u, v in cross_edges:
+        if u in idx_set and v in idx_set:
+            add_edge(orig_to_subset[u], orig_to_subset[v])
+
+    if not edges:
+        # Fallback: no edges (single isolated nodes)
+        return torch.zeros((2, 0), dtype=torch.long)
+
+    return torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+
 def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indices: list = None) -> torch.Tensor:
     """Registry lookup for graph topologies.
 
     Args:
-        topology_name: Name of the topology. Supported: 'chain', 'wflw'.
-        num_landmarks: Required when topology_name == 'chain'. Ignored for 'wflw'.
+        topology_name: Name of the topology. Supported: 'chain', 'wflw',
+                       'cephalometric'.
+        num_landmarks: Required when topology_name == 'chain'. Ignored for
+                       'wflw' and 'cephalometric'.
         landmark_indices: When provided with 'wflw' topology, creates a
                          subsampled WFLW graph preserving anatomical groupings.
+                         When provided with 'cephalometric' topology and fewer
+                         than 19 indices, creates a subsampled cephalometric
+                         graph preserving anatomical groupings.
 
     Returns:
         Edge index tensor appropriate for the named topology.
@@ -185,7 +300,7 @@ def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indic
         KeyError: If topology_name is not a known topology.
         ValueError: If topology_name == 'chain' and num_landmarks is None.
     """
-    known = ["chain", "wflw"]
+    known = ["chain", "wflw", "cephalometric"]
 
     if topology_name == "chain":
         if num_landmarks is None:
@@ -197,6 +312,10 @@ def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indic
         if landmark_indices and len(landmark_indices) < 98:
             return make_subsampled_wflw_edge_index(landmark_indices)
         return make_wflw_edge_index()
+    elif topology_name == "cephalometric":
+        if landmark_indices and len(landmark_indices) < 19:
+            return make_subsampled_cephalometric_edge_index(landmark_indices)
+        return make_cephalometric_edge_index()
     else:
         raise KeyError(
             f"Unknown topology '{topology_name}'. Known topologies: {known}"

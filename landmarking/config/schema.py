@@ -34,6 +34,7 @@ class DatasetConfig:
     data_dir: str = ""
     split_path: str = ""
     landmark_indices: list = field(default_factory=list)
+    pixel_spacing: float = 0.1
 
 
 @dataclass
@@ -158,10 +159,11 @@ class LandmarkingConfig:
             ValueError: If landmark_indices contains invalid values or duplicates.
         """
         if self.dataset.landmark_indices:
+            max_idx = 18 if self.dataset.name == "cephalometric" else 97
             for idx in self.dataset.landmark_indices:
-                if not isinstance(idx, int) or idx < 0 or idx > 97:
+                if not isinstance(idx, int) or idx < 0 or idx > max_idx:
                     raise ValueError(
-                        f"Invalid landmark index: {idx}. Must be int in [0, 97]."
+                        f"Invalid landmark index: {idx}. Must be int in [0, {max_idx}]."
                     )
             if len(self.dataset.landmark_indices) != len(set(self.dataset.landmark_indices)):
                 raise ValueError("landmark_indices contains duplicates")

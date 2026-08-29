@@ -166,6 +166,89 @@ def evaluate_wflw_heatmap(model, test_loader, device, heatmap_size, iod_left=Non
     return results
 
 
+def evaluate_cephalometric_split(
+    model, loader, device, config, is_heatmap, edge_index, mean_shape,
+):
+    """Evaluate a cephalometric model on one split's dataloader.
+
+    Runs variant-aware inference (mirroring the TrainingEngine dispatch),
+    collects normalized predicted and ground-truth coordinates plus per-sample
+    ``orig_size`` / ``pixel_spacing`` metadata, converts to per-landmark radial
+    error in millimeters, and returns the MRE/std/SDR summary. Never computes
+    the framework NME (Req 7.5).
+    """
+    from ..evaluation.metrics_cephalometric import (
+        compute_radial_error_mm, compute_mre_sdr,
+    )
+
+    num_landmarks = config.dataset.num_landmarks
+    is_coord_only = config.model.variant in ("hrnet_coord",)
+    is_graph_cond_heatmap = config.model.variant == "graph_cond_heatmap"
+
+    radial_errors_mm = []
+    n_samples = 0
+
+    model.eval()
+    with torch.no_grad():
+        for batch in loader:
+            imgs, coords, *rest = batch
+            imgs = imgs.to(device)
+            coords = coords.to(device)
+            B = imgs.shape[0]
+            metadata = rest[-1] if rest else {}
+
+            # Variant-aware forward pass (mirror the TrainingEngine).
+            if is_graph_cond_heatmap:
+                _, pred = model(imgs, edge_index)
+            elif is_heatmap:
+                # Heatmap model on coords dataset: forward(imgs) -> (hm, coords)
+                _, pred = model(imgs)
+            elif is_coord_only:
+                pred = model(imgs)
+            else:
+                # GCN / fused variants: forward(imgs, init, edge_index)
+                if mean_shape is not None:
+                    init = mean_shape.unsqueeze(0).expand(B, -1, -1)
+                else:
+                    init = torch.full(
+                        (B, num_landmarks, 2), 0.5, device=device
+                    )
+                out = model(imgs, init, edge_index)
+                pred = out[0] if isinstance(out, tuple) else out
+
+            pred_norm = pred.cpu().numpy()   # (B, K, 2) in [0,1]
+            gt_norm = coords.cpu().numpy()   # (B, K, 2) in [0,1]
+
+            # Per-sample metadata (batched tensors -> index per sample).
+            orig_size = metadata.get("orig_size") if hasattr(metadata, "get") else None
+            pixel_spacing = metadata.get("pixel_spacing") if hasattr(metadata, "get") else None
+
+            for i in range(B):
+                # orig_size[i] -> [H, W]
+                if orig_size is not None:
+                    os_i = orig_size[i]
+                    os_i = os_i.tolist() if hasattr(os_i, "tolist") else list(os_i)
+                else:
+                    os_i = [config.dataset.input_size, config.dataset.input_size]
+
+                # pixel_spacing[i] -> scalar
+                if pixel_spacing is not None:
+                    ps_i = pixel_spacing[i]
+                    ps_i = float(ps_i.item()) if hasattr(ps_i, "item") else float(ps_i)
+                else:
+                    ps_i = float(config.dataset.pixel_spacing)
+
+                errs = compute_radial_error_mm(
+                    pred_norm[i], gt_norm[i], os_i, ps_i
+                )
+                radial_errors_mm.extend([float(e) for e in errs])
+                n_samples += 1
+
+    summary = compute_mre_sdr(radial_errors_mm)
+    summary["n_samples"] = n_samples
+    return summary
+
+
 def main(argv=None):
     args = parse_args(argv)
 
@@ -186,10 +269,42 @@ def main(argv=None):
 
     # Load split
     split_path = args.split or config.dataset.split_path
+    # For cephalometric, evaluation reports Test1 and Test2 separately. We
+    # collect a {split_name: [paths]} mapping so each partition is scored on
+    # its own. Precedence matches other datasets:
+    #   --split -> config.dataset.split_path -> directory discovery.
+    ceph_splits = None
     if split_path and Path(split_path).exists():
         with open(split_path) as f:
             split_data = json.load(f)
         test_paths = split_data.get("test", [])
+        if config.dataset.name == "cephalometric":
+            # A provided split file is honored as a single "test" list.
+            ceph_splits = {"test": test_paths}
+    elif config.dataset.name == "cephalometric":
+        # Cephalometric: no split file -> discover Test1 and Test2 separately
+        # so each partition is scored on its own (Req 7.6, 10.3, 11.5).
+        data_dir = Path(config.dataset.data_dir)
+        ceph_splits = {}
+        for split_name in ("test1", "test2"):
+            split_dir = data_dir / split_name
+            if split_dir.exists():
+                paths = sorted([str(p) for p in split_dir.glob("*.pt")])
+                if paths:
+                    ceph_splits[split_name] = paths
+                    logger.info(
+                        f"Auto-discovered {split_name} set "
+                        f"({len(paths)} samples) from: {split_dir}"
+                    )
+        if not ceph_splits:
+            logger.error(
+                f"No split file and no test1/test2 directories with .pt "
+                f"files found under {data_dir}. Provide --split or ensure "
+                f"test data exists."
+            )
+            sys.exit(1)
+        # test_paths retained for the shared logging line below.
+        test_paths = [p for paths in ceph_splits.values() for p in paths]
     else:
         # Auto-discover test set from data directory
         data_dir = Path(config.dataset.data_dir)
@@ -261,6 +376,29 @@ def main(argv=None):
             augment=False,
             landmark_indices=config.dataset.landmark_indices or None,
         )
+    elif config.dataset.name == "cephalometric":
+        from ..datasets.cephalometric.dataset import CephalometricDataset
+
+        ceph_mode = "heatmap" if is_heatmap else "coord"
+
+        def _build_ceph_loader(paths, split_name):
+            ds = CephalometricDataset(
+                pt_paths=paths,
+                input_size=config.dataset.input_size,
+                num_landmarks=config.dataset.num_landmarks,
+                augment=False,
+                mode=ceph_mode,
+                heatmap_size=config.model.heatmap_size,
+                sigma=config.model.sigma,
+                pixel_spacing=config.dataset.pixel_spacing,
+                landmark_indices=config.dataset.landmark_indices or None,
+                split=split_name,
+            )
+            return DataLoader(ds, batch_size=32, shuffle=False, num_workers=4)
+
+        # Per-split loaders are built inside the cephalometric eval branch;
+        # test_loader is unused for this dataset.
+        test_loader = None
     else:
         from ..datasets.lizard.dataset import LizardDataset
         test_ds = LizardDataset(
@@ -270,7 +408,8 @@ def main(argv=None):
             augment=False,
         )
 
-    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False, num_workers=4)
+    if config.dataset.name != "cephalometric":
+        test_loader = DataLoader(test_ds, batch_size=32, shuffle=False, num_workers=4)
 
     # Run evaluation
     if is_heatmap and config.dataset.name == "wflw":
@@ -296,6 +435,27 @@ def main(argv=None):
                 mean_shape = mean_shape[config.dataset.landmark_indices]
         edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks, landmark_indices=config.dataset.landmark_indices or None).to(device)
         results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right)
+    elif config.dataset.name == "cephalometric":
+        # Cephalometric evaluation — MRE (mm) + SDR, reported per split
+        # (Test1 / Test2 separately). No framework NME (Req 7.5).
+        edge_index = get_edge_index(
+            config.dataset.graph_topology, config.dataset.num_landmarks,
+            landmark_indices=config.dataset.landmark_indices or None,
+        ).to(device)
+        mean_shape = None
+        if config.dataset.mean_shape_path and Path(config.dataset.mean_shape_path).exists():
+            mean_shape = torch.load(
+                config.dataset.mean_shape_path, map_location=device, weights_only=False
+            )
+            if config.dataset.landmark_indices:
+                mean_shape = mean_shape[config.dataset.landmark_indices]
+
+        results = {}
+        for split_name, split_paths in ceph_splits.items():
+            loader = _build_ceph_loader(split_paths, split_name)
+            results[split_name] = evaluate_cephalometric_split(
+                model, loader, device, config, is_heatmap, edge_index, mean_shape,
+            )
     else:
         # Lizard evaluation — pixel error
         from ..evaluation.metrics_lizard import compute_pixel_error, pixel_to_mm
@@ -356,6 +516,23 @@ def main(argv=None):
             n = results["counts"][k]
             nme_s = f"{nme_v:.4f}" if nme_v is not None else "N/A"
             logger.info(f"  {k:<16} NME={nme_s}  FR={fr_v:.4f}  AUC={auc_v:.4f}  (n={n})")
+    elif config.dataset.name == "cephalometric":
+        # Per-split MRE (mm) + std + SDR@2/2.5/3/4mm
+        for split_name, split_res in results.items():
+            mre_v = split_res.get("mre")
+            std_v = split_res.get("std")
+            n = split_res.get("n", 0)
+            mre_s = f"{mre_v:.4f}" if mre_v is not None else "N/A"
+            std_s = f"{std_v:.4f}" if std_v is not None else "N/A"
+            logger.info(
+                f"  [{split_name}] MRE={mre_s} mm  std={std_s} mm  "
+                f"(n_landmarks={n}, n_samples={split_res.get('n_samples', 0)})"
+            )
+            sdr = split_res.get("sdr", {})
+            for thr in ("2.0mm", "2.5mm", "3.0mm", "4.0mm"):
+                sdr_v = sdr.get(thr)
+                sdr_s = f"{sdr_v:.2f}%" if sdr_v is not None else "N/A"
+                logger.info(f"      SDR@{thr:<6} = {sdr_s}")
     else:
         logger.info(f"  Mean pixel error: {results['mean_px_error']:.2f}")
         logger.info(f"  Median pixel error: {results['median_px_error']:.2f}")

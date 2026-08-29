@@ -211,3 +211,172 @@ class TestComputeAUC:
         auc_good = compute_auc(good, threshold=0.10)
         auc_bad = compute_auc(bad, threshold=0.10)
         assert auc_good > auc_bad
+
+
+# ---------------------------------------------------------------------------
+# Cephalometric metrics tests
+# ---------------------------------------------------------------------------
+
+from hypothesis import given, settings, strategies as st
+
+from landmarking.evaluation.metrics_cephalometric import (
+    to_original_pixels,
+    compute_radial_error_mm,
+    compute_mre_sdr,
+)
+from landmarking.evaluation.engine import evaluate_cephalometric
+
+
+# Feature: cephalometric-dataset, Property 2: Coordinate normalize / map-back round trip
+class TestCephalometricNormalizeRoundTrip:
+    """Property 2: normalize by (W, H) then map back recovers pixels.
+
+    Validates: Requirements 2.3, 7.2
+    """
+
+    @settings(max_examples=200)
+    @given(
+        h=st.integers(min_value=2, max_value=4000),
+        w=st.integers(min_value=2, max_value=4000),
+        data=st.data(),
+    )
+    def test_normalize_mapback_round_trip(self, h, w, data):
+        n = data.draw(st.integers(min_value=1, max_value=19))
+        xs = data.draw(
+            st.lists(
+                st.floats(min_value=0.0, max_value=float(w),
+                          allow_nan=False, allow_infinity=False),
+                min_size=n, max_size=n,
+            )
+        )
+        ys = data.draw(
+            st.lists(
+                st.floats(min_value=0.0, max_value=float(h),
+                          allow_nan=False, allow_infinity=False),
+                min_size=n, max_size=n,
+            )
+        )
+        pixels = np.array(list(zip(xs, ys)), dtype=np.float64)
+
+        # Normalize by width (x) and height (y)
+        coords_norm = np.empty_like(pixels)
+        coords_norm[:, 0] = pixels[:, 0] / w
+        coords_norm[:, 1] = pixels[:, 1] / h
+
+        # Normalized values are within [0, 1]
+        assert np.all(coords_norm >= 0.0 - 1e-9)
+        assert np.all(coords_norm <= 1.0 + 1e-9)
+
+        # Map back via orig_size = [H, W]
+        recovered = to_original_pixels(coords_norm, orig_size=[h, w])
+        np.testing.assert_allclose(recovered, pixels, rtol=1e-6, atol=1e-6)
+
+
+# Feature: cephalometric-dataset, Property 9: MRE / SDR metric invariants
+class TestCephalometricMREInvariants:
+    """Property 9: MRE / SDR invariants.
+
+    Validates: Requirements 7.2, 7.3, 7.4, 9.4
+    """
+
+    @settings(max_examples=200, deadline=None)
+    @given(
+        n=st.integers(min_value=5, max_value=19),
+        h=st.integers(min_value=10, max_value=3000),
+        w=st.integers(min_value=10, max_value=3000),
+        pixel_spacing=st.floats(min_value=0.01, max_value=5.0,
+                                allow_nan=False, allow_infinity=False),
+        k=st.floats(min_value=0.1, max_value=10.0,
+                    allow_nan=False, allow_infinity=False),
+        data=st.data(),
+    )
+    def test_mre_sdr_invariants(self, n, h, w, pixel_spacing, k, data):
+        coord = st.floats(min_value=0.0, max_value=1.0,
+                          allow_nan=False, allow_infinity=False)
+        pred = np.array(
+            data.draw(st.lists(st.tuples(coord, coord), min_size=n, max_size=n)),
+            dtype=np.float64,
+        )
+        gt = np.array(
+            data.draw(st.lists(st.tuples(coord, coord), min_size=n, max_size=n)),
+            dtype=np.float64,
+        )
+        orig_size = [h, w]
+
+        errs = compute_radial_error_mm(pred, gt, orig_size, pixel_spacing)
+
+        # Every per-landmark error is non-negative
+        assert np.all(errs >= 0.0)
+
+        # MRE is zero when pred == gt
+        zero_errs = compute_radial_error_mm(gt, gt, orig_size, pixel_spacing)
+        res_zero = compute_mre_sdr(zero_errs)
+        assert res_zero["mre"] == pytest.approx(0.0, abs=1e-9)
+
+        # Scaling pixel_spacing by k scales MRE by k
+        res = compute_mre_sdr(errs)
+        errs_scaled = compute_radial_error_mm(
+            pred, gt, orig_size, pixel_spacing * k
+        )
+        res_scaled = compute_mre_sdr(errs_scaled)
+        assert res_scaled["mre"] == pytest.approx(res["mre"] * k, rel=1e-6, abs=1e-9)
+
+        # SDR non-decreasing across increasing thresholds, each in [0, 100]
+        sdr = res["sdr"]
+        ordered = [sdr["2.0mm"], sdr["2.5mm"], sdr["3.0mm"], sdr["4.0mm"]]
+        for val in ordered:
+            assert 0.0 <= val <= 100.0
+        for a, b in zip(ordered, ordered[1:]):
+            assert a <= b + 1e-9
+
+        # Landmark subset behaves consistently: metric normalizes by physical
+        # pixel_spacing, not a landmark pair. Any subset's errors are the same
+        # subset of the full per-landmark errors.
+        subset = data.draw(
+            st.lists(st.integers(min_value=0, max_value=n - 1),
+                     min_size=1, max_size=n, unique=True)
+        )
+        subset_errs = compute_radial_error_mm(
+            pred[subset], gt[subset], orig_size, pixel_spacing
+        )
+        np.testing.assert_allclose(subset_errs, errs[subset], rtol=1e-6, atol=1e-6)
+
+
+class TestEvaluateCephalometricNoNME:
+    """Unit test: cephalometric metric result has no 'nme' key.
+
+    Validates: Requirement 7.5
+    """
+
+    def test_result_has_no_nme_but_has_mre_and_sdr(self):
+        gt = [
+            np.array([[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]], dtype=np.float64),
+            np.array([[0.2, 0.2], [0.4, 0.6], [0.7, 0.3]], dtype=np.float64),
+        ]
+        pred = [
+            g + 0.001 for g in gt
+        ]
+        metadata = [
+            {"orig_size": np.array([800.0, 640.0]), "pixel_spacing": 0.1,
+             "split": "test1"},
+            {"orig_size": np.array([1000.0, 900.0]), "pixel_spacing": 0.1,
+             "split": "test1"},
+        ]
+
+        result = evaluate_cephalometric(pred, gt, metadata)
+
+        assert "nme" not in result
+        assert "mre" in result
+        assert "sdr" in result
+        assert result["mre"] is not None
+        assert result["n_evaluated"] == 2
+
+    def test_skips_none_predictions(self):
+        gt = [np.array([[0.1, 0.1], [0.5, 0.5]], dtype=np.float64)]
+        pred = [None]
+        metadata = [{"orig_size": np.array([800.0, 640.0]),
+                     "pixel_spacing": 0.1, "split": "test1"}]
+        result = evaluate_cephalometric(pred, gt, metadata)
+        assert result["n_evaluated"] == 0
+        assert result["mre"] is None
+        assert "nme" not in result

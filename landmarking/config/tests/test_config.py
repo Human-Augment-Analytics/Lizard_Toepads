@@ -40,6 +40,20 @@ class TestFromJson:
         assert config.dataset.graph_topology == "wflw"
         assert config.training.rot_factor == 30.0
 
+    def test_load_cephalometric_defaults(self):
+        config = LandmarkingConfig.from_json(str(DEFAULTS_DIR / "cephalometric.json"))
+        assert config.dataset.name == "cephalometric"
+        assert config.dataset.num_landmarks == 19
+        assert config.dataset.graph_topology == "cephalometric"
+        assert config.dataset.pixel_spacing == 0.1
+
+    def test_pixel_spacing_defaults_when_omitted(self):
+        """WFLW/Lizard configs omit pixel_spacing; it should default to 0.1 (Req 12.4)."""
+        lizard = LandmarkingConfig.from_json(str(DEFAULTS_DIR / "lizard.json"))
+        wflw = LandmarkingConfig.from_json(str(DEFAULTS_DIR / "wflw.json"))
+        assert lizard.dataset.pixel_spacing == 0.1
+        assert wflw.dataset.pixel_spacing == 0.1
+
     def test_roundtrip_json(self, tmp_path):
         """Config written to JSON and read back should be identical."""
         original = LandmarkingConfig.from_json(str(DEFAULTS_DIR / "lizard.json"))
@@ -133,6 +147,16 @@ class TestResolvePaths:
         config.resolve_paths()
         assert config.dataset.data_dir == "/explicit/path"
 
+    def test_resolve_dataset_dir_cephalometric(self):
+        """With data_dir unset, cephalometric resolves to <data_root>/Cephalometric_data (Req 5.6)."""
+        config = LandmarkingConfig.from_dict({
+            "paths": {"data_root": "/data"},
+            "dataset": {"name": "cephalometric"},
+        })
+        config.resolve_paths()
+        assert config.dataset.data_dir.endswith("Cephalometric_data")
+        assert config.dataset.data_dir == "/data/Cephalometric_data"
+
 
 class TestResolver:
     """Test resolver utility functions directly."""
@@ -158,3 +182,35 @@ class TestResolver:
     def test_resolve_dataset_dir_unknown(self):
         result = resolve_dataset_dir("/root", "custom_dataset")
         assert result == "/root/custom_dataset"
+
+    def test_resolve_dataset_dir_cephalometric(self):
+        result = resolve_dataset_dir("/root", "cephalometric")
+        assert result == "/root/Cephalometric_data"
+
+
+class TestDatasetAwareValidation:
+    """Test dataset-aware landmark-index validation bounds."""
+
+    def test_cephalometric_valid_indices(self):
+        """Cephalometric allows indices in [0, 18] (Req 5.6)."""
+        config = LandmarkingConfig.from_dict({
+            "dataset": {"name": "cephalometric", "landmark_indices": [0, 18]},
+        })
+        # Should not raise
+        config.validate()
+
+    def test_cephalometric_out_of_range_raises(self):
+        """Cephalometric rejects index 19 (max is 18)."""
+        config = LandmarkingConfig.from_dict({
+            "dataset": {"name": "cephalometric", "landmark_indices": [0, 19]},
+        })
+        with pytest.raises(ValueError):
+            config.validate()
+
+    def test_wflw_indices_still_valid(self):
+        """WFLW bound of [0, 97] is unchanged."""
+        config = LandmarkingConfig.from_dict({
+            "dataset": {"name": "wflw", "landmark_indices": [0, 97]},
+        })
+        # Should not raise
+        config.validate()

@@ -10,6 +10,7 @@ from typing import Callable, Dict
 
 import numpy as np
 
+from . import metrics_cephalometric
 from . import metrics_lizard
 from . import metrics_wflw
 
@@ -110,10 +111,59 @@ def evaluate_wflw(predictions: list, ground_truths: list, metadata: list) -> dic
     return result
 
 
+def evaluate_cephalometric(
+    predictions: list, ground_truths: list, metadata: list
+) -> dict:
+    """Evaluate cephalometric predictions with MRE (mm) and SDR.
+
+    Maps normalized predictions and ground truths back to original pixel
+    space using each sample's ``orig_size``, converts per-landmark
+    Euclidean pixel error to millimeters via ``pixel_spacing``, pools the
+    errors across all samples and landmarks, and reports MRE / std / SDR.
+
+    Args:
+        predictions: List of (N, 2) prediction arrays normalized to [0, 1].
+        ground_truths: List of (N, 2) GT arrays normalized to [0, 1].
+        metadata: List of metadata dicts, each with "orig_size" and
+            "pixel_spacing".
+
+    Returns:
+        Dict with mre, std, sdr, n (from compute_mre_sdr) and n_evaluated.
+        Never contains an "nme" key (MRE/SDR are the sole accuracy metrics).
+    """
+    pooled_errors = []
+    n_evaluated = 0
+
+    for pred, gt, meta in zip(predictions, ground_truths, metadata):
+        if pred is None:
+            continue
+
+        orig_size = meta.get("orig_size")
+        if hasattr(orig_size, "tolist"):
+            orig_size = orig_size.tolist()
+        orig_size = np.asarray(orig_size, dtype=np.float64).reshape(-1)
+
+        pixel_spacing = meta.get("pixel_spacing", 0.1)
+        if hasattr(pixel_spacing, "item"):
+            pixel_spacing = pixel_spacing.item()
+        pixel_spacing = float(pixel_spacing)
+
+        errors_mm = metrics_cephalometric.compute_radial_error_mm(
+            pred, gt, orig_size, pixel_spacing
+        )
+        pooled_errors.extend(errors_mm.tolist())
+        n_evaluated += 1
+
+    result = metrics_cephalometric.compute_mre_sdr(pooled_errors)
+    result["n_evaluated"] = n_evaluated
+    return result
+
+
 # Metric dispatch registry
 METRIC_REGISTRY: Dict[str, Callable] = {
     "lizard": evaluate_lizard,
     "wflw": evaluate_wflw,
+    "cephalometric": evaluate_cephalometric,
 }
 
 
