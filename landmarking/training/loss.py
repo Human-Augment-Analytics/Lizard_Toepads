@@ -130,19 +130,40 @@ def heatmap_loss(
     heatmap_size: int,
     sigma: float = 1.5,
     coord_weight: float = 100.0,
+    mode: str = "ce",
 ) -> torch.Tensor:
-    """Combined heatmap MSE + coordinate loss for heatmap regression models.
+    """Combined heatmap + coordinate loss for heatmap regression models.
 
-    Generates Gaussian target heatmaps from gt_coords, then computes:
-        loss = MSE(pred_heatmaps, gt_heatmaps) + coord_weight * MSE(pred_coords, gt_coords)
+    Two modes for the heatmap term:
+
+    ``mode="mse"`` (legacy):
+        MSE(pred_heatmaps, gt_heatmaps) + coord_weight * MSE(pred_coords, gt_coords)
+
+        BROKEN IN COMBINATION. The Gaussian target is ~0 in 16320 of 16384 cells at
+        heatmap_size=128, so predicting zero everywhere is already near-optimal for
+        the MSE term: its total achievable gain is ~4.3e-4 while the coordinate term
+        is ~4.3. Measured, the heatmap term is 0.010% of the loss and 0.010% of the
+        gradient, so it cannot shape the map at all and training degenerates to pure
+        coordinate regression through the decoder. Kept only to reproduce old runs.
+
+    ``mode="ce"`` (default):
+        Treats each landmark's heatmap as a DISTRIBUTION and minimizes the cross
+        entropy against the normalized (sum-to-1) Gaussian target:
+            -sum_x  target_norm(x) * log_softmax(pred)(x)
+        This is scale-appropriate (it starts near log(H*W) ~ 9.7 and falls as the
+        peak forms), it directly shapes the softmax that the decoder consumes, and
+        it is the correct "likelihood" framing for Bayesian fusion. Verified to
+        overfit a 4-image batch to ~11px where the MSE combination stalls at ~247px
+        against a 258px centre-prediction baseline.
 
     Args:
         pred_heatmaps: (B, K, H, W) predicted heatmap logits.
-        pred_coords: (B, K, 2) soft-argmax decoded coordinates in [0, 1].
+        pred_coords: (B, K, 2) decoded coordinates in [0, 1].
         gt_coords: (B, K, 2) ground truth coordinates in [0, 1].
         heatmap_size: Spatial size of target heatmaps (H = W).
         sigma: Gaussian sigma for target heatmap generation.
         coord_weight: Scalar weight for the coordinate loss term.
+        mode: "ce" (default) or "mse".
 
     Returns:
         Scalar combined loss.
@@ -163,8 +184,17 @@ def heatmap_loss(
     dy = grid_y.unsqueeze(0).unsqueeze(0) - py.unsqueeze(-1).unsqueeze(-1)
     gt_heatmaps = torch.exp(-(dx ** 2 + dy ** 2) / (2 * sigma ** 2))
 
-    # Heatmap MSE
-    hm_loss = F.mse_loss(pred_heatmaps, gt_heatmaps)
+    if mode == "mse":
+        hm_loss = F.mse_loss(pred_heatmaps, gt_heatmaps)
+    elif mode == "ce":
+        # Normalize the target into a proper per-landmark distribution, then take
+        # cross entropy against the predicted log-distribution.
+        tgt = gt_heatmaps.view(B, K, -1)
+        tgt = tgt / tgt.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        logp = F.log_softmax(pred_heatmaps.view(B, K, -1), dim=-1)
+        hm_loss = -(tgt * logp).sum(dim=-1).mean()
+    else:
+        raise ValueError(f"Unknown heatmap loss mode {mode!r}; expected 'ce' or 'mse'.")
 
     # Coordinate MSE
     coord_loss = F.mse_loss(pred_coords, gt_coords)

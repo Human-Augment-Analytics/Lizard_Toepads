@@ -27,11 +27,16 @@ class HRNetHeatmap(nn.Module):
         num_landmarks: int,
         pretrained: bool = True,
         heatmap_size: int = 64,
+        decode_mode: str = "windowed",
+        decode_radius: int = 5,
+        bn_momentum: float = 0.01,
         **kwargs,
     ):
         super().__init__()
         self.num_landmarks = num_landmarks
         self.heatmap_size = heatmap_size
+        self.decode_mode = decode_mode
+        self.decode_radius = decode_radius
 
         self.backbone = timm.create_model(
             "hrnet_w18",
@@ -52,9 +57,15 @@ class HRNetHeatmap(nn.Module):
             ], dim=1)
             all_channels = fused_dummy.shape[1]
 
+        # bn_momentum default 0.01 is the paper-faithful HRNet value and is kept so
+        # the working WFLW baseline is unchanged. On SMALL datasets it is harmful:
+        # a freshly initialized BN with momentum 0.01 at batch_size 4 needs ~300+
+        # steps for its running stats to converge, so eval() normalizes with wrong
+        # statistics. Measured 15.5x train-vs-eval logit-scale discrepancy on
+        # identical weights after 150 steps. Raise it (0.1) for small-data configs.
         self.head = nn.Sequential(
             nn.Conv2d(all_channels, all_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(all_channels, momentum=0.01),
+            nn.BatchNorm2d(all_channels, momentum=bn_momentum),
             nn.ReLU(inplace=True),
             nn.Conv2d(all_channels, num_landmarks, kernel_size=1),
         )
@@ -80,7 +91,9 @@ class HRNetHeatmap(nn.Module):
                 mode="bilinear", align_corners=False,
             )
 
-        coords = soft_argmax(heatmaps)
+        coords = decode_coords(
+            heatmaps, mode=self.decode_mode, radius=self.decode_radius
+        )
         return heatmaps, coords
 
 
@@ -118,13 +131,19 @@ def hard_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
 
 
 def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
-    """Differentiable spatial expectation (soft-argmax).
+    """Differentiable spatial expectation (soft-argmax) over the WHOLE map.
 
-    Args:
-        heatmaps: (B, K, H, W) raw logits.
+    WARNING — severe centre bias at realistic logit scales. softmax over H*W cells
+    (16384 at heatmap_size=128) is nearly uniform unless the logit range is large,
+    and the expectation of a near-uniform distribution over [0,1] is 0.5. Measured
+    on PERFECT Gaussian target maps at heatmap_size=128, mean error in canvas px
+    (1024): logit scale 1 -> 265px, scale 5 -> 257px, scale 10 -> 85px,
+    scale 15 -> 1.4px. Predicting the image centre for everything scores ~274px.
 
-    Returns:
-        (B, K, 2) expected coordinates in [0, 1].
+    So this decoder returns the image centre for any map that is not already very
+    sharply peaked, and its accuracy is near-discontinuous in the logit scale.
+    Prefer `windowed_soft_argmax` for a differentiable readout, or `hard_argmax`
+    where gradients are not needed. Kept for backward compatibility and ablations.
     """
     B, K, H, W = heatmaps.shape
     flat = heatmaps.view(B, K, -1)
@@ -138,3 +157,74 @@ def soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
     y_coords = (weights.sum(dim=3) * ys.view(1, 1, H)).sum(dim=-1)
 
     return torch.stack([x_coords, y_coords], dim=-1)
+
+
+def windowed_soft_argmax(heatmaps: torch.Tensor, radius: int = 5) -> torch.Tensor:
+    """Soft-argmax restricted to a window around each landmark's peak.
+
+    Locates the peak with argmax (the index is DETACHED, so no gradient flows
+    through the discrete selection), then takes the spatial expectation only over
+    a (2*radius+1)^2 window around it. This keeps the readout differentiable with
+    respect to heatmap VALUES while removing the centre bias caused by thousands
+    of irrelevant cells dragging the global expectation toward 0.5.
+
+    Measured on perfect Gaussian targets at heatmap_size=128 (canvas px @1024):
+    6.7px at logit scale 0.1 and 0.5px at scale 10, versus 265px and 85px for the
+    global version. Gradient flow verified.
+
+    Args:
+        heatmaps: (B, K, H, W) raw logits.
+        radius: Half-width of the window in heatmap cells.
+
+    Returns:
+        (B, K, 2) expected coordinates in [0, 1].
+    """
+    B, K, H, W = heatmaps.shape
+    device = heatmaps.device
+
+    flat = heatmaps.view(B, K, -1)
+    idx = flat.argmax(dim=-1).detach()
+    cy = (idx // W).float().view(B, K, 1, 1)
+    cx = (idx % W).float().view(B, K, 1, 1)
+
+    yy = torch.arange(H, device=device, dtype=torch.float32).view(1, 1, H, 1)
+    xx = torch.arange(W, device=device, dtype=torch.float32).view(1, 1, 1, W)
+    inside = ((yy - cy).abs() <= radius) & ((xx - cx).abs() <= radius)
+
+    # The peak cell is always inside the window, so no row is fully masked and the
+    # softmax is well defined.
+    masked = heatmaps.masked_fill(~inside, float("-inf"))
+    weights = F.softmax(masked.view(B, K, -1), dim=-1).view(B, K, H, W)
+
+    xs = torch.linspace(0, 1, W, device=device)
+    ys = torch.linspace(0, 1, H, device=device)
+    x_coords = (weights.sum(dim=2) * xs.view(1, 1, W)).sum(dim=-1)
+    y_coords = (weights.sum(dim=3) * ys.view(1, 1, H)).sum(dim=-1)
+
+    return torch.stack([x_coords, y_coords], dim=-1)
+
+
+def decode_coords(
+    heatmaps: torch.Tensor, mode: str = "windowed", radius: int = 5
+) -> torch.Tensor:
+    """Decode coordinates from heatmap logits.
+
+    Args:
+        heatmaps: (B, K, H, W) raw logits.
+        mode: "windowed" (default, differentiable + unbiased), "global"
+            (legacy soft-argmax, centre-biased), or "hard" (argmax with sub-pixel
+            refinement, not differentiable).
+        radius: Window half-width for "windowed".
+
+    Returns:
+        (B, K, 2) coordinates in [0, 1].
+    """
+    if mode == "windowed":
+        return windowed_soft_argmax(heatmaps, radius=radius)
+    if mode == "global":
+        return soft_argmax(heatmaps)
+    if mode == "hard":
+        return hard_argmax(heatmaps)
+    raise ValueError(
+        f"Unknown decode mode {mode!r}; expected 'windowed', 'global', or 'hard'."
+    )

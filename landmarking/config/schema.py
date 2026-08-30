@@ -69,7 +69,12 @@ class ModelConfig:
     # span=0.5 satisfies both: ceiling 0.51 spans the frame at 2-sigma, while
     # useful stds sit in the well-conditioned middle of the sigmoid.
     prior_sigma_span: float = 0.5
-    prior_offset_scale: float = 0.10
+    # Max distance (normalized coords) the graph may move the prior mean away from
+    # the appearance anchor. This bound exists to limit damage from a bad anchor;
+    # now that anchors come from argmax rather than centre-biased soft-argmax it can
+    # be looser, which matters because rescuing a wrong appearance peak REQUIRES a
+    # large offset. At 0.10 the prior mean was confined to +/-102px at canvas 1024.
+    prior_offset_scale: float = 0.25
     # Positive bias on the Cholesky head -> prior starts broad (near-identity
     # fusion), so appearance dominates first and the graph must earn any narrowing.
     # Paired with lr_prior_mult so it can actually travel to an informative std.
@@ -78,6 +83,16 @@ class ModelConfig:
     # learn real peaks before the graph prior acts on its anchors.
     prior_warmup_epochs: int = 0
     prior_disabled: bool = False
+    # Coordinate decoder for heatmap-family models. "windowed" = soft-argmax within
+    # decode_radius cells of the argmax peak (differentiable AND unbiased);
+    # "global" = legacy full-map soft-argmax (severely centre-biased, kept for
+    # ablations); "hard" = argmax with sub-pixel refinement (not differentiable).
+    decode_mode: str = "windowed"
+    decode_radius: int = 5
+    # BatchNorm momentum for from-scratch heatmap heads. 0.01 is the paper-faithful
+    # HRNet value and is fine on large datasets; on small datasets with small
+    # batches it leaves running stats unconverged, so eval() misnormalizes.
+    bn_momentum: float = 0.1
 
 
 @dataclass
@@ -106,6 +121,11 @@ class TrainingConfig:
     seed: int = 42
     device: str = "cuda"
     loss_type: str = "mse"
+    # Heatmap term used by heatmap_loss (non-WFLW heatmap + graph-cond family).
+    # "ce" = cross entropy vs the normalized Gaussian target (default; actually
+    # shapes the map). "mse" = legacy, contributes ~0.01% of the gradient and
+    # cannot train the heatmap; kept only to reproduce earlier runs.
+    heatmap_loss_mode: str = "ce"
     star_omega: float = 1.0
     star_eigenvalue_clamp: float = 6.0
 

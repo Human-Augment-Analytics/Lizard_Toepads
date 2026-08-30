@@ -64,7 +64,7 @@ except ImportError:
     )
 
 from .registry import register_model
-from .hrnet_heatmap import soft_argmax
+from .hrnet_heatmap import decode_coords, hard_argmax
 
 
 LANDMARK_EMBED_DIM = 32
@@ -100,8 +100,11 @@ class GraphPriorFusion(nn.Module):
         heatmap_size: int = 64,
         sigma_min: float = 0.01,
         sigma_span: float = 0.5,
-        offset_scale: float = 0.10,
+        offset_scale: float = 0.25,
         chol_bias: float = 2.0,
+        decode_mode: str = "windowed",
+        decode_radius: int = 5,
+        bn_momentum: float = 0.1,
         prior_disabled: bool = False,
         **kwargs,
     ):
@@ -113,6 +116,8 @@ class GraphPriorFusion(nn.Module):
         self.sigma_span = sigma_span
         self.offset_scale = offset_scale
         self.chol_bias = chol_bias
+        self.decode_mode = decode_mode
+        self.decode_radius = decode_radius
         self.prior_disabled = prior_disabled
         # Runtime toggle used for fusion warm-up (see set_prior_active). Distinct
         # from prior_disabled, which is a permanent architectural ablation.
@@ -137,9 +142,14 @@ class GraphPriorFusion(nn.Module):
             self.fused_channels = fused_dummy.shape[1]
 
         # --- Appearance head (conv heatmap decoder -> likelihood) ---
+        # bn_momentum default 0.1 (PyTorch default), NOT the 0.01 used by the
+        # paper-faithful WFLW head: this head is trained from scratch on small
+        # datasets at small batch size, where momentum 0.01 leaves the running
+        # stats unconverged for hundreds of steps and eval() then normalizes with
+        # the wrong statistics (measured 15.5x train/eval logit-scale gap).
         self.appearance_head = nn.Sequential(
             nn.Conv2d(self.fused_channels, self.fused_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(self.fused_channels, momentum=0.01),
+            nn.BatchNorm2d(self.fused_channels, momentum=bn_momentum),
             nn.ReLU(inplace=True),
             nn.Conv2d(self.fused_channels, num_landmarks, kernel_size=1),
         )
@@ -261,6 +271,12 @@ class GraphPriorFusion(nn.Module):
         quad = z1 * z1 + z2 * z2  # (B, N, H, W)
         return -0.5 * quad  # unnormalized log-Gaussian
 
+    def _decode(self, logits: Tensor) -> Tensor:
+        """Decode coordinates from (fused or appearance) logits."""
+        return decode_coords(
+            logits, mode=self.decode_mode, radius=self.decode_radius
+        )
+
     def set_prior_active(self, active: bool) -> None:
         """Enable/disable the fusion at runtime (used for warm-up).
 
@@ -307,11 +323,16 @@ class GraphPriorFusion(nn.Module):
             # GCN-off: pure conv-heatmap baseline (equivalence check / ablation).
             self.last_sigma_trace = torch.tensor(float("inf"))
             self.last_fused_logits = heatmaps
-            return heatmaps, soft_argmax(heatmaps)
+            return heatmaps, self._decode(heatmaps)
 
-        # Anchor = appearance-only soft-argmax (current belief before fusion).
-        anchors = soft_argmax(heatmaps).detach()  # (B, N, 2); detach: anchor is a
-        # placement, gradients to appearance flow via the heatmap term, not the anchor.
+        # Anchor = appearance peak (current belief before fusion). Uses ARGMAX, not
+        # soft-argmax: the anchor is already detached so it needs no gradient, and
+        # soft-argmax over the full map returns the image centre for any map that is
+        # not sharply peaked. A centre anchor is a self-reinforcing fixed point --
+        # the prior gets centred there, which suppresses appearance evidence
+        # elsewhere, which keeps the anchor at the centre. Measured on ideal target
+        # maps: argmax anchor ~9px vs soft-argmax anchor ~274px.
+        anchors = hard_argmax(heatmaps).detach()  # (B, N, 2)
 
         feat_proj_map = self.feat_proj(fused_map)  # (B, hid, H, W)
         mu, L11, L21, L22 = self._graph_prior(feat_proj_map, anchors, edge_index)
@@ -320,7 +341,7 @@ class GraphPriorFusion(nn.Module):
         log_prior = self._gaussian_prior_map(mu, L11, L21, L22, H, W, x.device)
         fused_logits = F.log_softmax(heatmaps.view(B, N, -1), dim=-1).view(B, N, H, W) + log_prior
 
-        coords = soft_argmax(fused_logits)
+        coords = self._decode(fused_logits)
 
         # Monitoring: mean trace of Sigma = L11^2 + L21^2 + L22^2.
         self.last_sigma_trace = (L11 ** 2 + L21 ** 2 + L22 ** 2).mean().detach()

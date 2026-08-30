@@ -63,7 +63,82 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_landmarks, iod_left=60, iod_right=72):
+# Variants whose forward signature is (imgs, edge_index) -> (heatmaps, coords),
+# i.e. they take a graph but need NO coordinate initialization. These must not be
+# dispatched like the GCN/fused family, whose signature is
+# (imgs, initial_coords, edge_index).
+#
+# Keep in sync with TrainingEngine._is_graph_cond_heatmap. Previously this file
+# tested `variant == "graph_cond_heatmap"` by exact equality, so graph_prior_fusion
+# fell through to the 3-argument call and raised a TypeError at eval time.
+GRAPH_COND_HEATMAP_VARIANTS = ("graph_cond_heatmap", "graph_prior_fusion")
+
+
+def build_model_kwargs(config) -> dict:
+    """Construct model kwargs for evaluation, mirroring TrainingEngine.setup().
+
+    Getting this wrong is silent and fatal: a mismatched `heatmap_size` builds a
+    different architecture than the checkpoint was trained with. The previous code
+    only passed `heatmap_size` when variant == "heatmap", so the graph-conditioned
+    heatmap variants were built at the default 64 regardless of config.
+    """
+    variant = config.model.variant
+    kwargs = {"num_landmarks": config.dataset.num_landmarks}
+
+    if variant in GRAPH_COND_HEATMAP_VARIANTS:
+        kwargs.update({
+            "gnn_hidden": config.model.gnn_hidden,
+            "num_layers": config.model.num_layers,
+            "heatmap_size": config.model.heatmap_size,
+        })
+        if variant == "graph_cond_heatmap":
+            kwargs["num_heads"] = getattr(config.model, "num_heads", 4)
+        if variant == "graph_prior_fusion":
+            kwargs.update({
+                "sigma_min": config.model.prior_sigma_min,
+                "sigma_span": config.model.prior_sigma_span,
+                "offset_scale": config.model.prior_offset_scale,
+                "chol_bias": getattr(config.model, "prior_chol_bias", 2.0),
+                "decode_mode": getattr(config.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(config.model, "decode_radius", 5),
+                "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
+                "prior_disabled": config.model.prior_disabled,
+            })
+        return kwargs
+
+    if variant == "heatmap":
+        kwargs.update({
+            "heatmap_size": getattr(config.model, "heatmap_size", 64),
+            "decode_mode": getattr(config.model, "decode_mode", "windowed"),
+            "decode_radius": getattr(config.model, "decode_radius", 5),
+        })
+        return kwargs
+
+    # GCN / fused / coord family.
+    kwargs.update({
+        "feat_dim": config.model.feat_dim,
+        "gnn_hidden": config.model.gnn_hidden,
+        "num_layers": config.model.num_layers,
+        "num_iters": config.model.num_iters,
+    })
+    if variant in ("multiscale", "fused", "fused_global_ms"):
+        kwargs["scale_indices"] = config.model.scale_indices
+    if variant == "fused_global_patch":
+        kwargs.update({
+            "patch_mode": config.model.patch_mode,
+            "patch_step": config.model.patch_step,
+            "patch_radius": config.model.patch_radius,
+            "patch_radii": tuple(config.model.patch_radii),
+            "patch_proj_dim": config.model.patch_proj_dim,
+        })
+    if variant == "coord":
+        kwargs["use_coarse_init"] = config.model.use_coarse_init
+    if variant == "hinit":
+        kwargs["heatmap_checkpoint"] = config.model.heatmap_checkpoint
+    return kwargs
+
+
+def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_landmarks, iod_left=60, iod_right=72, variant=None):
     """Evaluate a GCN model on WFLW test set. Returns NME/FR/AUC."""
     model.eval()
     nme_buckets = {name: [] for name in ["full"] + ATTR_NAMES}
@@ -75,14 +150,18 @@ def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_la
             coords = coords.to(device)
             B = imgs.shape[0]
 
-            # Mean shape initialization (no noise at eval)
-            if mean_shape is not None:
-                initial_coords = mean_shape.unsqueeze(0).expand(B, -1, -1)
+            if variant in GRAPH_COND_HEATMAP_VARIANTS:
+                # forward(imgs, edge_index) -> (heatmaps, coords); no init coords.
+                _, pred_coords = model(imgs, edge_index)
             else:
-                initial_coords = torch.full((B, num_landmarks, 2), 0.5, device=device)
+                # Mean shape initialization (no noise at eval)
+                if mean_shape is not None:
+                    initial_coords = mean_shape.unsqueeze(0).expand(B, -1, -1)
+                else:
+                    initial_coords = torch.full((B, num_landmarks, 2), 0.5, device=device)
 
-            out = model(imgs, initial_coords, edge_index)
-            pred_coords = out[0] if isinstance(out, tuple) else out
+                out = model(imgs, initial_coords, edge_index)
+                pred_coords = out[0] if isinstance(out, tuple) else out
 
             # Convert to 512px space for NME
             pred_px = pred_coords.cpu().numpy() * 512.0
@@ -183,7 +262,7 @@ def evaluate_cephalometric_split(
 
     num_landmarks = config.dataset.num_landmarks
     is_coord_only = config.model.variant in ("hrnet_coord",)
-    is_graph_cond_heatmap = config.model.variant == "graph_cond_heatmap"
+    is_graph_cond_heatmap = config.model.variant in GRAPH_COND_HEATMAP_VARIANTS
 
     radial_errors_mm = []
     n_samples = 0
@@ -329,20 +408,9 @@ def main(argv=None):
         sys.exit(1)
     logger.info(f"Test set: {len(test_paths)} samples")
 
-    # Build model
-    model_kwargs = {"num_landmarks": config.dataset.num_landmarks}
-    if not is_heatmap:
-        model_kwargs.update({
-            "feat_dim": config.model.feat_dim,
-            "gnn_hidden": config.model.gnn_hidden,
-            "num_layers": config.model.num_layers,
-            "num_iters": config.model.num_iters,
-        })
-        if config.model.variant in ("multiscale", "fused"):
-            model_kwargs["scale_indices"] = config.model.scale_indices
-    else:
-        model_kwargs["heatmap_size"] = config.model.heatmap_size
-
+    # Build model (kwargs mirror TrainingEngine.setup so the architecture matches
+    # the checkpoint exactly).
+    model_kwargs = build_model_kwargs(config)
     model = get_model(config.model.variant, **model_kwargs)
 
     # Load checkpoint
@@ -434,7 +502,7 @@ def main(argv=None):
             if config.dataset.landmark_indices:
                 mean_shape = mean_shape[config.dataset.landmark_indices]
         edge_index = get_edge_index(config.dataset.graph_topology, config.dataset.num_landmarks, landmark_indices=config.dataset.landmark_indices or None).to(device)
-        results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right)
+        results = evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, config.dataset.num_landmarks, iod_left=iod_left, iod_right=iod_right, variant=config.model.variant)
     elif config.dataset.name == "cephalometric":
         # Cephalometric evaluation — MRE (mm) + SDR, reported per split
         # (Test1 / Test2 separately). No framework NME (Req 7.5).
@@ -472,12 +540,16 @@ def main(argv=None):
                 imgs = imgs.to(device)
                 coords = coords.to(device)
                 B = imgs.shape[0]
-                if mean_shape is not None:
-                    init = mean_shape.unsqueeze(0).expand(B, -1, -1)
+                if config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
+                    # forward(imgs, edge_index) -> (heatmaps, coords); no init.
+                    _, pred = model(imgs, edge_index)
                 else:
-                    init = torch.full((B, config.dataset.num_landmarks, 2), 0.5, device=device)
-                out = model(imgs, init, edge_index)
-                pred = out[0] if isinstance(out, tuple) else out
+                    if mean_shape is not None:
+                        init = mean_shape.unsqueeze(0).expand(B, -1, -1)
+                    else:
+                        init = torch.full((B, config.dataset.num_landmarks, 2), 0.5, device=device)
+                    out = model(imgs, init, edge_index)
+                    pred = out[0] if isinstance(out, tuple) else out
                 pred_px = pred.cpu().numpy() * config.dataset.input_size
                 gt_px = coords.cpu().numpy() * config.dataset.input_size
 

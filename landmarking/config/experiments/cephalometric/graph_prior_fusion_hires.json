@@ -29,10 +29,13 @@
     "sigma": 1.5,
     "prior_sigma_min": 0.01,
     "prior_sigma_span": 0.5,
-    "prior_offset_scale": 0.10,
+    "prior_offset_scale": 0.25,
     "prior_chol_bias": 2.0,
     "prior_warmup_epochs": 5,
-    "prior_disabled": false
+    "prior_disabled": false,
+    "decode_mode": "windowed",
+    "decode_radius": 5,
+    "bn_momentum": 0.1
   },
   "training": {
     "epochs": 150,
@@ -52,6 +55,7 @@
     "vis_interval": 10,
     "seed": 42,
     "device": "cuda",
-    "loss_type": "mse"
+    "loss_type": "mse",
+    "heatmap_loss_mode": "ce"
   }
 }

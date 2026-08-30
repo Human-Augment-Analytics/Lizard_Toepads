@@ -146,7 +146,11 @@ class TrainingEngine:
         if cfg.model.variant == "hinit":
             model_kwargs["heatmap_checkpoint"] = cfg.model.heatmap_checkpoint
         if cfg.model.variant == "heatmap":
-            model_kwargs["heatmap_size"] = getattr(cfg.model, "heatmap_size", 64)
+            model_kwargs.update({
+                "heatmap_size": getattr(cfg.model, "heatmap_size", 64),
+                "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(cfg.model, "decode_radius", 5),
+            })
         if cfg.model.variant == "graph_cond_heatmap":
             model_kwargs.update({
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -162,7 +166,10 @@ class TrainingEngine:
                 "sigma_min": cfg.model.prior_sigma_min,
                 "sigma_span": cfg.model.prior_sigma_span,
                 "offset_scale": cfg.model.prior_offset_scale,
-                "chol_bias": getattr(cfg.model, "prior_chol_bias", 4.0),
+                "chol_bias": getattr(cfg.model, "prior_chol_bias", 2.0),
+                "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(cfg.model, "decode_radius", 5),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
                 "prior_disabled": cfg.model.prior_disabled,
             })
 
@@ -562,6 +569,7 @@ class TrainingEngine:
                 loss = heatmap_loss(
                     pred_heatmaps, pred_coords, coords,
                     cfg.model.heatmap_size, cfg.model.sigma,
+                    mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
                 )
             elif self._is_heatmap_on_coords:
                 # Heatmap model on non-WFLW dataset: forward(imgs) → (heatmaps, coords)
@@ -574,6 +582,7 @@ class TrainingEngine:
                 loss = heatmap_loss(
                     pred_heatmaps, pred_coords, coords,
                     cfg.model.heatmap_size, cfg.model.sigma,
+                    mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
                 )
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
