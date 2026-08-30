@@ -92,7 +92,7 @@ class TrainingEngine:
                 f"mean_shape_path specified but file not found: {cfg.dataset.mean_shape_path}. "
                 f"Falling back to constant (0.5, 0.5) initialization."
             )
-        elif cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap"):
+        elif cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion"):
             logging.warning(
                 "No mean_shape_path set for GCN model. Using constant (0.5, 0.5) initialization. "
                 "This will likely result in very poor initial NME. "
@@ -123,7 +123,7 @@ class TrainingEngine:
             "num_landmarks": cfg.dataset.num_landmarks,
         }
         # GCN-specific kwargs
-        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap"):
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion"):
             model_kwargs.update({
                 "feat_dim": cfg.model.feat_dim,
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -154,6 +154,16 @@ class TrainingEngine:
                 "num_heads": getattr(cfg.model, "num_heads", 4),
                 "heatmap_size": cfg.model.heatmap_size,
             })
+        if cfg.model.variant == "graph_prior_fusion":
+            model_kwargs.update({
+                "gnn_hidden": cfg.model.gnn_hidden,
+                "num_layers": cfg.model.num_layers,
+                "heatmap_size": cfg.model.heatmap_size,
+                "sigma_min": cfg.model.prior_sigma_min,
+                "sigma_span": cfg.model.prior_sigma_span,
+                "offset_scale": cfg.model.prior_offset_scale,
+                "prior_disabled": cfg.model.prior_disabled,
+            })
 
         # Determine if this is a heatmap-style model (different forward signature)
         # Only True for WFLW heatmap variant which uses WFLWRefDataset with pre-generated target heatmaps
@@ -164,8 +174,12 @@ class TrainingEngine:
         self._is_heatmap_on_coords = (
             cfg.model.variant in ("heatmap",) and cfg.dataset.name != "wflw"
         )
-        # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output)
-        self._is_graph_cond_heatmap = cfg.model.variant == "graph_cond_heatmap"
+        # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output).
+        # graph_prior_fusion shares the identical forward(imgs, edge_index) ->
+        # (heatmaps, coords) interface, so it uses the same dispatch/loss path.
+        self._is_graph_cond_heatmap = cfg.model.variant in (
+            "graph_cond_heatmap", "graph_prior_fusion",
+        )
 
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)

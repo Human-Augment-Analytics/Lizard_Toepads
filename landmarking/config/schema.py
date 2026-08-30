@@ -58,6 +58,10 @@ class ModelConfig:
     patch_radius: int = 2
     patch_radii: list = field(default_factory=lambda: [2, 6, 14])
     patch_proj_dim: int = 32
+    prior_sigma_min: float = 0.01
+    prior_sigma_span: float = 0.20
+    prior_offset_scale: float = 0.10
+    prior_disabled: bool = False
 
 
 @dataclass

@@ -22,6 +22,7 @@ _MODEL_MODULES = [
     "hrnet_gcn_fused_global_patch", # "fused_global_patch" — requires torch_geometric
     "hrnet_gcn_hinit",        # "hinit" — requires torch_geometric
     "graph_cond_heatmap",     # "graph_cond_heatmap" — requires torch_geometric
+    "graph_prior_fusion",     # "graph_prior_fusion" — requires torch_geometric
     "star_head",              # "fused_global_star" — requires torch_geometric
     "hrnet_heatmap",          # "heatmap"
     "hrnet_coord",            # "hrnet_coord"
