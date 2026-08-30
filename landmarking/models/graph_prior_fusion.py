@@ -23,12 +23,28 @@ inductive bias while landing the prior in image space so it can multiply H_i.
 
 Sigma-collapse guard
 --------------------
-The covariance is parameterized so it CANNOT grow without bound: the diagonal
-std is `sigma_min + sigma_span * sigmoid(raw)`, bounding the prior's breadth. A
-GCN-off mode (prior_disabled=True or forcing Sigma huge) reduces the model
-EXACTLY to the pure conv-heatmap baseline — this is both the ablation and a
-correctness check. The forward also returns the mean predicted Sigma trace for
-monitoring.
+The diagonal std is `sigma_min + sigma_span * sigmoid(raw)`, so it is bounded
+below by sigma_min (cannot spike to a delta) and above by sigma_min+sigma_span.
+
+NOTE on the ceiling: sigma_span must be large enough that the upper end is
+EFFECTIVELY FLAT over the [0,1] coordinate space, otherwise the ceiling does not
+mean "prior off" — it mandates a permanently informative prior. With span=0.20
+the broadest reachable prior had std 0.21, a blob covering ~44% of the frame at
+2-sigma, and the model was pinned there; the continuous "Sigma -> inf reduces to
+pure heatmap" limit was unreachable by the optimizer.
+
+But span must ALSO not be so large that useful stds (~0.05-0.25) get squashed into
+a saturated tail of the sigmoid. What the optimizer moves is the PRE-ACTIVATION,
+and with Adam a parameter travels only ~lr*steps; if the useful band sits many
+units away it is unreachable and the prior is frozen at its init. Default span is
+0.5: the 0.51 ceiling spans the frame at 2-sigma (genuinely "off"), while useful
+stds sit in the well-conditioned middle of the sigmoid. The prior heads also get a
+dedicated higher LR (see TrainingEngine._split_prior_param_groups) so they can
+actually traverse that band. Collapse is something to DETECT via
+last_sigma_trace, not something the parameterization forbids by construction.
+
+A GCN-off mode (prior_disabled=True) reduces the model EXACTLY to the pure
+conv-heatmap baseline — this is both the ablation and a correctness check.
 
 Forward signature matches `graph_cond_heatmap`: forward(x, edge_index) ->
 (heatmaps, coords), so it reuses the existing heatmap_loss training path.
@@ -67,6 +83,11 @@ class GraphPriorFusion(nn.Module):
         sigma_span: Range added to sigma_min (max std = sigma_min + sigma_span).
         offset_scale: Max magnitude of the offset the graph can add to the anchor
             (normalized coords), bounding how far the prior mean can move.
+        chol_bias: Initial bias on the Cholesky head. Positive values start the
+            prior BROAD (sigmoid(bias) ~ 1 -> std near the sigma_min+sigma_span
+            ceiling), which is what makes the start genuinely near-identity:
+            a broad prior cannot move a landmark. Zero-init gives sigmoid(0)=0.5,
+            i.e. a mid-breadth prior that actively distorts from step 0.
         prior_disabled: If True, skip fusion -> pure conv-heatmap baseline
             (GCN-off ablation / equivalence check).
     """
@@ -78,8 +99,9 @@ class GraphPriorFusion(nn.Module):
         num_layers: int = 2,
         heatmap_size: int = 64,
         sigma_min: float = 0.01,
-        sigma_span: float = 0.20,
+        sigma_span: float = 0.5,
         offset_scale: float = 0.10,
+        chol_bias: float = 2.0,
         prior_disabled: bool = False,
         **kwargs,
     ):
@@ -90,7 +112,13 @@ class GraphPriorFusion(nn.Module):
         self.sigma_min = sigma_min
         self.sigma_span = sigma_span
         self.offset_scale = offset_scale
+        self.chol_bias = chol_bias
         self.prior_disabled = prior_disabled
+        # Runtime toggle used for fusion warm-up (see set_prior_active). Distinct
+        # from prior_disabled, which is a permanent architectural ablation.
+        self.prior_active = True
+        self.last_sigma_trace = torch.tensor(float("nan"))
+        self.last_fused_logits = None
 
         # --- Backbone ---
         self.backbone = timm.create_model(
@@ -131,10 +159,15 @@ class GraphPriorFusion(nn.Module):
         # Heads: 2 for offset, 3 for Cholesky (log_L11, L21, log_L22).
         self.offset_head = nn.Linear(gnn_hidden, 2)
         self.chol_head = nn.Linear(gnn_hidden, 3)
-        # Init offset/chol to ~0 so the prior starts broad and near the anchor
-        # (near-identity fusion at init -> stable start, appearance dominates first).
+        # Offset head zero-init -> prior mean starts exactly at the anchor.
         nn.init.zeros_(self.offset_head.weight); nn.init.zeros_(self.offset_head.bias)
-        nn.init.zeros_(self.chol_head.weight); nn.init.zeros_(self.chol_head.bias)
+        # Cholesky head: zero WEIGHTS but a POSITIVE BIAS so the prior starts at
+        # (near) maximum breadth. A broad prior is the identity element of the
+        # multiplicative fusion, so appearance genuinely dominates at step 0 and
+        # the graph has to earn any narrowing. Zero bias would give sigmoid(0)=0.5
+        # -> a mid-breadth blob centred on a meaningless initial anchor.
+        nn.init.zeros_(self.chol_head.weight)
+        nn.init.constant_(self.chol_head.bias, chol_bias)
 
     def get_fused_map(self, x: Tensor) -> Tensor:
         feat_maps = self.backbone(x)
@@ -228,19 +261,52 @@ class GraphPriorFusion(nn.Module):
         quad = z1 * z1 + z2 * z2  # (B, N, H, W)
         return -0.5 * quad  # unnormalized log-Gaussian
 
-    def forward(self, x: Tensor, edge_index: Tensor):
-        """Returns (fused_heatmaps, coords). coords in [0,1].
+    def set_prior_active(self, active: bool) -> None:
+        """Enable/disable the fusion at runtime (used for warm-up).
 
-        Also stashes self.last_sigma_trace (float tensor) for monitoring.
+        During warm-up the model behaves as a pure conv-heatmap model, so the
+        appearance head can learn real peaks BEFORE the graph prior starts
+        acting on them. This matters because the prior is centred on an anchor
+        derived from the appearance heatmap: at init that heatmap is ~uniform,
+        its soft-argmax is the image centre, and a prior centred there is a
+        self-reinforcing fixed point (the anchor is detached, so nothing pulls
+        it off centre directly).
+        """
+        self.prior_active = bool(active)
+
+    def forward(self, x: Tensor, edge_index: Tensor):
+        """Returns (appearance_heatmaps, coords). coords in [0,1].
+
+        IMPORTANT — which tensor goes where:
+        The first return value is the APPEARANCE head's raw logits, NOT the fused
+        log-posterior. The training path feeds this slot to `heatmap_loss`, which
+        MSEs it against a Gaussian target in [0, 1]. Fused logits are log-space
+        (log_softmax + log_gaussian, i.e. always <= 0 and typically -10..-30), so
+        MSE-ing them against a [0, 1] target is not a valid objective: it is
+        unsatisfiable, it dominates the total loss, and its only available descent
+        direction is to flatten the prior to its breadth ceiling. That produced a
+        frozen train loss and a centre-blob collapse whose radius equalled the
+        sigma ceiling.
+
+        Coordinates ARE decoded from the fused posterior, so the graph prior is
+        still fully in the gradient path via the coordinate term. This matches the
+        design spec: heatmap loss on H_i, coordinate loss on soft-argmax(P_i).
+
+        Also stashes:
+          self.last_sigma_trace  — mean trace of Sigma, for collapse monitoring.
+          self.last_fused_logits — the fused log-posterior, for debugging or an
+                                   optional posterior NLL term.
         """
         fused_map = self.get_fused_map(x)  # (B, C, H, W)
         heatmaps = self.appearance_head(fused_map)  # (B, N, H, W) logits
         heatmaps = self._resize_heatmaps(heatmaps, fused_map.shape[2], fused_map.shape[3])
         B, N, H, W = heatmaps.shape
 
-        if self.prior_disabled:
+        # prior_disabled = permanent ablation; prior_active = warm-up toggle.
+        if self.prior_disabled or not self.prior_active:
             # GCN-off: pure conv-heatmap baseline (equivalence check / ablation).
             self.last_sigma_trace = torch.tensor(float("inf"))
+            self.last_fused_logits = heatmaps
             return heatmaps, soft_argmax(heatmaps)
 
         # Anchor = appearance-only soft-argmax (current belief before fusion).
@@ -258,7 +324,6 @@ class GraphPriorFusion(nn.Module):
 
         # Monitoring: mean trace of Sigma = L11^2 + L21^2 + L22^2.
         self.last_sigma_trace = (L11 ** 2 + L21 ** 2 + L22 ** 2).mean().detach()
+        self.last_fused_logits = fused_logits
 
-        # Return fused logits as the "heatmaps" so heatmap_loss supervises the fused
-        # distribution (and, via log_softmax(H) inside, the appearance head too).
-        return fused_logits, coords
+        return heatmaps, coords

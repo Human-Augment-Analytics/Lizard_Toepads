@@ -59,8 +59,24 @@ class ModelConfig:
     patch_radii: list = field(default_factory=lambda: [2, 6, 14])
     patch_proj_dim: int = 32
     prior_sigma_min: float = 0.01
-    prior_sigma_span: float = 0.20
+    # Prior std = sigma_min + sigma_span * sigmoid(raw), so the reachable band is
+    # [sigma_min, sigma_min + sigma_span]. Two competing requirements:
+    #   - the top of the band must be broad enough to be effectively FLAT over the
+    #     [0,1] coordinate space (so "broad" really means "prior off"). span=0.20
+    #     failed this: its 0.21 ceiling is a blob covering ~44% of the frame.
+    #   - the band must not be so wide that useful stds (~0.05-0.25) are squashed
+    #     into a saturated corner of the sigmoid the optimizer cannot travel to.
+    # span=0.5 satisfies both: ceiling 0.51 spans the frame at 2-sigma, while
+    # useful stds sit in the well-conditioned middle of the sigmoid.
+    prior_sigma_span: float = 0.5
     prior_offset_scale: float = 0.10
+    # Positive bias on the Cholesky head -> prior starts broad (near-identity
+    # fusion), so appearance dominates first and the graph must earn any narrowing.
+    # Paired with lr_prior_mult so it can actually travel to an informative std.
+    prior_chol_bias: float = 2.0
+    # Number of initial epochs with fusion disabled, letting the appearance head
+    # learn real peaks before the graph prior acts on its anchors.
+    prior_warmup_epochs: int = 0
     prior_disabled: bool = False
 
 
@@ -73,6 +89,11 @@ class TrainingConfig:
     val_batch_size: int = 64
     lr: float = 1e-4
     lr_backbone: float = 1e-5
+    # LR multiplier for the graph-prior offset/Cholesky heads (graph_prior_fusion
+    # only). These heads move pre-activations through bounded tanh/sigmoid, so at
+    # the shared head LR they cannot travel far enough to change the prior's
+    # behaviour within a training run. See TrainingEngine._split_prior_param_groups.
+    lr_prior_mult: float = 10.0
     weight_decay: float = 1e-4
     lr_milestones: list = field(default_factory=lambda: [60, 90])
     lr_gamma: float = 0.1

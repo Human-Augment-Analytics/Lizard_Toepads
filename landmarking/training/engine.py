@@ -162,6 +162,7 @@ class TrainingEngine:
                 "sigma_min": cfg.model.prior_sigma_min,
                 "sigma_span": cfg.model.prior_sigma_span,
                 "offset_scale": cfg.model.prior_offset_scale,
+                "chol_bias": getattr(cfg.model, "prior_chol_bias", 4.0),
                 "prior_disabled": cfg.model.prior_disabled,
             })
 
@@ -180,6 +181,9 @@ class TrainingEngine:
         self._is_graph_cond_heatmap = cfg.model.variant in (
             "graph_cond_heatmap", "graph_prior_fusion",
         )
+        # graph_prior_fusion needs two extras the shared path doesn't: a fusion
+        # warm-up toggle and Sigma monitoring for collapse detection.
+        self._is_graph_prior_fusion = cfg.model.variant == "graph_prior_fusion"
 
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)
@@ -199,6 +203,8 @@ class TrainingEngine:
             param_groups = make_param_groups(
                 self.model, cfg.training.lr, cfg.training.lr_backbone
             )
+            if self._is_graph_prior_fusion:
+                param_groups = self._split_prior_param_groups(param_groups)
             self.optimizer = torch.optim.Adam(param_groups)
 
         # MultiStepLR scheduler
@@ -225,6 +231,41 @@ class TrainingEngine:
 
         # Create dataloaders from split
         self._create_dataloaders()
+
+    def _split_prior_param_groups(self, param_groups: list) -> list:
+        """Give the graph-prior heads (offset/Cholesky) their own faster LR group.
+
+        Why this is needed: these two heads emit the prior's mean offset and its
+        breadth through bounded squashing functions (tanh / sigmoid), so what the
+        optimizer actually moves is a PRE-ACTIVATION. With Adam, a parameter
+        travels roughly lr * num_steps when gradients are consistent. On a small
+        dataset that budget is well under one unit of pre-activation, which is far
+        less than the distance between "prior effectively off" and "prior
+        informative". Left on the shared head LR, the prior is frozen at whatever
+        breadth it was initialized with, and the architecture silently degenerates
+        to a pure heatmap model — a false negative for the whole research question.
+        """
+        cfg = self.config
+        mult = getattr(cfg.training, "lr_prior_mult", 10.0)
+        prior_modules = [self.model.offset_head, self.model.chol_head]
+        prior_params = [p for m in prior_modules for p in m.parameters()]
+        prior_ids = {id(p) for p in prior_params}
+
+        new_groups = []
+        for g in param_groups:
+            kept = [p for p in g["params"] if id(p) not in prior_ids]
+            if kept:
+                new_groups.append({**g, "params": kept})
+        new_groups.append({
+            "params": prior_params,
+            "lr": cfg.training.lr * mult,
+            "weight_decay": 0.0,
+        })
+        logging.info(
+            f"Graph-prior heads on dedicated LR "
+            f"{cfg.training.lr * mult:.2e} ({mult}x head LR)"
+        )
+        return new_groups
 
     def _create_dataloaders(self):
         """Create train and validation dataloaders from split file.
@@ -403,10 +444,33 @@ class TrainingEngine:
             if self._is_heatmap_model:
                 self.scheduler.step()
 
+            # Fusion warm-up: run as a pure heatmap model for the first N epochs so
+            # the appearance head learns real peaks before the graph prior starts
+            # acting on anchors derived from it.
+            if self._is_graph_prior_fusion:
+                warmup = getattr(cfg.model, "prior_warmup_epochs", 0)
+                prior_on = epoch > warmup
+                self.model.set_prior_active(prior_on)
+                if warmup and epoch == warmup + 1:
+                    logging.info(
+                        f"Fusion warm-up complete after {warmup} epochs; "
+                        f"graph prior now ACTIVE."
+                    )
+
             epoch_loss = self._train_epoch(epoch)
             metrics = self._validate(epoch)
             val_loss = metrics.get("val_loss", float("inf"))
             val_nme = metrics.get("val_nme", None)
+
+            # Sigma-collapse monitoring: trace pinned near the ceiling means the
+            # prior has effectively switched itself off.
+            if self._is_graph_prior_fusion:
+                trace = getattr(self.model, "last_sigma_trace", None)
+                if trace is not None:
+                    logging.info(
+                        f"Epoch {epoch} prior sigma trace: {float(trace):.6f} "
+                        f"(prior_active={self.model.prior_active})"
+                    )
 
             if self._is_heatmap_model and val_nme is not None:
                 logging.info(
