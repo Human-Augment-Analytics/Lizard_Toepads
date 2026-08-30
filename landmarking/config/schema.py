@@ -53,6 +53,11 @@ class ModelConfig:
     heatmap_size: int = 64
     num_heads: int = 4
     sigma: float = 1.5
+    patch_mode: str = "multiradius"
+    patch_step: int = 1
+    patch_radius: int = 2
+    patch_radii: list = field(default_factory=lambda: [2, 6, 14])
+    patch_proj_dim: int = 32
 
 
 @dataclass

@@ -133,6 +133,14 @@ class TrainingEngine:
         # Add variant-specific kwargs
         if cfg.model.variant in ("multiscale", "fused", "fused_global_ms"):
             model_kwargs["scale_indices"] = cfg.model.scale_indices
+        if cfg.model.variant == "fused_global_patch":
+            model_kwargs.update({
+                "patch_mode": cfg.model.patch_mode,
+                "patch_step": cfg.model.patch_step,
+                "patch_radius": cfg.model.patch_radius,
+                "patch_radii": tuple(cfg.model.patch_radii),
+                "patch_proj_dim": cfg.model.patch_proj_dim,
+            })
         if cfg.model.variant == "coord":
             model_kwargs["use_coarse_init"] = cfg.model.use_coarse_init
         if cfg.model.variant == "hinit":
