@@ -131,7 +131,7 @@ class TrainingEngine:
                 "num_iters": cfg.model.num_iters,
             })
         # Add variant-specific kwargs
-        if cfg.model.variant in ("multiscale", "fused"):
+        if cfg.model.variant in ("multiscale", "fused", "fused_global_ms"):
             model_kwargs["scale_indices"] = cfg.model.scale_indices
         if cfg.model.variant == "coord":
             model_kwargs["use_coarse_init"] = cfg.model.use_coarse_init
