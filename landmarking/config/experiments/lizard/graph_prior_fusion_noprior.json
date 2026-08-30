@@ -24,8 +24,8 @@
     "prior_sigma_span": 0.5,
     "prior_offset_scale": 0.25,
     "prior_chol_bias": 2.0,
-    "prior_warmup_epochs": 5,
-    "prior_disabled": false,
+    "prior_warmup_epochs": 0,
+    "prior_disabled": true,
     "decode_mode": "windowed",
     "decode_radius": 5,
     "bn_momentum": 0.1
