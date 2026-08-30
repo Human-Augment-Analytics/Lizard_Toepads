@@ -176,8 +176,16 @@ class GraphPriorFusion(nn.Module):
         # multiplicative fusion, so appearance genuinely dominates at step 0 and
         # the graph has to earn any narrowing. Zero bias would give sigmoid(0)=0.5
         # -> a mid-breadth blob centred on a meaningless initial anchor.
+        # Only the DIAGONAL raws (indices 0 and 2) get the broadening bias. Index 1
+        # is the off-diagonal raw, and L21 = tanh(raw) * L22, so biasing it too
+        # would start the prior as a strongly tilted, correlated ellipse instead of
+        # the intended isotropic broad Gaussian. (Setting all three to 2.0 gave
+        # correlation 0.69 and per-axis stds 0.72 / 0.28 -- anisotropic from step 0.)
         nn.init.zeros_(self.chol_head.weight)
-        nn.init.constant_(self.chol_head.bias, chol_bias)
+        nn.init.zeros_(self.chol_head.bias)
+        with torch.no_grad():
+            self.chol_head.bias[0] = chol_bias  # L11 raw
+            self.chol_head.bias[2] = chol_bias  # L22 raw
 
     def get_fused_map(self, x: Tensor) -> Tensor:
         feat_maps = self.backbone(x)
