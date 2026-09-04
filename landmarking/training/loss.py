@@ -200,3 +200,109 @@ def heatmap_loss(
     coord_loss = F.mse_loss(pred_coords, gt_coords)
 
     return hm_loss + coord_weight * coord_loss
+
+
+def pipnet_loss(
+    cls: torch.Tensor,
+    off_x: torch.Tensor,
+    off_y: torch.Tensor,
+    nb_x: torch.Tensor,
+    nb_y: torch.Tensor,
+    gt_coords: torch.Tensor,
+    meanface_indices: torch.Tensor,
+    cls_loss_weight: float = 10.0,
+    reg_loss_weight: float = 1.0,
+):
+    """PIPNet composite loss — reference-faithful.
+
+    Reproduces the reference ``gen_target_pip`` (target construction) and
+    ``compute_loss_pip`` (gather-at-GT-cell loss) from PIPNet's ``lib``. Targets
+    are built on the fly from normalized ground-truth coordinates:
+
+      - Score map target: one-hot, 1 at the ground-truth cell
+        ``(mu_y, mu_x) = (floor(y*Hg), floor(x*Wg))`` (clamped to bounds), else 0.
+      - Local offset targets at that cell: ``shift_x = x*Wg - mu_x``,
+        ``shift_y = y*Hg - mu_y`` (both in [0, 1)).
+      - Neighbor offset targets at that cell, channel ``num_nb*i + j``:
+        ``nb_x = x_j*Wg - mu_x_i``, ``nb_y = y_j*Hg - mu_y_i`` where j indexes
+        landmark i's mean-shape neighbors.
+
+    The score term is MSE over the whole map; the four offset terms are L1
+    evaluated ONLY at the ground-truth cell (gathered via the label argmax, as
+    the reference does). The total is::
+
+        cls_loss_weight * loss_map
+        + reg_loss_weight * (loss_x + loss_y + loss_nb_x + loss_nb_y)
+
+    Args:
+        cls: (B, N, Hg, Wg) predicted score map (raw logits).
+        off_x: (B, N, Hg, Wg) predicted within-cell x offsets (raw).
+        off_y: (B, N, Hg, Wg) predicted within-cell y offsets (raw).
+        nb_x: (B, num_nb*N, Hg, Wg) predicted neighbor x offsets (raw).
+        nb_y: (B, num_nb*N, Hg, Wg) predicted neighbor y offsets (raw).
+        gt_coords: (B, N, 2) ground-truth coordinates in [0, 1].
+        meanface_indices: (N, num_nb) long neighbor indices.
+        cls_loss_weight: Weight for the score-map MSE term (default 10).
+        reg_loss_weight: Weight for each L1 offset term (default 1).
+
+    Returns:
+        A tuple ``(total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y)`` where
+        ``total`` is the scalar weighted sum and the rest are the unweighted
+        component losses (useful for logging and tests).
+    """
+    b, n, gh, gw = cls.shape
+    num_nb = meanface_indices.shape[1]
+    device = cls.device
+
+    gx = gt_coords[:, :, 0]  # (B, N) in [0,1]
+    gy = gt_coords[:, :, 1]
+
+    # Ground-truth cell (matches gen_target_pip: floor then clamp to bounds).
+    mu_x = torch.clamp(torch.floor(gx * gw).long(), 0, gw - 1)  # (B, N)
+    mu_y = torch.clamp(torch.floor(gy * gh).long(), 0, gh - 1)
+    g_flat = mu_y * gw + mu_x  # (B, N) flat cell index
+
+    # --- Score-map target: one-hot at the GT cell ---
+    target_map = torch.zeros(b, n, gh * gw, device=device)
+    target_map.scatter_(2, g_flat.unsqueeze(-1), 1.0)
+    target_map = target_map.view(b, n, gh, gw)
+    loss_map = F.mse_loss(cls, target_map)
+
+    # --- Local offset targets (at the GT cell) ---
+    target_x = gx * gw - mu_x.float()  # (B, N) in [0,1)
+    target_y = gy * gh - mu_y.float()
+
+    # Gather predictions at the GT cell: reshape (B*N, Hg*Wg), gather flat index.
+    g_bn = g_flat.view(b * n, 1)
+    off_x_sel = torch.gather(off_x.view(b * n, -1), 1, g_bn).view(b, n)
+    off_y_sel = torch.gather(off_y.view(b * n, -1), 1, g_bn).view(b, n)
+    loss_x = F.l1_loss(off_x_sel, target_x)
+    loss_y = F.l1_loss(off_y_sel, target_y)
+
+    # --- Neighbor offset targets (at the GT cell) ---
+    # neighbor coords: gather gt of each landmark's neighbors -> (B, N, num_nb)
+    nb_idx = meanface_indices.to(device)  # (N, num_nb)
+    nb_idx_b = nb_idx.unsqueeze(0).expand(b, n, num_nb)  # (B, N, num_nb)
+    nbr_x = torch.gather(
+        gx.unsqueeze(1).expand(b, n, n), 2, nb_idx_b
+    )  # (B, N, num_nb)
+    nbr_y = torch.gather(gy.unsqueeze(1).expand(b, n, n), 2, nb_idx_b)
+
+    target_nb_x = nbr_x * gw - mu_x.float().unsqueeze(-1)  # (B, N, num_nb)
+    target_nb_y = nbr_y * gh - mu_y.float().unsqueeze(-1)
+
+    # Predicted neighbor offsets: nb_x is (B, num_nb*N, Hg, Wg) with channel
+    # layout num_nb*i + j (reference). Gather at the same GT cell per (i, j).
+    # Reshape to (B, N, num_nb, Hg*Wg) then gather the GT cell of landmark i.
+    nb_x_r = nb_x.view(b, n, num_nb, gh * gw)
+    nb_y_r = nb_y.view(b, n, num_nb, gh * gw)
+    g_idx_nb = g_flat.view(b, n, 1, 1).expand(b, n, num_nb, 1)  # (B,N,num_nb,1)
+    nb_x_sel = torch.gather(nb_x_r, 3, g_idx_nb).squeeze(-1)  # (B, N, num_nb)
+    nb_y_sel = torch.gather(nb_y_r, 3, g_idx_nb).squeeze(-1)
+    loss_nb_x = F.l1_loss(nb_x_sel, target_nb_x)
+    loss_nb_y = F.l1_loss(nb_y_sel, target_nb_y)
+
+    total = cls_loss_weight * loss_map + reg_loss_weight * (
+        loss_x + loss_y + loss_nb_x + loss_nb_y
+    )
+    return total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y

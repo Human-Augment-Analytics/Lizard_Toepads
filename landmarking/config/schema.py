@@ -93,6 +93,17 @@ class ModelConfig:
     # HRNet value and is fine on large datasets; on small datasets with small
     # batches it leaves running stats unconverged, so eval() misnormalizes.
     bn_momentum: float = 0.1
+    # --- PIPNet (variant "pipnet") only ---------------------------------------
+    # torchvision backbone architecture (resnet18/34/50/101). PIPNet uses
+    # torchvision, not timm, and unpacks the ResNet layers manually.
+    backbone: str = "resnet18"
+    # Grid stride: grid = input_size / net_stride. 32 -> no extra layers; 64/128
+    # append strided convs; 16 appends a transposed conv (reference net_stride).
+    net_stride: int = 32
+    # NRM neighbors per landmark. Reference default is 10 (for ~98 landmarks); the
+    # Lizard config overrides this to 8 since N=9 (a landmark cannot have more
+    # than N-1 distinct neighbors).
+    num_nb: int = 10
 
 
 @dataclass
@@ -128,6 +139,12 @@ class TrainingConfig:
     heatmap_loss_mode: str = "ce"
     star_omega: float = 1.0
     star_eigenvalue_clamp: float = 6.0
+    # --- PIPNet (variant "pipnet") only ---------------------------------------
+    # Composite-loss weights, matching the reference: cls (score-map MSE) is
+    # weighted 10, and each of the four L1 offset terms is weighted 1. Total is
+    # cls_w*loss_map + reg_w*(loss_x + loss_y + loss_nb_x + loss_nb_y).
+    pipnet_cls_loss_weight: float = 10.0
+    pipnet_reg_loss_weight: float = 1.0
 
 
 @dataclass

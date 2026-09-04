@@ -28,6 +28,7 @@ _MODEL_MODULES = [
     "hrnet_coord",            # "hrnet_coord"
     "stacked_hourglass",      # "stacked_hourglass"
     "vit",                    # "vit"
+    "pipnet",                 # "pipnet"
 ]
 
 for _mod_name in _MODEL_MODULES:

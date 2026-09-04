@@ -1,0 +1,41 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "pipnet",
+    "backbone": "resnet18",
+    "net_stride": 32,
+    "num_nb": 8
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 16,
+    "val_batch_size": 16,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [30, 50],
+    "lr_gamma": 0.1,
+    "grad_clip": 5.0,
+    "init_noise_sigma": 0.0,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "pipnet_cls_loss_weight": 10.0,
+    "pipnet_reg_loss_weight": 1.0
+  }
+}

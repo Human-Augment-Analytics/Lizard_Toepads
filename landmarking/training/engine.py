@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from .loss import landmark_loss, heatmap_loss, star_loss
+from .loss import landmark_loss, heatmap_loss, star_loss, pipnet_loss
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
 
@@ -123,7 +123,7 @@ class TrainingEngine:
             "num_landmarks": cfg.dataset.num_landmarks,
         }
         # GCN-specific kwargs
-        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion"):
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion", "pipnet"):
             model_kwargs.update({
                 "feat_dim": cfg.model.feat_dim,
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -192,8 +192,48 @@ class TrainingEngine:
         # warm-up toggle and Sigma monitoring for collapse detection.
         self._is_graph_prior_fusion = cfg.model.variant == "graph_prior_fusion"
 
+        # PIPNet: image-only forward returning five raw maps; loss = pipnet_loss.
+        # Requires a mean shape to derive neighbor indices (get_meanface).
+        self._is_pipnet = cfg.model.variant == "pipnet"
+        if self._is_pipnet:
+            from ..models.pipnet import get_meanface_indices
+            if self.mean_shape is None:
+                raise ValueError(
+                    "pipnet requires a mean shape to derive neighbor indices; "
+                    "set dataset.mean_shape_path to an (N, 2) tensor."
+                )
+            (
+                self._meanface_indices,
+                self._pip_reverse_index1,
+                self._pip_reverse_index2,
+                self._pip_reverse_maxlen,
+            ) = get_meanface_indices(self.mean_shape, cfg.model.num_nb)
+            self._meanface_indices = self._meanface_indices.to(self.device)
+            model_kwargs.update({
+                "backbone": cfg.model.backbone,
+                "pretrained": True,
+                "input_size": cfg.dataset.input_size,
+                "net_stride": cfg.model.net_stride,
+                "num_nb": cfg.model.num_nb,
+                "meanface_indices": self._meanface_indices,
+            })
+            # NOTE: PIPNet unpacks the ResNet (no `.backbone` attribute), so
+            # make_param_groups puts every parameter in a single group at `lr`
+            # and lr_backbone is not applied. This matches the reference, which
+            # trains all params with one Adam LR; keep lr == lr_backbone in
+            # configs to avoid a misleading lr_backbone value.
+
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)
+
+        # PIPNet: hand the reverse-neighbor index to the model so the optional
+        # merged-decode inference (predict_coords(merge=True)) is available.
+        if self._is_pipnet:
+            self.model.set_reverse_index(
+                self._pip_reverse_index1,
+                self._pip_reverse_index2,
+                self._pip_reverse_maxlen,
+            )
 
         # Load backbone pretrained weights if specified
         if cfg.model.backbone_pretrained_path:
@@ -593,6 +633,21 @@ class TrainingEngine:
 
                 pred_coords = self.model(imgs)
                 loss = landmark_loss(pred_coords, coords)
+            elif self._is_pipnet:
+                # PIPNet: forward(imgs) → (cls, off_x, off_y, nb_x, nb_y) raw maps.
+                # Loss is the reference composite (MSE score map + L1 offsets).
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                cls, off_x, off_y, nb_x, nb_y = self.model(imgs)
+                loss = pipnet_loss(
+                    cls, off_x, off_y, nb_x, nb_y, coords,
+                    self.model.meanface_indices,
+                    cls_loss_weight=cfg.training.pipnet_cls_loss_weight,
+                    reg_loss_weight=cfg.training.pipnet_reg_loss_weight,
+                )[0]
             else:
                 imgs, coords, *rest = batch
                 imgs = imgs.to(self.device)
@@ -716,6 +771,19 @@ class TrainingEngine:
                     _, pred_coords = self.model(imgs)
                 elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)
+                elif self._is_pipnet:
+                    # Direct decode for per-epoch validation (cheap). The
+                    # neighbor-averaged merge (predict_coords(merge=True)) is
+                    # reserved for final evaluation. Note: the reported val_loss
+                    # below is coordinate MSE on decoded coords, NOT the pipnet
+                    # composite training loss, so the two curves are on different
+                    # scales and should not be compared directly.
+                    from ..models.pipnet import decode_pip
+                    cls, off_x, off_y, _, _ = self.model(imgs)
+                    pred_coords = decode_pip(
+                        cls, off_x, off_y,
+                        cfg.dataset.input_size, cfg.model.net_stride,
+                    )
                 else:
                     initial_coords = self._get_initial_coords(B, coords, epoch, flipped=flipped)
                     out = self.model(imgs, initial_coords, self.edge_index)
