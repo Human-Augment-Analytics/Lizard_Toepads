@@ -15,7 +15,7 @@
   "model": {
     "variant": "pipnet",
     "backbone": "resnet18",
-    "net_stride": 32,
+    "net_stride": 16,
     "num_nb": 8
   },
   "training": {
