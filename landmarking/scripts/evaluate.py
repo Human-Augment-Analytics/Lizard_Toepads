@@ -114,6 +114,33 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
+    if variant == "pipnet":
+        # Mirror TrainingEngine.setup: derive neighbor indices from the mean
+        # shape so the built architecture matches the checkpoint exactly.
+        from ..models.pipnet import get_meanface_indices
+        mean_shape = None
+        if config.dataset.mean_shape_path and Path(config.dataset.mean_shape_path).exists():
+            mean_shape = torch.load(
+                config.dataset.mean_shape_path, map_location="cpu", weights_only=False
+            )
+            if config.dataset.landmark_indices:
+                mean_shape = mean_shape[config.dataset.landmark_indices]
+        if mean_shape is None:
+            raise ValueError(
+                "pipnet evaluation requires dataset.mean_shape_path to derive "
+                "neighbor indices."
+            )
+        mf_idx, _, _, _ = get_meanface_indices(mean_shape, config.model.num_nb)
+        kwargs.update({
+            "backbone": config.model.backbone,
+            "pretrained": False,  # weights come from the checkpoint
+            "input_size": config.dataset.input_size,
+            "net_stride": config.model.net_stride,
+            "num_nb": config.model.num_nb,
+            "meanface_indices": mf_idx,
+        })
+        return kwargs
+
     # GCN / fused / coord family.
     kwargs.update({
         "feat_dim": config.model.feat_dim,
@@ -534,13 +561,28 @@ def main(argv=None):
         mean_shape = None
         if config.dataset.mean_shape_path and Path(config.dataset.mean_shape_path).exists():
             mean_shape = torch.load(config.dataset.mean_shape_path, map_location=device, weights_only=False)
+
+        # PIPNet: give the model its reverse-neighbor index so the merged
+        # (neighbor-averaged) decode used at inference is available.
+        is_pipnet = config.model.variant == "pipnet"
+        if is_pipnet:
+            from ..models.pipnet import get_meanface_indices
+            ms_cpu = mean_shape
+            if ms_cpu is None:
+                raise ValueError("pipnet evaluation requires a mean_shape_path.")
+            _, rev1, rev2, rev_ml = get_meanface_indices(ms_cpu.cpu(), config.model.num_nb)
+            model.set_reverse_index(rev1, rev2, rev_ml)
+
         with torch.no_grad():
             for batch in test_loader:
                 imgs, coords, *rest = batch
                 imgs = imgs.to(device)
                 coords = coords.to(device)
                 B = imgs.shape[0]
-                if config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
+                if is_pipnet:
+                    # Neighbor-averaged decode (reference inference merge).
+                    pred = model.predict_coords(imgs, merge=True)
+                elif config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
                     # forward(imgs, edge_index) -> (heatmaps, coords); no init.
                     _, pred = model(imgs, edge_index)
                 else:
