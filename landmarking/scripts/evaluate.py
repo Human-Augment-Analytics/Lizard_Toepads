@@ -117,6 +117,10 @@ def build_model_kwargs(config) -> dict:
             "heatmap_size": getattr(config.model, "heatmap_size", 64),
             "decode_mode": getattr(config.model, "decode_mode", "windowed"),
             "decode_radius": getattr(config.model, "decode_radius", 5),
+            "bn_momentum": getattr(config.model, "bn_momentum", 0.01),
+            # A STAR heatmap checkpoint has sigma_head weights, so the model must
+            # be built with use_star to load them.
+            "use_star": getattr(config.model, "heatmap_use_star", False),
         })
         return kwargs
 
@@ -595,6 +599,11 @@ def main(argv=None):
                 if is_pipnet:
                     # Direct or neighbor-averaged decode per --no-merge.
                     pred = model.predict_coords(imgs, merge=pip_merge)
+                elif config.model.variant == "heatmap":
+                    # HRNet heatmap: forward(imgs) -> (heatmaps, coords). Works
+                    # for both plain and STAR variants (forward is unchanged;
+                    # STAR only adds forward_star used in training). Take coords.
+                    _, pred = model(imgs)
                 elif config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
                     # forward(imgs, edge_index) -> (heatmaps, coords); no init.
                     _, pred = model(imgs, edge_index)
