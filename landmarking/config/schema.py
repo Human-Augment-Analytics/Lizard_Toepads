@@ -112,6 +112,15 @@ class ModelConfig:
     # head and a STAR term on the decoded coords, on top of the unchanged heatmap
     # CE/coord loss. False keeps the paper-faithful heatmap variant exactly.
     heatmap_use_star: bool = False
+    # --- HRNet cascade (variant "hrnet_cascade") only -------------------------
+    # Cascaded heatmap refinement on top of HRNet features. num_stages = K
+    # refinement stages; shared_weights = recurrent (one shared stage) vs
+    # independent per-stage params (shared is the safer small-data default);
+    # cascade_width = the refinement feature-stream width. Reuses heatmap_size,
+    # decode_mode, decode_radius, and bn_momentum above.
+    num_stages: int = 3
+    shared_weights: bool = True
+    cascade_width: int = 256
 
 
 @dataclass
@@ -158,6 +167,9 @@ class TrainingConfig:
     pipnet_star_weight: float = 1.0
     # Weight on the STAR coordinate term when model.heatmap_use_star is True.
     heatmap_star_weight: float = 1.0
+    # Per-stage loss weights for hrnet_cascade intermediate supervision.
+    # Empty list => equal weighting across all stages.
+    cascade_stage_weights: list = field(default_factory=list)
 
 
 @dataclass

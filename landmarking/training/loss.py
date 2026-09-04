@@ -453,3 +453,63 @@ def heatmap_star_loss(
 
     total = hm_coord + star_weight * loss_star
     return total, hm_coord, loss_star
+
+
+def cascade_heatmap_loss(
+    stage_heatmaps,
+    stage_coords,
+    gt_coords: torch.Tensor,
+    heatmap_size: int,
+    sigma: float = 1.5,
+    coord_weight: float = 100.0,
+    mode: str = "ce",
+    stage_weights=None,
+):
+    """Intermediate-supervision loss for the hrnet_cascade variant.
+
+    Applies the framework's existing ``heatmap_loss`` (default CE) to EVERY
+    refinement stage against the same ground truth, then returns the weighted
+    mean over stages. Every stage is supervised as both a heatmap and its decoded
+    coordinates (the coord term inside ``heatmap_loss``), so a poor stage is
+    penalized in place rather than silently corrupting the final output.
+
+    No new heatmap target or coordinate loss is introduced — this is purely a
+    per-stage reuse of ``heatmap_loss``.
+
+    Args:
+        stage_heatmaps: list of K tensors, each (B, N, Hs, Ws).
+        stage_coords: list of K tensors, each (B, N, 2) — the decoded coords of
+            the corresponding stage.
+        gt_coords: (B, N, 2) ground-truth coords in [0, 1].
+        heatmap_size: spatial size of the heatmap target (H = W).
+        sigma: Gaussian sigma for the heatmap target.
+        coord_weight: coordinate-term weight inside heatmap_loss.
+        mode: "ce" (default) or "mse".
+        stage_weights: optional list of K weights; None => equal weighting.
+
+    Returns:
+        (total, per_stage_losses) where total is the weighted mean scalar and
+        per_stage_losses is a list of the K unweighted component losses.
+    """
+    k = len(stage_heatmaps)
+    if k == 0:
+        raise ValueError("cascade_heatmap_loss requires at least one stage")
+    if stage_weights is None or len(stage_weights) == 0:
+        stage_weights = [1.0] * k
+    if len(stage_weights) != k:
+        raise ValueError(
+            f"stage_weights length {len(stage_weights)} != num stages {k}"
+        )
+
+    per_stage = []
+    weighted_sum = 0.0
+    for w, hm, co in zip(stage_weights, stage_heatmaps, stage_coords):
+        ls = heatmap_loss(
+            hm, co, gt_coords, heatmap_size,
+            sigma=sigma, coord_weight=coord_weight, mode=mode,
+        )
+        per_stage.append(ls)
+        weighted_sum = weighted_sum + w * ls
+
+    total = weighted_sum / float(sum(stage_weights))
+    return total, per_stage

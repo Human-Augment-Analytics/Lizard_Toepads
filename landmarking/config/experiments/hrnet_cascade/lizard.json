@@ -1,0 +1,41 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "hrnet_cascade",
+    "num_stages": 3,
+    "shared_weights": true,
+    "heatmap_size": 128,
+    "decode_mode": "windowed",
+    "decode_radius": 5,
+    "bn_momentum": 0.1,
+    "cascade_width": 256
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 8,
+    "val_batch_size": 16,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [30, 50],
+    "lr_gamma": 0.1,
+    "grad_clip": 5.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "heatmap_loss_mode": "ce"
+  }
+}

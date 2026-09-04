@@ -21,7 +21,7 @@ from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
 from .loss import (
     landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss,
-    heatmap_star_loss,
+    heatmap_star_loss, cascade_heatmap_loss,
 )
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
@@ -126,7 +126,7 @@ class TrainingEngine:
             "num_landmarks": cfg.dataset.num_landmarks,
         }
         # GCN-specific kwargs
-        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion", "pipnet"):
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion", "pipnet", "hrnet_cascade"):
             model_kwargs.update({
                 "feat_dim": cfg.model.feat_dim,
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -155,6 +155,16 @@ class TrainingEngine:
                 "decode_radius": getattr(cfg.model, "decode_radius", 5),
                 "bn_momentum": getattr(cfg.model, "bn_momentum", 0.01),
                 "use_star": getattr(cfg.model, "heatmap_use_star", False),
+            })
+        if cfg.model.variant == "hrnet_cascade":
+            model_kwargs.update({
+                "num_stages": getattr(cfg.model, "num_stages", 3),
+                "shared_weights": getattr(cfg.model, "shared_weights", True),
+                "heatmap_size": getattr(cfg.model, "heatmap_size", 128),
+                "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(cfg.model, "decode_radius", 5),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
+                "cascade_width": getattr(cfg.model, "cascade_width", 256),
             })
         if cfg.model.variant == "graph_cond_heatmap":
             model_kwargs.update({
@@ -190,6 +200,9 @@ class TrainingEngine:
         self._heatmap_use_star = (
             self._is_heatmap_on_coords and getattr(cfg.model, "heatmap_use_star", False)
         )
+        # HRNet cascade: image-only forward -> (list[stage heatmaps], final coords);
+        # loss = intermediate supervision over all stages.
+        self._is_cascade = cfg.model.variant == "hrnet_cascade"
         # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output).
         # graph_prior_fusion shares the identical forward(imgs, edge_index) ->
         # (heatmaps, coords) interface, so it uses the same dispatch/loss path.
@@ -645,6 +658,30 @@ class TrainingEngine:
                         cfg.model.heatmap_size, cfg.model.sigma,
                         mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
                     )
+            elif getattr(self, "_is_cascade", False):
+                # HRNet cascade: forward → (list[stage heatmaps], final coords).
+                # Intermediate supervision: heatmap_loss on every stage.
+                from ..models.hrnet_heatmap import decode_coords
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                stage_heatmaps, _ = self.model(imgs)
+                stage_coords = [
+                    decode_coords(
+                        hm,
+                        mode=getattr(cfg.model, "decode_mode", "windowed"),
+                        radius=getattr(cfg.model, "decode_radius", 5),
+                    )
+                    for hm in stage_heatmaps
+                ]
+                loss = cascade_heatmap_loss(
+                    stage_heatmaps, stage_coords, coords,
+                    cfg.model.heatmap_size, cfg.model.sigma,
+                    mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
+                    stage_weights=getattr(cfg.training, "cascade_stage_weights", None),
+                )[0]
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch
@@ -802,6 +839,9 @@ class TrainingEngine:
                 if self._is_graph_cond_heatmap:
                     _, pred_coords = self.model(imgs, self.edge_index)
                 elif self._is_heatmap_on_coords:
+                    _, pred_coords = self.model(imgs)
+                elif getattr(self, "_is_cascade", False):
+                    # (list[stage heatmaps], final coords) -> take final coords.
                     _, pred_coords = self.model(imgs)
                 elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)

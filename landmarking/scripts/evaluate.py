@@ -124,6 +124,20 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
+    if variant == "hrnet_cascade":
+        # Mirror TrainingEngine.setup so the architecture matches the checkpoint
+        # (num_stages / shared_weights change the parameter set).
+        kwargs.update({
+            "num_stages": getattr(config.model, "num_stages", 3),
+            "shared_weights": getattr(config.model, "shared_weights", True),
+            "heatmap_size": getattr(config.model, "heatmap_size", 128),
+            "decode_mode": getattr(config.model, "decode_mode", "windowed"),
+            "decode_radius": getattr(config.model, "decode_radius", 5),
+            "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
+            "cascade_width": getattr(config.model, "cascade_width", 256),
+        })
+        return kwargs
+
     if variant == "pipnet":
         # Mirror TrainingEngine.setup: derive neighbor indices from the mean
         # shape so the built architecture matches the checkpoint exactly.
@@ -603,6 +617,9 @@ def main(argv=None):
                     # HRNet heatmap: forward(imgs) -> (heatmaps, coords). Works
                     # for both plain and STAR variants (forward is unchanged;
                     # STAR only adds forward_star used in training). Take coords.
+                    _, pred = model(imgs)
+                elif config.model.variant == "hrnet_cascade":
+                    # forward(imgs) -> (list[stage heatmaps], final coords).
                     _, pred = model(imgs)
                 elif config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
                     # forward(imgs, edge_index) -> (heatmaps, coords); no init.
