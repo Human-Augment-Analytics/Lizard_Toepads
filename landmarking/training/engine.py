@@ -19,7 +19,10 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from .loss import landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss
+from .loss import (
+    landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss,
+    heatmap_star_loss,
+)
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
 
@@ -150,6 +153,8 @@ class TrainingEngine:
                 "heatmap_size": getattr(cfg.model, "heatmap_size", 64),
                 "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
                 "decode_radius": getattr(cfg.model, "decode_radius", 5),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.01),
+                "use_star": getattr(cfg.model, "heatmap_use_star", False),
             })
         if cfg.model.variant == "graph_cond_heatmap":
             model_kwargs.update({
@@ -181,6 +186,9 @@ class TrainingEngine:
         # Heatmap on Lizard: uses standard dataset + heatmap_loss (same path as graph_cond_heatmap)
         self._is_heatmap_on_coords = (
             cfg.model.variant in ("heatmap",) and cfg.dataset.name != "wflw"
+        )
+        self._heatmap_use_star = (
+            self._is_heatmap_on_coords and getattr(cfg.model, "heatmap_use_star", False)
         )
         # Graph-conditioned heatmap: hybrid (edge_index input + heatmap output).
         # graph_prior_fusion shares the identical forward(imgs, edge_index) ->
@@ -620,12 +628,23 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
-                pred_heatmaps, pred_coords = self.model(imgs)
-                loss = heatmap_loss(
-                    pred_heatmaps, pred_coords, coords,
-                    cfg.model.heatmap_size, cfg.model.sigma,
-                    mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
-                )
+                if self._heatmap_use_star:
+                    pred_heatmaps, pred_coords, sigma = self.model.forward_star(imgs)
+                    loss = heatmap_star_loss(
+                        pred_heatmaps, pred_coords, coords, sigma,
+                        cfg.model.heatmap_size, cfg.model.sigma,
+                        mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
+                        star_weight=cfg.training.heatmap_star_weight,
+                        star_omega=cfg.training.star_omega,
+                        star_eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
+                    )[0]
+                else:
+                    pred_heatmaps, pred_coords = self.model(imgs)
+                    loss = heatmap_loss(
+                        pred_heatmaps, pred_coords, coords,
+                        cfg.model.heatmap_size, cfg.model.sigma,
+                        mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
+                    )
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch

@@ -30,6 +30,7 @@ class HRNetHeatmap(nn.Module):
         decode_mode: str = "windowed",
         decode_radius: int = 5,
         bn_momentum: float = 0.01,
+        use_star: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -37,6 +38,7 @@ class HRNetHeatmap(nn.Module):
         self.heatmap_size = heatmap_size
         self.decode_mode = decode_mode
         self.decode_radius = decode_radius
+        self.use_star = use_star
 
         self.backbone = timm.create_model(
             "hrnet_w18",
@@ -71,6 +73,57 @@ class HRNetHeatmap(nn.Module):
         )
         nn.init.normal_(self.head[-1].weight, std=0.001)
         nn.init.constant_(self.head[-1].bias, 0)
+
+        # --- STAR uncertainty head (Option A) ---
+        # Per-landmark, per-cell Cholesky params [log_L11, L21, log_L22], read at
+        # the decoded (argmax) cell to form a per-landmark covariance for the STAR
+        # coordinate term. Zero-init so the model starts isotropic (Sigma = I),
+        # i.e. STAR begins as plain L2 and must earn any anisotropy. Only created
+        # when use_star, so the paper-faithful heatmap model is unchanged.
+        self.sigma_head = None
+        if use_star:
+            self.sigma_head = nn.Conv2d(all_channels, 3 * num_landmarks, kernel_size=1)
+            nn.init.constant_(self.sigma_head.weight, 0.0)
+            nn.init.constant_(self.sigma_head.bias, 0.0)
+
+    def _fuse(self, x):
+        """Backbone + 4-branch fusion -> (fused_map, H, W)."""
+        feat_maps = self.backbone(x)
+        H, W = feat_maps[0].shape[2], feat_maps[0].shape[3]
+        fused = torch.cat([
+            feat_maps[0],
+            F.interpolate(feat_maps[1], size=(H, W), mode="bilinear", align_corners=False),
+            F.interpolate(feat_maps[2], size=(H, W), mode="bilinear", align_corners=False),
+            F.interpolate(feat_maps[3], size=(H, W), mode="bilinear", align_corners=False),
+        ], dim=1)
+        return fused, H, W
+
+    def forward_star(self, x):
+        """Like forward, but also returns the STAR sigma map.
+
+        Returns (heatmaps, coords, sigma) where sigma is (B, 3*N, Hs, Ws) at the
+        heatmap resolution. Raises if the model was not built with use_star=True.
+        """
+        if self.sigma_head is None:
+            raise RuntimeError(
+                "forward_star requires the model built with use_star=True."
+            )
+        fused, H, W = self._fuse(x)
+        heatmaps = self.head(fused)
+        sigma = self.sigma_head(fused)
+        if self.heatmap_size is not None and H != self.heatmap_size:
+            heatmaps = F.interpolate(
+                heatmaps, size=(self.heatmap_size, self.heatmap_size),
+                mode="bilinear", align_corners=False,
+            )
+            sigma = F.interpolate(
+                sigma, size=(self.heatmap_size, self.heatmap_size),
+                mode="bilinear", align_corners=False,
+            )
+        coords = decode_coords(
+            heatmaps, mode=self.decode_mode, radius=self.decode_radius
+        )
+        return heatmaps, coords, sigma
 
     def forward(self, x):
         feat_maps = self.backbone(x)

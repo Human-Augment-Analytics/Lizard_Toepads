@@ -389,3 +389,67 @@ def pipnet_star_loss(
 
     total = pip_total + star_weight * loss_star
     return total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y, loss_star
+
+
+def heatmap_star_loss(
+    pred_heatmaps: torch.Tensor,
+    pred_coords: torch.Tensor,
+    gt_coords: torch.Tensor,
+    sigma: torch.Tensor,
+    heatmap_size: int,
+    sigma_gauss: float = 1.5,
+    coord_weight: float = 100.0,
+    mode: str = "ce",
+    star_weight: float = 1.0,
+    star_omega: float = 1.0,
+    star_eigenvalue_clamp: float = 6.0,
+):
+    """HRNet heatmap loss + STAR term on the decoded coordinates (Option A).
+
+    The heatmap term (CE or MSE) and coordinate MSE are computed UNCHANGED via
+    ``heatmap_loss``. On top, a STAR term reweights the decoded-coordinate error
+    by a per-landmark anisotropic covariance read from ``sigma`` at each
+    landmark's PREDICTED (argmax) heatmap cell.
+
+    Gathering sigma at the argmax cell (rather than a GT cell) is the natural
+    choice for a dense heatmap model: the coordinate the STAR term supervises is
+    itself decoded from that peak, so the uncertainty is read where the model
+    localized. The argmax index is detached, so STAR's gradient flows through the
+    sigma values and the decoded coordinate, not the discrete cell pick.
+
+    Args:
+        pred_heatmaps: (B, N, Hs, Ws) predicted heatmap logits.
+        pred_coords: (B, N, 2) decoded coords in [0, 1].
+        gt_coords: (B, N, 2) ground-truth coords in [0, 1].
+        sigma: (B, 3*N, Hs, Ws) Cholesky-param map from the sigma head.
+        heatmap_size: spatial size of the heatmap (H = W).
+        sigma_gauss: Gaussian sigma for the heatmap target (passed to heatmap_loss).
+        coord_weight: coord-term weight inside heatmap_loss.
+        mode: "ce" (default) or "mse" for the heatmap term.
+        star_weight: weight on the STAR coordinate term.
+        star_omega, star_eigenvalue_clamp: passed to ``star_loss``.
+
+    Returns:
+        (total, hm_coord_loss, loss_star).
+    """
+    b, n, hs, ws = pred_heatmaps.shape
+
+    hm_coord = heatmap_loss(
+        pred_heatmaps, pred_coords, gt_coords, heatmap_size,
+        sigma=sigma_gauss, coord_weight=coord_weight, mode=mode,
+    )
+
+    # Gather the 3 Cholesky params at each landmark's argmax cell (detached idx).
+    flat = pred_heatmaps.view(b, n, -1)
+    argmax_idx = flat.argmax(dim=-1).detach()  # (B, N)
+    sigma_r = sigma.view(b, n, 3, hs * ws)  # (B, N, 3, HW)
+    g_idx = argmax_idx.view(b, n, 1, 1).expand(b, n, 3, 1)  # (B, N, 3, 1)
+    log_sigma = torch.gather(sigma_r, 3, g_idx).squeeze(-1)  # (B, N, 3)
+
+    loss_star = star_loss(
+        pred_coords, gt_coords, log_sigma,
+        omega=star_omega, eigenvalue_clamp=star_eigenvalue_clamp,
+    )
+
+    total = hm_coord + star_weight * loss_star
+    return total, hm_coord, loss_star

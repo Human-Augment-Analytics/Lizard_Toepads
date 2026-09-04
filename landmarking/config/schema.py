@@ -108,6 +108,10 @@ class ModelConfig:
     # a STAR term on the DECODED coordinates, on top of the unchanged PIPNet
     # score/offset losses. False keeps the paper-faithful PIPNet exactly.
     pipnet_use_star: bool = False
+    # HRNet heatmap + STAR (Option A): when True, add an anisotropic covariance
+    # head and a STAR term on the decoded coords, on top of the unchanged heatmap
+    # CE/coord loss. False keeps the paper-faithful heatmap variant exactly.
+    heatmap_use_star: bool = False
 
 
 @dataclass
@@ -152,6 +156,8 @@ class TrainingConfig:
     # Weight on the STAR coordinate term when model.pipnet_use_star is True.
     # star_omega and star_eigenvalue_clamp (defined above) are reused.
     pipnet_star_weight: float = 1.0
+    # Weight on the STAR coordinate term when model.heatmap_use_star is True.
+    heatmap_star_weight: float = 1.0
 
 
 @dataclass
