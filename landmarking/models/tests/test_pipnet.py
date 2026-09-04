@@ -755,3 +755,36 @@ def test_star_loss_matches_plain_pipnet_when_star_weight_zero():
             cls, ox, oy, nbx, nby, sigma, coords, idx, s, stride, star_weight=0.0,
         )[0]
     assert star0.item() == pytest.approx(plain.item(), rel=1e-6)
+
+
+def test_eval_build_model_kwargs_star_roundtrip(tmp_path):
+    """The eval script must build a STAR-enabled model that can load a STAR
+    checkpoint (sigma_layer weights present on both sides)."""
+    from landmarking.scripts.evaluate import build_model_kwargs
+    from landmarking.models.registry import get_model
+
+    n, num_nb = 9, 8
+    # Write a temp mean shape the eval kwargs builder can read.
+    ms_path = tmp_path / "mean_shape.pt"
+    torch.save(torch.rand(n, 2), str(ms_path))
+
+    cfg = LandmarkingConfig.from_dict({
+        "dataset": {"name": "lizard", "num_landmarks": n, "input_size": 128,
+                    "mean_shape_path": str(ms_path)},
+        "model": {"variant": "pipnet", "backbone": "resnet18", "net_stride": 32,
+                  "num_nb": num_nb, "pipnet_use_star": True},
+    })
+    kwargs = build_model_kwargs(cfg)
+    assert kwargs["use_star"] is True
+
+    # Train-side model (use_star) -> save -> eval-side model (from kwargs) -> load.
+    trained = get_model("pipnet", num_landmarks=n, backbone="resnet18",
+                        pretrained=False, input_size=128, net_stride=32,
+                        num_nb=num_nb, meanface_indices=kwargs["meanface_indices"],
+                        use_star=True)
+    state = trained.state_dict()
+    eval_model = get_model("pipnet", **{**kwargs, "pretrained": False})
+    missing, unexpected = eval_model.load_state_dict(state, strict=False)
+    # No sigma_layer keys should be missing or unexpected.
+    assert not any("sigma_layer" in k for k in missing)
+    assert not any("sigma_layer" in k for k in unexpected)

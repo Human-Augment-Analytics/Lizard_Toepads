@@ -144,6 +144,9 @@ def build_model_kwargs(config) -> dict:
             "net_stride": config.model.net_stride,
             "num_nb": config.model.num_nb,
             "meanface_indices": mf_idx,
+            # Must match training: a STAR checkpoint has sigma_layer weights, so
+            # the model has to be built with use_star to load them.
+            "use_star": getattr(config.model, "pipnet_use_star", False),
         })
         return kwargs
 
