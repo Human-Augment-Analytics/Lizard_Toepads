@@ -289,3 +289,32 @@ def test_eval_decode_dispatch_cascade_returns_coords():
     with torch.no_grad():
         _, pred = m(torch.randn(2, 3, 256, 256))
     assert pred.shape == (2, 9, 2)
+
+
+# --------------------------------------------------------------------------- #
+# Corner-trap fix: the cascade coord gradient must pull a corner prediction
+# toward the true location (global soft-argmax, not windowed argmax trap).
+# --------------------------------------------------------------------------- #
+
+def test_cascade_coord_gradient_escapes_corner():
+    """A heatmap whose argmax is at the (0,0) corner but whose GT is elsewhere
+    must receive a gradient that INCREASES mass away from the corner."""
+    from landmarking.training.loss import cascade_heatmap_loss
+
+    b, n, hs = 1, 1, 16
+    # Logits with the peak forced at the top-left corner cell (0,0).
+    hm = torch.full((b, n, hs, hs), -5.0, requires_grad=True)
+    with torch.no_grad():
+        hm[0, 0, 0, 0] = 5.0  # argmax at corner
+    gt = torch.tensor([[[0.8, 0.8]]])  # true location is bottom-right
+
+    total, _ = cascade_heatmap_loss([hm], None, gt, hs, mode="ce", coord_weight=100.0)
+    total.backward()
+    grad = hm.grad[0, 0]
+    # Descending the loss should push probability mass toward the GT (bottom-right)
+    # cell relative to the corner: the negative gradient at a bottom-right cell
+    # should exceed that at the corner (i.e. loss decreases by raising BR logits).
+    br = grad[hs - 1, hs - 1].item()
+    corner = grad[0, 0].item()
+    # Gradient wrt logits: more-negative grad => raising that logit lowers loss.
+    assert br < corner  # bottom-right is favored over the corner

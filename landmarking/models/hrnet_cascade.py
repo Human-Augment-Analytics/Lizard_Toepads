@@ -32,6 +32,14 @@ from .registry import register_model
 from .hrnet_heatmap import decode_coords
 
 
+def _gn_groups(width: int) -> int:
+    """Largest group count in {32,16,8,4,2,1} that divides `width` (for GroupNorm)."""
+    for g in (32, 16, 8, 4, 2, 1):
+        if width % g == 0:
+            return g
+    return 1
+
+
 class _RefineStage(nn.Module):
     """One refinement stage: refine the feature stream, emit a heatmap.
 
@@ -41,12 +49,19 @@ class _RefineStage(nn.Module):
 
     def __init__(self, width: int, num_landmarks: int, bn_momentum: float):
         super().__init__()
+        # GroupNorm, NOT BatchNorm: these refinement convs are trained from
+        # scratch at small batch size, where BN's running stats do not converge
+        # and eval() then normalizes with the wrong statistics — producing stable
+        # train loss but violently oscillating val error (heatmaps mis-scaled ->
+        # argmax jumps). GroupNorm has no running stats, so train and eval behave
+        # identically. bn_momentum is accepted for API compatibility but unused.
+        groups = _gn_groups(width)
         self.block = nn.Sequential(
             nn.Conv2d(width, width, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(width, momentum=bn_momentum),
+            nn.GroupNorm(groups, width),
             nn.ReLU(inplace=True),
             nn.Conv2d(width, width, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(width, momentum=bn_momentum),
+            nn.GroupNorm(groups, width),
             nn.ReLU(inplace=True),
         )
         self.out_head = nn.Conv2d(width, num_landmarks, kernel_size=1)
