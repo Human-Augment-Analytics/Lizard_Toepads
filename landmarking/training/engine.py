@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from ..config.schema import LandmarkingConfig
 from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
-from .loss import landmark_loss, heatmap_loss, star_loss, pipnet_loss
+from .loss import landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
 
@@ -209,6 +209,7 @@ class TrainingEngine:
                 self._pip_reverse_maxlen,
             ) = get_meanface_indices(self.mean_shape, cfg.model.num_nb)
             self._meanface_indices = self._meanface_indices.to(self.device)
+            self._pipnet_use_star = getattr(cfg.model, "pipnet_use_star", False)
             model_kwargs.update({
                 "backbone": cfg.model.backbone,
                 "pretrained": True,
@@ -216,6 +217,7 @@ class TrainingEngine:
                 "net_stride": cfg.model.net_stride,
                 "num_nb": cfg.model.num_nb,
                 "meanface_indices": self._meanface_indices,
+                "use_star": self._pipnet_use_star,
             })
             # NOTE: PIPNet unpacks the ResNet (no `.backbone` attribute), so
             # make_param_groups puts every parameter in a single group at `lr`
@@ -641,13 +643,26 @@ class TrainingEngine:
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
-                cls, off_x, off_y, nb_x, nb_y = self.model(imgs)
-                loss = pipnet_loss(
-                    cls, off_x, off_y, nb_x, nb_y, coords,
-                    self.model.meanface_indices,
-                    cls_loss_weight=cfg.training.pipnet_cls_loss_weight,
-                    reg_loss_weight=cfg.training.pipnet_reg_loss_weight,
-                )[0]
+                if getattr(self, "_pipnet_use_star", False):
+                    cls, off_x, off_y, nb_x, nb_y, sigma = self.model.forward_star(imgs)
+                    loss = pipnet_star_loss(
+                        cls, off_x, off_y, nb_x, nb_y, sigma, coords,
+                        self.model.meanface_indices,
+                        cfg.dataset.input_size, cfg.model.net_stride,
+                        cls_loss_weight=cfg.training.pipnet_cls_loss_weight,
+                        reg_loss_weight=cfg.training.pipnet_reg_loss_weight,
+                        star_weight=cfg.training.pipnet_star_weight,
+                        star_omega=cfg.training.star_omega,
+                        star_eigenvalue_clamp=cfg.training.star_eigenvalue_clamp,
+                    )[0]
+                else:
+                    cls, off_x, off_y, nb_x, nb_y = self.model(imgs)
+                    loss = pipnet_loss(
+                        cls, off_x, off_y, nb_x, nb_y, coords,
+                        self.model.meanface_indices,
+                        cls_loss_weight=cfg.training.pipnet_cls_loss_weight,
+                        reg_loss_weight=cfg.training.pipnet_reg_loss_weight,
+                    )[0]
             else:
                 imgs, coords, *rest = batch
                 imgs = imgs.to(self.device)

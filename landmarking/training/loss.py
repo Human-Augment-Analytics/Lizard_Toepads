@@ -306,3 +306,86 @@ def pipnet_loss(
         loss_x + loss_y + loss_nb_x + loss_nb_y
     )
     return total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y
+
+
+def pipnet_star_loss(
+    cls: torch.Tensor,
+    off_x: torch.Tensor,
+    off_y: torch.Tensor,
+    nb_x: torch.Tensor,
+    nb_y: torch.Tensor,
+    sigma: torch.Tensor,
+    gt_coords: torch.Tensor,
+    meanface_indices: torch.Tensor,
+    input_size: int,
+    net_stride: int,
+    cls_loss_weight: float = 10.0,
+    reg_loss_weight: float = 1.0,
+    star_weight: float = 1.0,
+    star_omega: float = 1.0,
+    star_eigenvalue_clamp: float = 6.0,
+):
+    """PIPNet loss + STAR term on the decoded coordinates (Option A).
+
+    The paper-faithful PIPNet loss (score-map MSE + L1 offset/neighbor terms) is
+    computed UNCHANGED via ``pipnet_loss``. On top of it, a STAR term is added:
+    the coordinates are decoded (argmax cell + within-cell offset), a per-landmark
+    anisotropic covariance is read from ``sigma`` at each landmark's ground-truth
+    cell, and ``star_loss`` reweights the decoded-coordinate error to down-weight
+    the semantically ambiguous direction.
+
+    Gathering sigma at the GROUND-TRUTH cell (not the argmax cell) matches how the
+    offsets are supervised and keeps the term well-defined when the classifier is
+    still wrong early in training. The decode's argmax index is detached (as in
+    ``decode_pip``), so STAR's gradient flows through the offset values and the
+    sigma head, not through the discrete cell selection.
+
+    Args:
+        cls, off_x, off_y: (B, N, Hg, Wg) score / offset maps.
+        nb_x, nb_y: (B, num_nb*N, Hg, Wg) neighbor-offset maps.
+        sigma: (B, 3*N, Hg, Wg) Cholesky-param map from the sigma head.
+        gt_coords: (B, N, 2) ground-truth coords in [0, 1].
+        meanface_indices: (N, num_nb) long neighbor indices.
+        input_size, net_stride: for decoding coords.
+        cls_loss_weight, reg_loss_weight: PIPNet term weights.
+        star_weight: weight on the STAR coordinate term.
+        star_omega, star_eigenvalue_clamp: passed to ``star_loss``.
+
+    Returns:
+        (total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y, loss_star).
+    """
+    from ..models.pipnet import decode_pip
+
+    # Paper-faithful PIPNet terms, untouched.
+    pip_total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y = pipnet_loss(
+        cls, off_x, off_y, nb_x, nb_y, gt_coords, meanface_indices,
+        cls_loss_weight=cls_loss_weight, reg_loss_weight=reg_loss_weight,
+    )
+
+    b, n, gh, gw = cls.shape
+
+    # Ground-truth cell (same formula as pipnet_loss / gen_target_pip).
+    gx = gt_coords[:, :, 0]
+    gy = gt_coords[:, :, 1]
+    mu_x = torch.clamp(torch.floor(gx * gw).long(), 0, gw - 1)
+    mu_y = torch.clamp(torch.floor(gy * gh).long(), 0, gh - 1)
+    g_flat = (mu_y * gw + mu_x).view(b, n, 1)  # (B, N, 1)
+
+    # Decode coords (differentiable through offsets; argmax detached).
+    pred_coords = decode_pip(cls, off_x, off_y, input_size, net_stride)
+
+    # Gather the 3 Cholesky params at the GT cell. sigma is (B, 3N, Hg, Wg) with
+    # channel layout [param, landmark] flattened as 3*i + p? We defined the head
+    # as Conv2d(-, 3*N): treat channels as (N, 3) with landmark-major layout to
+    # match a simple (B, N, 3, HW) view.
+    sigma_r = sigma.view(b, n, 3, gh * gw)  # (B, N, 3, HW)
+    g_idx = g_flat.view(b, n, 1, 1).expand(b, n, 3, 1)  # (B, N, 3, 1)
+    log_sigma = torch.gather(sigma_r, 3, g_idx).squeeze(-1)  # (B, N, 3)
+
+    loss_star = star_loss(
+        pred_coords, gt_coords, log_sigma,
+        omega=star_omega, eigenvalue_clamp=star_eigenvalue_clamp,
+    )
+
+    total = pip_total + star_weight * loss_star
+    return total, loss_map, loss_x, loss_y, loss_nb_x, loss_nb_y, loss_star

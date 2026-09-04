@@ -506,6 +506,42 @@ def test_engine_train_and_validate_pipnet(tmp_path):
     assert "val_px_err" in metrics
 
 
+def test_engine_train_pipnet_star(tmp_path):
+    """Engine runs a train step + validation with STAR enabled."""
+    engine = _make_pipnet_engine(tmp_path, num_nb=8)
+    # Rebuild the model with use_star and set the flag the train branch checks.
+    from landmarking.models.registry import get_model
+    engine.model = get_model(
+        "pipnet", num_landmarks=9, backbone="resnet18", pretrained=False,
+        input_size=128, net_stride=32, num_nb=8,
+        meanface_indices=engine._meanface_indices, use_star=True,
+    ).to(engine.device)
+    engine.optimizer = torch.optim.Adam(engine.model.parameters(), lr=1e-4)
+    engine._pipnet_use_star = True
+    engine.config.dataset.input_size = 128
+    engine.config.model.net_stride = 32
+    engine.config.training.pipnet_star_weight = 1.0
+    engine.config.training.star_omega = 1.0
+    engine.config.training.star_eigenvalue_clamp = 3.0
+    loss = engine._train_epoch(epoch=1)
+    assert np.isfinite(loss)
+    metrics = engine._validate(epoch=1)
+    assert np.isfinite(metrics["val_loss"])
+
+
+def test_star_experiment_config_loads():
+    cfg_path = (
+        Path(__file__).resolve().parents[2]
+        / "config" / "experiments" / "pipnet" / "lizard_star.json"
+    )
+    assert cfg_path.exists()
+    cfg = LandmarkingConfig.from_json(str(cfg_path))
+    cfg.resolve_paths()
+    cfg.validate()
+    assert cfg.model.pipnet_use_star is True
+    assert cfg.training.pipnet_star_weight == 1.0
+
+
 def test_engine_pipnet_sparsity(tmp_path):
     """With landmark_indices, meanface + heads size to the subset."""
     subset = [0, 2, 4, 6, 8]  # 5 landmarks
@@ -592,6 +628,9 @@ def test_decode_merge_matches_reference_forward_pip():
 
     n, num_nb, gh, gw = 8, 3, 8, 8
     input_size, net_stride = 256, 32
+    # Deterministic, well-spread mean shape so the reverse-index max_len is
+    # stable regardless of test execution order (avoids RNG-order coupling).
+    torch.manual_seed(0)
     mf = torch.rand(n, 2)
     idx, rev1, rev2, ml = get_meanface_indices(mf, num_nb)
 
@@ -625,3 +664,94 @@ def test_decode_merge_matches_reference_forward_pip():
         rev1, rev2, ml,
     )[0]
     assert torch.allclose(ours, ref_merge, atol=1e-5)
+
+
+# --------------------------------------------------------------------------- #
+# STAR on PIPNet (Option A)
+# --------------------------------------------------------------------------- #
+
+def test_star_disabled_by_default():
+    """Without use_star, no sigma head and forward_star raises."""
+    m = PIPNet(num_landmarks=9, pretrained=False, input_size=128, net_stride=32)
+    assert m.sigma_layer is None
+    with pytest.raises(RuntimeError):
+        m.forward_star(torch.randn(1, 3, 128, 128))
+
+
+def test_star_head_shapes():
+    n, num_nb, s, stride = 9, 4, 128, 32
+    m = PIPNet(num_landmarks=n, pretrained=False, input_size=s, net_stride=stride,
+               num_nb=num_nb, use_star=True)
+    m.eval()
+    grid = s // stride
+    with torch.no_grad():
+        cls, ox, oy, nbx, nby, sigma = m.forward_star(torch.randn(2, 3, s, s))
+    assert sigma.shape == (2, 3 * n, grid, grid)
+    assert cls.shape == (2, n, grid, grid)
+
+
+def test_star_head_zero_init_is_isotropic():
+    """Zero-init sigma head => log_sigma ~ 0 => STAR term ~ plain L2 at start."""
+    from landmarking.training.loss import pipnet_star_loss
+    n, num_nb, s, stride = 9, 4, 128, 32
+    m = PIPNet(num_landmarks=n, pretrained=False, input_size=s, net_stride=stride,
+               num_nb=num_nb, use_star=True)
+    mf = torch.stack([torch.arange(n).float(), torch.zeros(n)], dim=-1)
+    idx, _, _, _ = get_meanface_indices(mf, num_nb)
+    m.meanface_indices = idx  # override placeholder with a real map
+    imgs = torch.randn(2, 3, s, s)
+    coords = torch.rand(2, n, 2)
+    cls, ox, oy, nbx, nby, sigma = m.forward_star(imgs)
+    out = pipnet_star_loss(
+        cls, ox, oy, nbx, nby, sigma, coords, idx, s, stride,
+    )
+    total, lm, lx, ly, lnx, lny, lstar = out
+    assert torch.isfinite(total)
+    assert torch.isfinite(lstar)
+    # At zero sigma, star_loss reduces to 0.5 * ||err||^2 (log-det term is 0).
+    assert lstar.item() >= 0.0
+
+
+def test_star_loss_gradients_flow_to_sigma_and_offsets():
+    """STAR term must produce gradients on both the sigma head and offset heads."""
+    from landmarking.training.loss import pipnet_star_loss
+    n, num_nb, s, stride = 9, 3, 128, 32
+    m = PIPNet(num_landmarks=n, pretrained=False, input_size=s, net_stride=stride,
+               num_nb=num_nb, use_star=True)
+    mf = torch.rand(n, 2)
+    idx, _, _, _ = get_meanface_indices(mf, num_nb)
+    m.meanface_indices = idx
+    m.train()
+    imgs = torch.randn(2, 3, s, s)
+    coords = torch.rand(2, n, 2)
+    cls, ox, oy, nbx, nby, sigma = m.forward_star(imgs)
+    total = pipnet_star_loss(
+        cls, ox, oy, nbx, nby, sigma, coords, idx, s, stride,
+        star_weight=1.0,
+    )[0]
+    total.backward()
+    assert m.sigma_layer.weight.grad is not None
+    assert m.sigma_layer.weight.grad.abs().sum() > 0
+    assert m.x_layer.weight.grad is not None
+    assert m.x_layer.weight.grad.abs().sum() > 0
+
+
+def test_star_loss_matches_plain_pipnet_when_star_weight_zero():
+    """star_weight=0 => total equals the plain pipnet_loss total."""
+    from landmarking.training.loss import pipnet_loss, pipnet_star_loss
+    n, num_nb, s, stride = 9, 3, 128, 32
+    m = PIPNet(num_landmarks=n, pretrained=False, input_size=s, net_stride=stride,
+               num_nb=num_nb, use_star=True)
+    mf = torch.rand(n, 2)
+    idx, _, _, _ = get_meanface_indices(mf, num_nb)
+    m.meanface_indices = idx
+    m.eval()
+    imgs = torch.randn(2, 3, s, s)
+    coords = torch.rand(2, n, 2)
+    with torch.no_grad():
+        cls, ox, oy, nbx, nby, sigma = m.forward_star(imgs)
+        plain = pipnet_loss(cls, ox, oy, nbx, nby, coords, idx)[0]
+        star0 = pipnet_star_loss(
+            cls, ox, oy, nbx, nby, sigma, coords, idx, s, stride, star_weight=0.0,
+        )[0]
+    assert star0.item() == pytest.approx(plain.item(), rel=1e-6)

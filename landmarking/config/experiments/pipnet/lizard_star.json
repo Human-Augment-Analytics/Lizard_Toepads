@@ -16,7 +16,8 @@
     "variant": "pipnet",
     "backbone": "resnet18",
     "net_stride": 32,
-    "num_nb": 8
+    "num_nb": 8,
+    "pipnet_use_star": true
   },
   "training": {
     "epochs": 60,
@@ -36,6 +37,9 @@
     "seed": 42,
     "device": "cuda",
     "pipnet_cls_loss_weight": 10.0,
-    "pipnet_reg_loss_weight": 1.0
+    "pipnet_reg_loss_weight": 1.0,
+    "pipnet_star_weight": 1.0,
+    "star_omega": 1.0,
+    "star_eigenvalue_clamp": 3.0
   }
 }

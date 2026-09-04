@@ -180,6 +180,7 @@ class PIPNet(nn.Module):
         net_stride: int = 32,
         num_nb: int = 10,
         meanface_indices: Optional[torch.Tensor] = None,
+        use_star: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -201,6 +202,7 @@ class PIPNet(nn.Module):
         self.input_size = input_size
         self.net_stride = net_stride
         self.backbone_name = backbone
+        self.use_star = use_star
 
         # --- Backbone: unpack torchvision ResNet exactly as the reference ---
         resnet = _build_resnet(backbone, pretrained)
@@ -258,6 +260,17 @@ class PIPNet(nn.Module):
             nn.init.normal_(head.weight, std=0.001)
             if head.bias is not None:
                 nn.init.constant_(head.bias, 0)
+
+        # --- STAR uncertainty head (Option A): per-landmark, per-cell Cholesky
+        # params [log_L11, L21, log_L22]. Read at the GT/argmax cell just like
+        # the offset heads. Zero-init so the model starts isotropic (Sigma = I),
+        # i.e. STAR begins as plain L2 and must EARN any anisotropy. Only created
+        # when use_star, so the paper-faithful model is byte-identical otherwise.
+        self.sigma_layer = None
+        if use_star:
+            self.sigma_layer = nn.Conv2d(head_ch, 3 * num_landmarks, kernel_size=1)
+            nn.init.constant_(self.sigma_layer.weight, 0.0)
+            nn.init.constant_(self.sigma_layer.bias, 0.0)
 
         # --- Neighbor index buffer ---
         if meanface_indices is None:
@@ -345,6 +358,26 @@ class PIPNet(nn.Module):
         nb_x = self.nb_x_layer(feat)
         nb_y = self.nb_y_layer(feat)
         return cls, off_x, off_y, nb_x, nb_y
+
+    def forward_star(self, x: torch.Tensor):
+        """Like forward, but also returns the STAR sigma map.
+
+        Returns (cls, off_x, off_y, nb_x, nb_y, sigma) where sigma is
+        (B, 3*N, Hg, Wg) holding per-landmark, per-cell Cholesky params. Raises
+        if the model was not built with use_star=True.
+        """
+        if self.sigma_layer is None:
+            raise RuntimeError(
+                "forward_star requires the model built with use_star=True."
+            )
+        feat = self._backbone_forward(x)
+        cls = self.cls_layer(feat)
+        off_x = self.x_layer(feat)
+        off_y = self.y_layer(feat)
+        nb_x = self.nb_x_layer(feat)
+        nb_y = self.nb_y_layer(feat)
+        sigma = self.sigma_layer(feat)
+        return cls, off_x, off_y, nb_x, nb_y, sigma
 
     def predict_coords(self, x: torch.Tensor, merge: bool = False) -> torch.Tensor:
         """Convenience: forward + decode to (B, N, 2) coordinates in ~[0, 1].

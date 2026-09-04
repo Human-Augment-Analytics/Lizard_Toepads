@@ -104,6 +104,10 @@ class ModelConfig:
     # Lizard config overrides this to 8 since N=9 (a landmark cannot have more
     # than N-1 distinct neighbors).
     num_nb: int = 10
+    # PIPNet + STAR (Option A): when True, add an anisotropic covariance head and
+    # a STAR term on the DECODED coordinates, on top of the unchanged PIPNet
+    # score/offset losses. False keeps the paper-faithful PIPNet exactly.
+    pipnet_use_star: bool = False
 
 
 @dataclass
@@ -145,6 +149,9 @@ class TrainingConfig:
     # cls_w*loss_map + reg_w*(loss_x + loss_y + loss_nb_x + loss_nb_y).
     pipnet_cls_loss_weight: float = 10.0
     pipnet_reg_loss_weight: float = 1.0
+    # Weight on the STAR coordinate term when model.pipnet_use_star is True.
+    # star_omega and star_eigenvalue_clamp (defined above) are reused.
+    pipnet_star_weight: float = 1.0
 
 
 @dataclass
