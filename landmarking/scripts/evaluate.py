@@ -60,6 +60,12 @@ def parse_args(argv=None):
     parser.add_argument("--variant", type=str, default=None, help="Override model variant.")
     parser.add_argument("--device", type=str, default=None, help="Override device.")
     parser.add_argument("--mean-shape", type=str, default=None, help="Override mean shape path (GCN models).")
+    parser.add_argument(
+        "--no-merge", action="store_true",
+        help="PIPNet only: use the direct (argmax cell + offset) decode instead "
+             "of the neighbor-averaged merge. Useful to isolate whether the NRM "
+             "merge helps or hurts on a given checkpoint.",
+    )
     return parser.parse_args(argv)
 
 
@@ -565,6 +571,7 @@ def main(argv=None):
         # PIPNet: give the model its reverse-neighbor index so the merged
         # (neighbor-averaged) decode used at inference is available.
         is_pipnet = config.model.variant == "pipnet"
+        pip_merge = is_pipnet and not getattr(args, "no_merge", False)
         if is_pipnet:
             from ..models.pipnet import get_meanface_indices
             ms_cpu = mean_shape
@@ -572,6 +579,9 @@ def main(argv=None):
                 raise ValueError("pipnet evaluation requires a mean_shape_path.")
             _, rev1, rev2, rev_ml = get_meanface_indices(ms_cpu.cpu(), config.model.num_nb)
             model.set_reverse_index(rev1, rev2, rev_ml)
+            logger.info(
+                f"PIPNet decode: {'neighbor-merged' if pip_merge else 'direct (no merge)'}"
+            )
 
         with torch.no_grad():
             for batch in test_loader:
@@ -580,8 +590,8 @@ def main(argv=None):
                 coords = coords.to(device)
                 B = imgs.shape[0]
                 if is_pipnet:
-                    # Neighbor-averaged decode (reference inference merge).
-                    pred = model.predict_coords(imgs, merge=True)
+                    # Direct or neighbor-averaged decode per --no-merge.
+                    pred = model.predict_coords(imgs, merge=pip_merge)
                 elif config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
                     # forward(imgs, edge_index) -> (heatmaps, coords); no init.
                     _, pred = model(imgs, edge_index)
@@ -614,6 +624,8 @@ def main(argv=None):
             "median_px_error": float(np.median(errors)),
             "n_evaluated": len(errors),
         }
+        if is_pipnet:
+            results["pipnet_decode"] = "merged" if pip_merge else "direct"
         if mm_errors:
             results["mean_mm_error"] = float(np.mean(mm_errors))
             results["median_mm_error"] = float(np.median(mm_errors))
