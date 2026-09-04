@@ -170,6 +170,13 @@ class TrainingConfig:
     # Per-stage loss weights for hrnet_cascade intermediate supervision.
     # Empty list => equal weighting across all stages.
     cascade_stage_weights: list = field(default_factory=list)
+    # Pose-invariant structural loss (edge-length + turning-angle) added to the
+    # coordinate loss for coordinate-regression variants (fused_global family).
+    # 0.0 disables it entirely (default). Keep modest so the coordinate loss still
+    # leads (protects the well-localized across-edge component / the tail).
+    structural_loss_weight: float = 0.0
+    structural_dist_weight: float = 1.0
+    structural_angle_weight: float = 1.0
 
 
 @dataclass

@@ -21,7 +21,7 @@ from ..common.graph_topologies import get_edge_index
 from ..models.registry import get_model
 from .loss import (
     landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss,
-    heatmap_star_loss, cascade_heatmap_loss,
+    heatmap_star_loss, cascade_heatmap_loss, structural_loss, chain_triples,
 )
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
@@ -83,6 +83,26 @@ class TrainingEngine:
             cfg.dataset.graph_topology, cfg.dataset.num_landmarks,
             landmark_indices=landmark_indices or None,
         ).to(self.device)
+
+        # Contour triples for the pose-invariant turning-angle structural loss
+        # (chain topology only; a chain of N landmarks has interior vertices
+        # 1..N-2). Only used when training.structural_loss_weight > 0.
+        self._struct_triples = None
+        if getattr(cfg.training, "structural_loss_weight", 0.0) > 0:
+            if cfg.dataset.graph_topology == "chain":
+                self._struct_triples = chain_triples(
+                    cfg.dataset.num_landmarks, device=self.device
+                )
+            else:
+                logging.warning(
+                    "structural_loss_weight > 0 but graph_topology is "
+                    f"'{cfg.dataset.graph_topology}', not 'chain'; the "
+                    "turning-angle term needs an ordered contour and will be "
+                    "skipped (edge-length term still applies)."
+                )
+                self._struct_triples = torch.zeros(
+                    (0, 3), dtype=torch.long, device=self.device
+                )
 
         # Load mean shape if specified
         if cfg.dataset.mean_shape_path and Path(cfg.dataset.mean_shape_path).exists():
@@ -768,6 +788,17 @@ class TrainingEngine:
                 else:
                     pred_coords = out
                     loss = landmark_loss(pred_coords, coords)
+
+                # Optional pose-invariant structural regularizer (edge-length +
+                # turning-angle), added to the coordinate loss for the GCN /
+                # fused_global family. Modest weight so the coordinate loss leads.
+                sw = getattr(cfg.training, "structural_loss_weight", 0.0)
+                if sw > 0 and self._struct_triples is not None:
+                    loss = loss + sw * structural_loss(
+                        pred_coords, coords, self.edge_index, self._struct_triples,
+                        dist_weight=getattr(cfg.training, "structural_dist_weight", 1.0),
+                        angle_weight=getattr(cfg.training, "structural_angle_weight", 1.0),
+                    )
 
             self.optimizer.zero_grad()
             loss.backward()

@@ -123,6 +123,96 @@ def dist_loss(
     return F.mse_loss(pred_dists, gt_dists)
 
 
+def turning_angle_loss(
+    pred: torch.Tensor, gt: torch.Tensor, triples: torch.Tensor
+) -> torch.Tensor:
+    """Pose-invariant turning-angle (contour-bending) loss.
+
+    For each ordered triple (a, b, c) of contour-adjacent landmarks, the angle at
+    the middle vertex b is a property of the SHAPE, not the pose: it is invariant
+    to global rotation, translation, and scale. Penalizing the difference between
+    the predicted and ground-truth vertex angles therefore encodes "the contour
+    bends the right amount here" WITHOUT assuming any absolute orientation — so a
+    rotated toe-pad is not penalized (the key requirement: absolute-angle losses
+    would wrongly penalize correct-but-rotated predictions).
+
+    The angle is compared via its cosine (the normalized dot product of the two
+    edge vectors b->a and b->c), which is smooth, bounded in [-1, 1], and needs no
+    arccos (avoiding the gradient singularity at 0 and pi). Vectors are normalized
+    so only DIRECTION (bending) is compared; magnitude/spacing is handled by
+    ``dist_loss``.
+
+    Args:
+        pred: (B, N, 2) predicted coordinates.
+        gt: (B, N, 2) ground-truth coordinates.
+        triples: (T, 3) long tensor of ordered contour triples (a, b, c); the
+            angle is measured at the middle index b.
+
+    Returns:
+        Scalar MSE loss between predicted and GT vertex-angle cosines.
+    """
+    if triples.numel() == 0:
+        return pred.new_zeros(())
+
+    a, b, c = triples[:, 0], triples[:, 1], triples[:, 2]
+
+    def cos_at_vertex(x):
+        # Edge vectors from the middle vertex b to its two neighbors.
+        v1 = x[:, a] - x[:, b]  # (B, T, 2)
+        v2 = x[:, c] - x[:, b]  # (B, T, 2)
+        v1 = v1 / (v1.norm(dim=-1, keepdim=True) + 1e-8)
+        v2 = v2 / (v2.norm(dim=-1, keepdim=True) + 1e-8)
+        return (v1 * v2).sum(dim=-1)  # (B, T) cosine of the vertex angle
+
+    return F.mse_loss(cos_at_vertex(pred), cos_at_vertex(gt))
+
+
+def structural_loss(
+    pred: torch.Tensor,
+    gt: torch.Tensor,
+    edge_index: torch.Tensor,
+    triples: torch.Tensor,
+    dist_weight: float = 1.0,
+    angle_weight: float = 1.0,
+) -> torch.Tensor:
+    """Pose-invariant structural regularizer: edge-length + turning-angle.
+
+    Combines ``dist_loss`` (rotation/translation-invariant edge lengths) and
+    ``turning_angle_loss`` (rotation/scale-invariant contour bending). Both terms
+    are pose-invariant, so this can be added to the coordinate loss WITHOUT
+    penalizing correct predictions on rotated toe-pads. Intended as a modest
+    auxiliary term alongside the coordinate MSE (which keeps the model honest to
+    appearance and protects the well-localized across-edge component).
+
+    Args:
+        pred: (B, N, 2) predicted coordinates.
+        gt: (B, N, 2) ground-truth coordinates.
+        edge_index: (2, E) connectivity for the edge-length term.
+        triples: (T, 3) contour triples for the angle term.
+        dist_weight: weight on the edge-length term.
+        angle_weight: weight on the turning-angle term.
+
+    Returns:
+        Scalar weighted structural loss.
+    """
+    d = dist_loss(pred, gt, edge_index) if edge_index is not None and edge_index.numel() else pred.new_zeros(())
+    a = turning_angle_loss(pred, gt, triples)
+    return dist_weight * d + angle_weight * a
+
+
+def chain_triples(num_landmarks: int, device=None) -> torch.Tensor:
+    """Ordered (a, b, c) triples for a chain contour 0-1-...-(N-1).
+
+    Each interior landmark b in [1, N-2] contributes the triple (b-1, b, b+1),
+    so the angle is measured at every interior vertex. Endpoints have no vertex
+    angle. Returns an empty (0, 3) tensor when N < 3.
+    """
+    triples = [[i - 1, i, i + 1] for i in range(1, num_landmarks - 1)]
+    if not triples:
+        return torch.zeros((0, 3), dtype=torch.long, device=device)
+    return torch.tensor(triples, dtype=torch.long, device=device)
+
+
 def heatmap_loss(
     pred_heatmaps: torch.Tensor,
     pred_coords: torch.Tensor,
