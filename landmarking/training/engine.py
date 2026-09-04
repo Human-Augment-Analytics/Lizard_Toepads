@@ -668,16 +668,10 @@ class TrainingEngine:
                 B = imgs.shape[0]
 
                 stage_heatmaps, _ = self.model(imgs)
-                stage_coords = [
-                    decode_coords(
-                        hm,
-                        mode=getattr(cfg.model, "decode_mode", "windowed"),
-                        radius=getattr(cfg.model, "decode_radius", 5),
-                    )
-                    for hm in stage_heatmaps
-                ]
+                # The cascade loss decodes its own coord term (global soft-argmax)
+                # from the stage heatmaps; stage_coords is unused (pass None).
                 loss = cascade_heatmap_loss(
-                    stage_heatmaps, stage_coords, coords,
+                    stage_heatmaps, None, coords,
                     cfg.model.heatmap_size, cfg.model.sigma,
                     mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
                     stage_weights=getattr(cfg.training, "cascade_stage_weights", None),

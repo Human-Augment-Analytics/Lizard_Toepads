@@ -455,13 +455,39 @@ def heatmap_star_loss(
     return total, hm_coord, loss_star
 
 
+def _global_soft_argmax(heatmaps: torch.Tensor) -> torch.Tensor:
+    """Full-map soft-argmax used for the CASCADE coordinate TRAINING term.
+
+    Deliberately NOT the windowed decoder. The windowed soft-argmax takes the
+    spatial expectation only inside a window around the DETACHED argmax cell, so
+    its coordinate gradient cannot move a prediction out of a wrong (e.g. corner)
+    cell — the argmax pins the window and the coord loss then only sharpens
+    whatever cell was chosen. Combined with a large coord weight and per-stage
+    supervision, that self-locks landmarks whose argmax drifts to a border cell
+    (the observed (0,0) corner spikes with no recovery after a few epochs).
+
+    Global soft-argmax has a full-map gradient: a corner prediction is pulled
+    toward the true location by the coordinate loss, so it does not trap. It is
+    used ONLY as the differentiable coordinate readout for the cascade's training
+    loss; inference still decodes with the windowed decoder (unbiased readout).
+    """
+    b, n, h, w = heatmaps.shape
+    device = heatmaps.device
+    weights = F.softmax(heatmaps.view(b, n, -1), dim=-1).view(b, n, h, w)
+    xs = torch.linspace(0, 1, w, device=device)
+    ys = torch.linspace(0, 1, h, device=device)
+    x = (weights.sum(dim=2) * xs.view(1, 1, w)).sum(dim=-1)
+    y = (weights.sum(dim=3) * ys.view(1, 1, h)).sum(dim=-1)
+    return torch.stack([x, y], dim=-1)
+
+
 def cascade_heatmap_loss(
     stage_heatmaps,
     stage_coords,
     gt_coords: torch.Tensor,
     heatmap_size: int,
     sigma: float = 1.5,
-    coord_weight: float = 100.0,
+    coord_weight: float = 1.0,
     mode: str = "ce",
     stage_weights=None,
 ):
@@ -470,20 +496,32 @@ def cascade_heatmap_loss(
     Applies the framework's existing ``heatmap_loss`` (default CE) to EVERY
     refinement stage against the same ground truth, then returns the weighted
     mean over stages. Every stage is supervised as both a heatmap and its decoded
-    coordinates (the coord term inside ``heatmap_loss``), so a poor stage is
-    penalized in place rather than silently corrupting the final output.
+    coordinates, so a poor stage is penalized in place rather than silently
+    corrupting the final output.
 
-    No new heatmap target or coordinate loss is introduced — this is purely a
-    per-stage reuse of ``heatmap_loss``.
+    Two deliberate differences from a naive per-stage ``heatmap_loss`` call, both
+    to fix an observed degeneracy (landmarks snapping to the (0,0) corner and not
+    recovering after ~epoch 5):
+
+    1. The coordinate term is computed from a GLOBAL soft-argmax of the stage
+       heatmap (``_global_soft_argmax``), NOT the windowed decode passed in
+       ``stage_coords``. The windowed decode's gradient is trapped in a window
+       around a possibly-wrong argmax cell and cannot pull a corner prediction
+       back; the global readout has a full-map gradient and does not trap.
+    2. ``coord_weight`` defaults to 1.0 (not 100.0). At weight 100 the trapped
+       coordinate term dominated the loss and reinforced whatever cell the argmax
+       landed in; the CE term (which shapes the whole map, globally) should lead.
+
+    ``stage_coords`` is accepted for interface compatibility but is NOT used for
+    the loss (inference decoding still uses the windowed decoder elsewhere).
 
     Args:
         stage_heatmaps: list of K tensors, each (B, N, Hs, Ws).
-        stage_coords: list of K tensors, each (B, N, 2) — the decoded coords of
-            the corresponding stage.
+        stage_coords: list of K tensors — accepted but unused (see above).
         gt_coords: (B, N, 2) ground-truth coords in [0, 1].
         heatmap_size: spatial size of the heatmap target (H = W).
         sigma: Gaussian sigma for the heatmap target.
-        coord_weight: coordinate-term weight inside heatmap_loss.
+        coord_weight: coordinate-term weight (default 1.0).
         mode: "ce" (default) or "mse".
         stage_weights: optional list of K weights; None => equal weighting.
 
@@ -503,7 +541,11 @@ def cascade_heatmap_loss(
 
     per_stage = []
     weighted_sum = 0.0
-    for w, hm, co in zip(stage_weights, stage_heatmaps, stage_coords):
+    for w, hm in zip(stage_weights, stage_heatmaps):
+        # Decode the coord term from a GLOBAL soft-argmax of THIS stage's heatmap
+        # (full-map gradient, no argmax trap). Ignores the passed windowed
+        # stage_coords for the loss.
+        co = _global_soft_argmax(hm)
         ls = heatmap_loss(
             hm, co, gt_coords, heatmap_size,
             sigma=sigma, coord_weight=coord_weight, mode=mode,

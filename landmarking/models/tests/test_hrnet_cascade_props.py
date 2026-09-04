@@ -106,11 +106,13 @@ def test_p3_single_stage_no_merge(num_lms, shared):
 def test_p4_loss_composition(b, n, k, hs, seed):
     g = torch.Generator().manual_seed(seed)
     stage_hms = [torch.randn(b, n, hs, hs, generator=g) for _ in range(k)]
-    stage_coords = [torch.rand(b, n, 2, generator=g) for _ in range(k)]
     gt = torch.rand(b, n, 2, generator=g)
-    total, per_stage = cascade_heatmap_loss(stage_hms, stage_coords, gt, hs, mode="ce")
-    manual = [heatmap_loss(hm, co, gt, hs, mode="ce")
-              for hm, co in zip(stage_hms, stage_coords)]
+    from landmarking.training.loss import _global_soft_argmax
+    total, per_stage = cascade_heatmap_loss(stage_hms, None, gt, hs, mode="ce")
+    manual = [
+        heatmap_loss(hm, _global_soft_argmax(hm), gt, hs, coord_weight=1.0, mode="ce")
+        for hm in stage_hms
+    ]
     expected = sum(manual) / k
     assert total.item() == pytest.approx(expected.item(), rel=1e-5, abs=1e-6)
 
