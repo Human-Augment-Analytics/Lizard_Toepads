@@ -1,4 +1,4 @@
-"""TPS file I/O utilities for Lizard dataset.
+﻿"""TPS file I/O utilities for Lizard dataset.
 
 Reads .TPS morphometric landmark files and extracts coordinates.
 Also provides ruler distance extraction for pixel-to-mm conversion.
@@ -92,3 +92,12 @@ def get_ruler_distance(img_id: str, img: np.ndarray, tps_data_dir: str) -> dict:
         else:
             ret[c] = None
     return ret
+
+
+# Consolidated multi-specimen TPS reading lives in landmarking.common.tps_io so
+# that it (and the shape analysis built on it) stays importable without torch --
+# the landmarking.datasets package imports torch at module scope. Re-exported
+# here so all TPS I/O remains discoverable from one place.
+from ...common.tps_io import read_consolidated_tps  # noqa: E402,F401
+
+__all__ = ["get_tps_coords", "get_ruler_distance", "read_consolidated_tps"]
