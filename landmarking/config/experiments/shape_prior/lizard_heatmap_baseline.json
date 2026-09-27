@@ -1,5 +1,5 @@
 {
-  "_comment": "A/B control for the shape-prior experiment. Identical to lizard_heatmap_shape.json except model.variant is 'heatmap' (no projection). Run BOTH from this pair rather than comparing against an older run, so the only difference is the projection.",
+  "_comment": "A/B control for the shape-prior experiment. Identical to lizard_heatmap_shape.json except model.variant is 'heatmap' (no projection). Run BOTH from this pair rather than comparing against an older run, so the only difference is the projection. Recipe matches alternative-models/hrnet/configs/heatmap_default.json, the setup that produced the established ~6.5px lizard heatmap number: 120 epochs, milestones [80,105], batch 32, sigma 5.0, differential head LR 1e-3 / backbone 1e-4. The engine routes lizard 'heatmap' through the differential-LR path (make_param_groups), so training.lr is the head LR and training.lr_backbone the backbone LR.",
   "paths": {
     "data_root": "/home/hice1/axu39/scratch/",
     "output_root": "./runs"
@@ -16,21 +16,22 @@
   "model": {
     "variant": "heatmap",
     "heatmap_size": 128,
+    "sigma": 5.0,
     "decode_mode": "windowed",
     "decode_radius": 5,
     "bn_momentum": 0.1,
     "heatmap_use_star": false
   },
   "training": {
-    "epochs": 60,
-    "batch_size": 8,
-    "val_batch_size": 16,
-    "lr": 1e-4,
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
     "lr_backbone": 1e-4,
-    "weight_decay": 0.0,
-    "lr_milestones": [30, 50],
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
     "lr_gamma": 0.1,
-    "grad_clip": 5.0,
+    "grad_clip": 1.0,
     "checkpoint_interval": 10,
     "vis_interval": 10,
     "seed": 42,
