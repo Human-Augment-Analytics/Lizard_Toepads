@@ -30,6 +30,7 @@ _MODEL_MODULES = [
     "vit",                    # "vit"
     "pipnet",                 # "pipnet"
     "hrnet_cascade",          # "hrnet_cascade"
+    "shape_projection",       # "heatmap_shape"
 ]
 
 for _mod_name in _MODEL_MODULES:

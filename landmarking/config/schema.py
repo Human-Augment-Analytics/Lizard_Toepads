@@ -121,6 +121,34 @@ class ModelConfig:
     num_stages: int = 3
     shared_weights: bool = True
     cascade_width: int = 256
+    # --- Shape projection (variant "heatmap_shape") only -----------------------
+    # Constrains decoded coordinates to a point-distribution model fitted offline
+    # by landmarking.scripts.shape_bound_report --save-basis. Required: there is
+    # no sensible default basis, and a wrong one silently changes the geometry.
+    shape_basis_path: str = ""
+    # Group inside the basis file. "all" pools finger and toe; single-class
+    # bases measure better (a pooled basis spends 79% of its leading component
+    # on the finger/toe distinction) but need one model per class.
+    shape_basis_group: str = "all"
+    # "similarity" = basis fitted with rotation factored out (strongly preferred:
+    # residual rotation after the OBB crop is the dominant variance direction, so
+    # letting the fitted transform absorb it keeps the coefficients for shape).
+    # "no_rotation" = rotation counted as shape variation.
+    shape_basis_variant: str = "similarity"
+    # Components retained (k). The measured oracle bound on Lizard: k=6 gives
+    # 2.6 px (finger) / 2.1 px (toe), k=9 gives 1.4 / 1.2, against ~6.5 px for
+    # the unconstrained heatmap model. Budget headroom above the bound.
+    shape_components: int = 8
+    # Active Shape Model plausibility clamp, in standard deviations. 0 disables.
+    # A saturated coefficient gets zero gradient, so overly tight values stall
+    # learning.
+    shape_n_sigma: float = 3.0
+    # 1.0 = hard projection (the regime the oracle bound describes); lower makes
+    # the prior a soft regularizer blended with the raw prediction.
+    shape_blend: float = 1.0
+    # Alternating refinement steps inside the projection. Cheap relative to the
+    # backbone (20 steps ~= 14% of one head conv), so default generously.
+    shape_fit_iters: int = 20
 
 
 @dataclass

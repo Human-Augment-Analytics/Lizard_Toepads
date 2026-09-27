@@ -124,6 +124,27 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
+    if variant == "heatmap_shape":
+        # Mirror TrainingEngine.setup. The shape settings do not add parameters
+        # (the basis is a buffer), but they change the geometry of the output, so
+        # a mismatch here silently evaluates a different model than was trained.
+        kwargs.update({
+            "heatmap_size": getattr(config.model, "heatmap_size", 128),
+            "decode_mode": getattr(config.model, "decode_mode", "windowed"),
+            "decode_radius": getattr(config.model, "decode_radius", 5),
+            "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
+            "shape_basis_path": getattr(config.model, "shape_basis_path", ""),
+            "shape_basis_group": getattr(config.model, "shape_basis_group", "all"),
+            "shape_basis_variant": getattr(
+                config.model, "shape_basis_variant", "similarity"
+            ),
+            "shape_components": getattr(config.model, "shape_components", 8),
+            "shape_n_sigma": getattr(config.model, "shape_n_sigma", 3.0),
+            "shape_blend": getattr(config.model, "shape_blend", 1.0),
+            "shape_fit_iters": getattr(config.model, "shape_fit_iters", 20),
+        })
+        return kwargs
+
     if variant == "hrnet_cascade":
         # Mirror TrainingEngine.setup so the architecture matches the checkpoint
         # (num_stages / shared_weights change the parameter set).
@@ -398,7 +419,8 @@ def main(argv=None):
 
     device = get_device(config.training.device)
     set_seed(config.training.seed)
-    is_heatmap = config.model.variant == "heatmap"
+    # heatmap_shape shares the forward(imgs) -> (heatmaps, coords) contract.
+    is_heatmap = config.model.variant in ("heatmap", "heatmap_shape")
 
     # Load split
     split_path = args.split or config.dataset.split_path
@@ -613,10 +635,12 @@ def main(argv=None):
                 if is_pipnet:
                     # Direct or neighbor-averaged decode per --no-merge.
                     pred = model.predict_coords(imgs, merge=pip_merge)
-                elif config.model.variant == "heatmap":
+                elif config.model.variant in ("heatmap", "heatmap_shape"):
                     # HRNet heatmap: forward(imgs) -> (heatmaps, coords). Works
                     # for both plain and STAR variants (forward is unchanged;
                     # STAR only adds forward_star used in training). Take coords.
+                    # heatmap_shape shares the contract and returns projected
+                    # coords in the same slot.
                     _, pred = model(imgs)
                 elif config.model.variant == "hrnet_cascade":
                     # forward(imgs) -> (list[stage heatmaps], final coords).

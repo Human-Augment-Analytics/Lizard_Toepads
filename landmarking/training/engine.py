@@ -29,6 +29,64 @@ from .visualization import save_training_overlays
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
 
+def heatmap_family_flags(cfg) -> dict:
+    """Resolve which heatmap dispatch path a config selects.
+
+    Three mutually exclusive routes exist for heatmap-style models:
+
+    - ``is_heatmap_model``: WFLW only. Uses ``WFLWRefDataset`` with
+      pre-generated target heatmaps and a pure heatmap MSE; decoded coordinates
+      are never supervised.
+    - ``is_heatmap_on_coords``: everything else. Standard coordinate dataset and
+      ``heatmap_loss`` (heatmap term plus coordinate term).
+    - ``heatmap_use_star``: adds the STAR uncertainty head on top of the second.
+
+    ``heatmap_shape`` subclasses ``HRNetHeatmap`` and keeps the identical
+    ``forward(imgs) -> (heatmaps, coords)`` contract, differing only in that the
+    coordinates are projected onto a shape model. It therefore rides the
+    coordinate path unchanged: the heatmap term still shapes the raw map while
+    the coordinate term supervises the projected output, which is what puts the
+    projection in the gradient path.
+
+    Args:
+        cfg: A resolved :class:`LandmarkingConfig`.
+
+    Returns:
+        Dict with keys ``is_heatmap_model``, ``is_heatmap_on_coords``, and
+        ``heatmap_use_star``.
+
+    Raises:
+        NotImplementedError: For ``heatmap_shape`` on WFLW. That path never
+            supervises decoded coordinates, so the projection would receive no
+            gradient and the run would silently train an unconstrained model --
+            worse than failing.
+    """
+    variant = cfg.model.variant
+    is_wflw = cfg.dataset.name == "wflw"
+
+    if variant == "heatmap_shape" and is_wflw:
+        raise NotImplementedError(
+            "heatmap_shape is not wired for WFLW: that path uses WFLWRefDataset "
+            "with a pure heatmap MSE loss and never supervises decoded "
+            "coordinates, so the shape projection would have no gradient."
+        )
+
+    return {
+        "is_heatmap_model": variant == "heatmap" and is_wflw,
+        "is_heatmap_on_coords": (
+            variant in ("heatmap", "heatmap_shape") and not is_wflw
+        ),
+        # STAR stays gated to the plain heatmap variant; heatmap_shape rejects it
+        # in its constructor because the STAR head reads uncertainty at the
+        # heatmap argmax cell, not at the projected coordinate.
+        "heatmap_use_star": (
+            variant == "heatmap"
+            and not is_wflw
+            and bool(getattr(cfg.model, "heatmap_use_star", False))
+        ),
+    }
+
+
 class TrainingEngine:
     """Unified training loop for landmark detection models.
 
@@ -176,6 +234,24 @@ class TrainingEngine:
                 "bn_momentum": getattr(cfg.model, "bn_momentum", 0.01),
                 "use_star": getattr(cfg.model, "heatmap_use_star", False),
             })
+        if cfg.model.variant == "heatmap_shape":
+            # Same backbone/head kwargs as "heatmap" (the variant subclasses it),
+            # plus the shape-projection settings.
+            model_kwargs.update({
+                "heatmap_size": getattr(cfg.model, "heatmap_size", 128),
+                "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(cfg.model, "decode_radius", 5),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
+                "shape_basis_path": getattr(cfg.model, "shape_basis_path", ""),
+                "shape_basis_group": getattr(cfg.model, "shape_basis_group", "all"),
+                "shape_basis_variant": getattr(
+                    cfg.model, "shape_basis_variant", "similarity"
+                ),
+                "shape_components": getattr(cfg.model, "shape_components", 8),
+                "shape_n_sigma": getattr(cfg.model, "shape_n_sigma", 3.0),
+                "shape_blend": getattr(cfg.model, "shape_blend", 1.0),
+                "shape_fit_iters": getattr(cfg.model, "shape_fit_iters", 20),
+            })
         if cfg.model.variant == "hrnet_cascade":
             model_kwargs.update({
                 "num_stages": getattr(cfg.model, "num_stages", 3),
@@ -208,18 +284,13 @@ class TrainingEngine:
                 "prior_disabled": cfg.model.prior_disabled,
             })
 
-        # Determine if this is a heatmap-style model (different forward signature)
-        # Only True for WFLW heatmap variant which uses WFLWRefDataset with pre-generated target heatmaps
-        self._is_heatmap_model = (
-            cfg.model.variant in ("heatmap",) and cfg.dataset.name == "wflw"
-        )
-        # Heatmap on Lizard: uses standard dataset + heatmap_loss (same path as graph_cond_heatmap)
-        self._is_heatmap_on_coords = (
-            cfg.model.variant in ("heatmap",) and cfg.dataset.name != "wflw"
-        )
-        self._heatmap_use_star = (
-            self._is_heatmap_on_coords and getattr(cfg.model, "heatmap_use_star", False)
-        )
+        # Heatmap-family dispatch flags. Extracted into a pure helper so the
+        # routing (and its unsupported-combination guard) can be tested without
+        # standing up dataloaders and a real model.
+        _hm_flags = heatmap_family_flags(cfg)
+        self._is_heatmap_model = _hm_flags["is_heatmap_model"]
+        self._is_heatmap_on_coords = _hm_flags["is_heatmap_on_coords"]
+        self._heatmap_use_star = _hm_flags["heatmap_use_star"]
         # HRNet cascade: image-only forward -> (list[stage heatmaps], final coords);
         # loss = intermediate supervision over all stages.
         self._is_cascade = cfg.model.variant == "hrnet_cascade"

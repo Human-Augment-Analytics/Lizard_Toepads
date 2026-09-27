@@ -386,6 +386,71 @@ class TestProjectAndReconstruct:
         with pytest.raises(ValueError, match=r"shape must be \(9, 2\)"):
             project_shape(np.ones((7, 2)), model, k=2)
 
+    def test_init_transform_is_honoured_at_k_zero(self):
+        shapes, _, _ = make_rank_r_dataset(n_samples=40)
+        model = fit_shape_model(shapes[:30])
+        seed = procrustes_fit(model.mean, shapes[35], allow_rotation=True)
+
+        _, transform = project_shape(shapes[35], model, k=0, init_transform=seed)
+
+        assert transform is seed
+
+    def test_init_transform_reaches_same_optimum_on_easy_data(self):
+        # On shapes close to the model the objective is effectively unimodal, so
+        # a deliberately poor starting transform should still converge to the
+        # same place. This is what makes warm starting safe in the common case.
+        shapes, _, _ = make_rank_r_dataset(n_samples=80, amp_max=0.02)
+        model = fit_shape_model(shapes[:60])
+        target = shapes[70]
+
+        bad = Similarity(
+            scale=50.0,
+            rotation=rotation_matrix(2.0),
+            src_centroid=np.zeros(2),
+            dst_centroid=np.array([500.0, -500.0]),
+        )
+
+        err_default = np.linalg.norm(
+            reconstruct_shape(target, model, k=4) - target, axis=1
+        ).mean()
+        err_seeded = np.linalg.norm(
+            reconstruct_shape(target, model, k=4, n_fit_iter=50, init_transform=bad)
+            - target,
+            axis=1,
+        ).mean()
+
+        assert err_seeded == pytest.approx(err_default, rel=1e-3)
+
+
+def make_mixed_orientation_dataset(n_samples: int = 300, seed: int = 5):
+    """Toepad-like shapes drawn from two widely separated orientation clusters.
+
+    Stands in for the configuration that broke monotonicity on real data:
+    finger and toe pooled into one shape model with rotation left in the
+    coordinates. Fit this with ``allow_rotation=False`` to put the model far
+    from its data, which is where the non-convex alternation misbehaves.
+    """
+    rng = np.random.default_rng(seed)
+
+    base = []
+    for i in range(4):
+        base.append([i * 1.0, 0.45 - 0.05 * i])
+        base.append([i * 1.0, -0.45 + 0.05 * i])
+    base.append([4.2, 0.0])
+    base = np.asarray(base, dtype=np.float64)
+
+    out = []
+    for i in range(n_samples):
+        shape = base + rng.normal(scale=0.06, size=base.shape)
+        theta = (0.0 if i % 2 == 0 else np.pi * 0.75) + rng.normal(scale=0.35)
+        out.append(
+            rng.uniform(90.0, 150.0)
+            * (shape - shape.mean(axis=0))
+            @ rotation_matrix(theta)
+            + rng.uniform(-40.0, 40.0, size=2)
+        )
+    return np.stack(out)
+
 
 class TestReconstructionBound:
     def test_monotone_non_increasing_in_k(self):
@@ -395,6 +460,72 @@ class TestReconstructionBound:
         bound = reconstruction_bound(shapes[150:], model)
 
         assert np.all(np.diff(bound["mean_error"]) <= 1e-9)
+
+    def test_monotone_even_when_model_fits_badly(self):
+        # The regression guard. A bound that rises with more components is
+        # incoherent, and it happened on real data: pooling classes with
+        # rotation unremoved gave 24.2 px at k=1 and 26.2 px at k=2. The fit is
+        # non-convex, so an independent alternation per k can land in a worse
+        # local optimum. reconstruction_bound now fits each k from both a cold
+        # and a warm start and keeps a per-shape running minimum.
+        shapes = make_mixed_orientation_dataset(n_samples=300)
+        model = fit_shape_model(shapes[:200], allow_rotation=False)
+
+        bound = reconstruction_bound(shapes[200:], model)
+
+        assert np.all(np.diff(bound["mean_error"]) <= 1e-9)
+
+    def test_per_shape_error_is_non_increasing_in_k(self):
+        # The running minimum is per shape, so the guarantee holds sample by
+        # sample rather than only on average.
+        shapes = make_mixed_orientation_dataset(n_samples=200)
+        model = fit_shape_model(shapes[:140], allow_rotation=False)
+
+        bound = reconstruction_bound(shapes[140:], model)
+        per_shape = np.asarray(bound["per_shape_mean"])  # (n_k, S)
+
+        assert np.all(np.diff(per_shape, axis=0) <= 1e-9)
+
+    def test_at_least_as_tight_as_an_independent_cold_fit(self):
+        # Trying both starts must never lose to the cold start alone, otherwise
+        # the reported bound would be looser than achievable -- the dangerous
+        # direction when the number is used to judge feasibility.
+        shapes = make_mixed_orientation_dataset(n_samples=200)
+        model = fit_shape_model(shapes[:140], allow_rotation=False)
+        val = shapes[140:]
+        ks = list(range(0, 9))
+
+        bound = reconstruction_bound(val, model, k_values=ks)
+        for i, k in enumerate(ks):
+            cold = float(
+                np.stack(
+                    [np.linalg.norm(reconstruct_shape(s, model, k) - s, axis=1)
+                     for s in val]
+                ).mean()
+            )
+            assert bound["mean_error"][i] <= cold + 1e-9
+
+    def test_results_follow_requested_order_not_sorted_order(self):
+        shapes, _, _ = make_rank_r_dataset(n_samples=120)
+        model = fit_shape_model(shapes[:90])
+        val = shapes[90:]
+
+        descending = reconstruction_bound(val, model, k_values=[6, 3, 0])
+        ascending = reconstruction_bound(val, model, k_values=[0, 3, 6])
+
+        assert descending["k_values"] == [6, 3, 0]
+        assert descending["mean_error"] == pytest.approx(
+            ascending["mean_error"][::-1]
+        )
+
+    def test_duplicate_k_values_are_consistent(self):
+        shapes, _, _ = make_rank_r_dataset(n_samples=120)
+        model = fit_shape_model(shapes[:90])
+
+        bound = reconstruction_bound(shapes[90:], model, k_values=[4, 4])
+
+        assert bound["k_values"] == [4, 4]
+        assert bound["mean_error"][0] == pytest.approx(bound["mean_error"][1])
 
     def test_recovers_true_rank_with_orthogonalized_modes(self):
         # Small amp_max keeps the |c|^2 similarity leakage negligible, so the

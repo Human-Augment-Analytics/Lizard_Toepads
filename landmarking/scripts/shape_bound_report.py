@@ -271,7 +271,7 @@ def analyze(
     allow_rotation: bool,
     baseline_px=None,
     mm_per_px=None,
-) -> dict:
+) -> tuple:
     """Fit a shape model on train shapes and bound reconstruction on val shapes.
 
     Args:
@@ -284,7 +284,9 @@ def analyze(
         mm_per_px: Optional scalar for reporting the bound in millimetres.
 
     Returns:
-        A JSON-serializable dict describing the model and the bound.
+        Tuple ``(result, model)`` where ``result`` is a JSON-serializable dict
+        describing the model and the bound, and ``model`` is the fitted
+        :class:`ShapeModel`, returned so the caller can export the basis.
     """
     model = fit_shape_model(train_shapes, allow_rotation=allow_rotation)
     bound = reconstruction_bound(val_shapes, model)
@@ -333,7 +335,50 @@ def analyze(
         ]
         result["min_k_beating_baseline"] = int(feasible[0]) if feasible else None
 
-    return result
+    return result, model
+
+
+def save_bases(models: dict, path: str, extra: dict = None) -> str:
+    """Write fitted shape bases to a compressed .npz for downstream models.
+
+    Keys are ``"{group}__{variant}__{field}"`` with ``field`` in
+    ``mean`` (N, 2), ``components`` (2N, n_components), and
+    ``explained_variance`` (n_components,). A ``__meta__`` key holds a JSON
+    string describing landmark count, rotation handling, and training sizes.
+
+    .npz rather than .pt so the file stays readable without torch, matching the
+    rest of ``landmarking.common``. Consumers convert to tensors on load.
+
+    Args:
+        models: Mapping ``group -> variant -> ShapeModel``.
+        path: Output .npz path.
+        extra: Optional extra metadata to embed.
+
+    Returns:
+        The path written.
+    """
+    arrays = {}
+    meta = {"groups": {}, "extra": extra or {}}
+    for group, variants in models.items():
+        meta["groups"][group] = {}
+        for variant, model in variants.items():
+            prefix = f"{group}__{variant}__"
+            arrays[prefix + "mean"] = model.mean
+            arrays[prefix + "components"] = model.components
+            arrays[prefix + "explained_variance"] = model.explained_variance
+            meta["groups"][group][variant] = {
+                "num_landmarks": model.num_landmarks,
+                "n_components": model.n_components,
+                "effective_rank": model.effective_rank,
+                "allow_rotation": model.allow_rotation,
+                "n_train": model.n_train,
+            }
+
+    arrays["__meta__"] = np.asarray(json.dumps(meta))
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(str(out), **arrays)
+    return str(out)
 
 
 def print_report(name: str, res: dict) -> None:
@@ -460,6 +505,13 @@ def main(argv=None):
                     help="Also report the translation+scale-only bound.")
     ap.add_argument("--output", type=str, default=None,
                     help="Write JSON here (default: <output_root>/<name>/shape_bound/).")
+    ap.add_argument("--save-basis", type=str, default=None,
+                    help="Write fitted shape bases to this .npz, for use by the "
+                         "heatmap_shape model variant.")
+    ap.add_argument("--no-save-basis-default", dest="save_basis_default",
+                    action="store_false",
+                    help="Do not auto-write shape_basis.npz next to the JSON.")
+    ap.set_defaults(save_basis_default=True)
     args = ap.parse_args(argv)
 
     if not any([args.config, args.data_dir, args.tps]):
@@ -595,11 +647,13 @@ def main(argv=None):
     # ---- Analyze ----
     rotation_modes = [True] + ([False] if args.no_rotation_variant else [])
     results = {}
+    fitted = {}
     for gname, (tr, va) in groups.items():
         mm_per_px = _median_mm_per_px(tr["ruler_px"], args.ruler_mm)
         results[gname] = {}
+        fitted[gname] = {}
         for allow_rotation in rotation_modes:
-            res = analyze(
+            res, model = analyze(
                 tr["shapes"],
                 va["shapes"],
                 allow_rotation=allow_rotation,
@@ -608,6 +662,7 @@ def main(argv=None):
             )
             key = "similarity" if allow_rotation else "no_rotation"
             results[gname][key] = res
+            fitted[gname][key] = model
             print_report(f"group={gname}", res)
 
     # ---- Interpretation ----
@@ -639,6 +694,22 @@ def main(argv=None):
             / "shape_bound"
             / "shape_bound.json"
         )
+    basis_path = args.save_basis
+    if basis_path is None and output_path and args.save_basis_default:
+        basis_path = str(Path(output_path).with_name("shape_basis.npz"))
+    if basis_path:
+        basis_path = save_bases(
+            fitted,
+            basis_path,
+            extra={
+                "source": source,
+                "canvas": args.canvas,
+                "seed": seed,
+                "rescale_long_side": args.rescale_long_side or None,
+            },
+        )
+        print(f"Shape bases written to {basis_path}")
+
     if output_path:
         payload = {
             "source": source,
@@ -647,13 +718,15 @@ def main(argv=None):
             "seed": seed,
             "ruler_mm": args.ruler_mm,
             "baseline_px": args.baseline_px,
+            "rescale_long_side": args.rescale_long_side or None,
+            "basis_path": basis_path,
             "results": results,
         }
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w") as f:
             json.dump(payload, f, indent=2)
-        print(f"\nJSON written to {out}")
+        print(f"JSON written to {out}")
 
     return 0
 

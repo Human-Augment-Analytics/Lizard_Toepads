@@ -398,7 +398,11 @@ def fit_shape_model(
 
 
 def project_shape(
-    shape: np.ndarray, model: ShapeModel, k: int, n_fit_iter: int = 8
+    shape: np.ndarray,
+    model: ShapeModel,
+    k: int,
+    n_fit_iter: int = 8,
+    init_transform: Optional[Similarity] = None,
 ) -> tuple:
     """Fit the oracle similarity and k shape coefficients for one shape.
 
@@ -416,6 +420,12 @@ def project_shape(
     error, erring high is the dangerous direction, so the loop runs to
     convergence.
 
+    The joint objective is NOT convex -- it contains the product of the scale
+    and the coefficient vector -- so the alternation finds a local optimum that
+    depends on where it starts. ``init_transform`` exists so callers sweeping k
+    can seed each fit from the previous k's solution; see
+    :func:`reconstruction_bound` for why that matters.
+
     Args:
         shape: (N, 2) shape in the caller's coordinate frame.
         model: A fitted :class:`ShapeModel`.
@@ -423,6 +433,8 @@ def project_shape(
             similarity.
         n_fit_iter: Maximum alternating refinement steps. Each step is optimal
             in one block given the other, so the objective is non-increasing.
+        init_transform: Optional starting transform. Defaults to aligning the
+            bare mean shape onto ``shape``.
 
     Returns:
         Tuple ``(coefficients, transform)`` where ``coefficients`` is a (k,)
@@ -445,9 +457,12 @@ def project_shape(
     # Align the model mean onto the observed shape. Fitting in this direction
     # means the transform maps model frame -> caller frame directly, so no
     # inversion is needed to report error in the caller's units.
-    transform = procrustes_fit(
-        model.mean, arr, allow_rotation=model.allow_rotation
-    )
+    if init_transform is None:
+        transform = procrustes_fit(
+            model.mean, arr, allow_rotation=model.allow_rotation
+        )
+    else:
+        transform = init_transform
     if k == 0:
         return np.zeros(0), transform
 
@@ -481,7 +496,11 @@ def project_shape(
 
 
 def reconstruct_shape(
-    shape: np.ndarray, model: ShapeModel, k: int, n_fit_iter: int = 8
+    shape: np.ndarray,
+    model: ShapeModel,
+    k: int,
+    n_fit_iter: int = 8,
+    init_transform: Optional[Similarity] = None,
 ) -> np.ndarray:
     """Best k-component reconstruction of ``shape``, in the caller's frame.
 
@@ -490,15 +509,32 @@ def reconstruct_shape(
         model: A fitted :class:`ShapeModel`.
         k: Number of components to use.
         n_fit_iter: Alternating refinement steps, see :func:`project_shape`.
+        init_transform: Optional starting transform, see :func:`project_shape`.
 
     Returns:
         (N, 2) reconstruction, directly comparable to ``shape``.
     """
-    coeffs, transform = project_shape(shape, model, k, n_fit_iter=n_fit_iter)
+    recon, _ = _reconstruct_with_transform(
+        shape, model, k, n_fit_iter=n_fit_iter, init_transform=init_transform
+    )
+    return recon
+
+
+def _reconstruct_with_transform(
+    shape: np.ndarray,
+    model: ShapeModel,
+    k: int,
+    n_fit_iter: int = 8,
+    init_transform: Optional[Similarity] = None,
+) -> tuple:
+    """Reconstruct and also return the fitted transform, for warm starting."""
+    coeffs, transform = project_shape(
+        shape, model, k, n_fit_iter=n_fit_iter, init_transform=init_transform
+    )
     flat = model.mean.reshape(-1).copy()
     if k > 0:
         flat = flat + model.components[:, :k] @ coeffs
-    return transform.apply(flat.reshape(model.num_landmarks, 2))
+    return transform.apply(flat.reshape(model.num_landmarks, 2)), transform
 
 
 def reconstruction_bound(
@@ -516,6 +552,35 @@ def reconstruction_bound(
 
     ``shapes`` should be disjoint from the shapes ``model`` was fitted on;
     otherwise the result is in-sample and optimistically biased.
+
+    Monotonicity
+    ------------
+    ``mean_error`` is guaranteed non-increasing in k. That is not automatic: the
+    joint fit over (transform, coefficients) is non-convex because it contains
+    the product of the scale and the coefficient vector, so an independent
+    alternation at each k can converge to a worse local optimum with MORE
+    components. Observed on real data whose shapes sit far from the model
+    (mixed classes with rotation left in): error rose from 24.2 to 26.2 px
+    between k=1 and k=2, which is incoherent for something labelled a bound.
+
+    Two measures, both needed:
+
+    1. Each k is fitted twice, from a cold start (align the bare mean) and from
+       a warm start (the transform behind the best result so far), keeping
+       whichever is better. Neither start dominates -- measured on real data,
+       warm beat cold at some k and lost by ~0.06 px at others -- and for a
+       bound, looser is the dangerous direction, so taking the minimum is
+       strictly preferable to picking one.
+    2. A per-shape running minimum across ascending k. This is legitimate, not
+       a cosmetic clamp: the solution found at any k' <= k is feasible at k
+       (pad the coefficients with zeros), so a value achieved at k' is an upper
+       bound on the true optimum at k. Reporting it therefore keeps the
+       quantity a valid bound while making it coherent in k.
+
+    ``k_values`` is sorted internally for the chain to be well defined; results
+    come back in the caller's requested order. ``median_error`` and
+    ``p90_error`` are order statistics over per-landmark errors and are only
+    near-monotone: a shape's mean can fall while one of its landmarks worsens.
 
     Args:
         shapes: (S, N, 2) held-out shapes in the caller's units.
@@ -549,10 +614,61 @@ def reconstruction_bound(
 
     if k_values is None:
         k_values = list(range(0, model.max_useful_k() + 1))
-    k_values = [int(k) for k in k_values]
+    requested = [int(k) for k in k_values]
+
+    # Ascending order is required for the running-minimum chain to be valid.
+    # Dedupe so a repeated k cannot disturb the ordering assumption.
+    ascending = sorted(set(requested))
+
+    n_shapes = arr.shape[0]
+    # errors_by_k[k] is the (S, N) per-landmark error matrix at that k.
+    errors_by_k = {}
+    # Best-so-far state per shape, carried forward across ascending k.
+    best_per_landmark = [None] * n_shapes
+    best_mean = np.full(n_shapes, np.inf)
+    best_transform = [None] * n_shapes
+
+    for k in ascending:
+        rows = []
+        for i, shape in enumerate(arr):
+            candidates = []
+
+            # Cold start: align the bare mean shape.
+            recon, transform = _reconstruct_with_transform(
+                shape, model, k, n_fit_iter=n_fit_iter, init_transform=None
+            )
+            candidates.append((recon, transform))
+
+            # Warm start: reuse the transform behind the best result so far.
+            if best_transform[i] is not None:
+                recon_w, transform_w = _reconstruct_with_transform(
+                    shape,
+                    model,
+                    k,
+                    n_fit_iter=n_fit_iter,
+                    init_transform=best_transform[i],
+                )
+                candidates.append((recon_w, transform_w))
+
+            per_landmark, mean_err, chosen_transform = None, np.inf, None
+            for recon_c, transform_c in candidates:
+                errs = np.linalg.norm(recon_c - shape, axis=1)
+                m = float(errs.mean())
+                if m < mean_err:
+                    per_landmark, mean_err, chosen_transform = errs, m, transform_c
+
+            # Running minimum: a solution achieved at any k' <= k stays feasible
+            # at k, so never report worse than the best seen so far.
+            if mean_err < best_mean[i]:
+                best_per_landmark[i] = per_landmark
+                best_mean[i] = mean_err
+                best_transform[i] = chosen_transform
+
+            rows.append(best_per_landmark[i])
+        errors_by_k[k] = np.stack(rows)
 
     result = {
-        "k_values": k_values,
+        "k_values": requested,
         "mean_error": [],
         "median_error": [],
         "p90_error": [],
@@ -561,17 +677,8 @@ def reconstruction_bound(
         "n_eval": int(arr.shape[0]),
     }
 
-    for k in k_values:
-        # (S, N) per-landmark Euclidean errors.
-        errors = np.stack(
-            [
-                np.linalg.norm(
-                    reconstruct_shape(s, model, k, n_fit_iter=n_fit_iter) - s,
-                    axis=1,
-                )
-                for s in arr
-            ]
-        )
+    for k in requested:
+        errors = errors_by_k[k]
         result["mean_error"].append(float(errors.mean()))
         result["median_error"].append(float(np.median(errors)))
         result["p90_error"].append(float(np.percentile(errors, 90)))

@@ -1,0 +1,46 @@
+{
+  "_comment": "Shape-prior experiment. Single-variable change from lizard_heatmap_baseline.json: variant heatmap -> heatmap_shape, which projects the decoded coordinates onto a point-distribution model. PREREQUISITE: generate the basis first with `python -m landmarking.scripts.shape_bound_report --config landmarking/config/defaults/lizard.json --by-class --save-basis runs/lizard/shape_bound/shape_basis.npz`. shape_components=8 sits between the measured oracle bound at k=6 (2.6px finger / 2.1px toe) and k=9 (1.4 / 1.2), against ~6.5px unconstrained.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "heatmap_shape",
+    "heatmap_size": 128,
+    "decode_mode": "windowed",
+    "decode_radius": 5,
+    "bn_momentum": 0.1,
+    "shape_basis_path": "./runs/lizard/shape_bound/shape_basis.npz",
+    "shape_basis_group": "all",
+    "shape_basis_variant": "similarity",
+    "shape_components": 8,
+    "shape_n_sigma": 3.0,
+    "shape_blend": 1.0,
+    "shape_fit_iters": 20
+  },
+  "training": {
+    "epochs": 60,
+    "batch_size": 8,
+    "val_batch_size": 16,
+    "lr": 1e-4,
+    "lr_backbone": 1e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [30, 50],
+    "lr_gamma": 0.1,
+    "grad_clip": 5.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "heatmap_loss_mode": "ce"
+  }
+}
