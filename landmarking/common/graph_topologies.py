@@ -22,6 +22,68 @@ def make_chain_edge_index(num_landmarks: int) -> torch.Tensor:
     return torch.tensor(edges, dtype=torch.long).t().contiguous()
 
 
+def make_lizard_ladder_edge_index(num_landmarks: int = 9) -> torch.Tensor:
+    """Bilateral 'ladder' graph for the 9-point Lizard toe/finger.
+
+    The Lizard landmarks are anatomically bilateral pairs running up the length
+    of the digit, plus a single tip:
+
+        0---1        (base pair)
+        |   |
+        2---3
+        |   |
+        4---5
+        |   |
+        6---7        (top pair)
+         \\ /
+          8          (tip)
+
+    A plain chain (0-1-2-...-8) only encodes "next landmark up the digit" and
+    misses two constraints that are strong priors for this anatomy:
+      - RUNGS: (0,1), (2,3), (4,5), (6,7) are lateral partners at the same level.
+        Their separation (digit width) and midpoint (digit centerline) are
+        low-variance shape cues a chain cannot represent.
+      - RAILS: the two sides run monotonically tip-ward — even indices
+        0-2-4-6 form the left rail, odd indices 1-3-5-7 the right rail.
+    Both top rail points connect to the tip (8), closing the ladder.
+
+    Encoding these lowers the geometric residual variance (sigma2_geo in the
+    project's rho framework), which is exactly the quantity a graph prior
+    exploits. All edges are bidirectional.
+
+    Args:
+        num_landmarks: Must be 9 (the ladder is defined for the 9-point layout).
+
+    Returns:
+        Edge index tensor of shape (2, 2*E), dtype torch.long.
+
+    Raises:
+        ValueError: If num_landmarks != 9.
+    """
+    if num_landmarks != 9:
+        raise ValueError(
+            f"lizard_ladder topology is defined for 9 landmarks, got "
+            f"{num_landmarks}."
+        )
+
+    undirected = [
+        # Rungs: bilateral pairs at each level.
+        (0, 1), (2, 3), (4, 5), (6, 7),
+        # Left rail (even indices) up the digit.
+        (0, 2), (2, 4), (4, 6),
+        # Right rail (odd indices) up the digit.
+        (1, 3), (3, 5), (5, 7),
+        # Top pair to the tip.
+        (6, 8), (7, 8),
+    ]
+
+    edges = []
+    for u, v in undirected:
+        edges.append([u, v])
+        edges.append([v, u])
+    return torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+
 def make_wflw_edge_index() -> torch.Tensor:
     """Anatomically correct WFLW 98-point facial landmark graph.
 
@@ -283,10 +345,10 @@ def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indic
     """Registry lookup for graph topologies.
 
     Args:
-        topology_name: Name of the topology. Supported: 'chain', 'wflw',
-                       'cephalometric'.
-        num_landmarks: Required when topology_name == 'chain'. Ignored for
-                       'wflw' and 'cephalometric'.
+        topology_name: Name of the topology. Supported: 'chain', 'lizard_ladder',
+                       'wflw', 'cephalometric'.
+        num_landmarks: Required when topology_name == 'chain'. Must be 9 for
+                       'lizard_ladder'. Ignored for 'wflw' and 'cephalometric'.
         landmark_indices: When provided with 'wflw' topology, creates a
                          subsampled WFLW graph preserving anatomical groupings.
                          When provided with 'cephalometric' topology and fewer
@@ -300,7 +362,7 @@ def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indic
         KeyError: If topology_name is not a known topology.
         ValueError: If topology_name == 'chain' and num_landmarks is None.
     """
-    known = ["chain", "wflw", "cephalometric"]
+    known = ["chain", "lizard_ladder", "wflw", "cephalometric"]
 
     if topology_name == "chain":
         if num_landmarks is None:
@@ -308,6 +370,9 @@ def get_edge_index(topology_name: str, num_landmarks: int = None, landmark_indic
                 "num_landmarks is required for the 'chain' topology"
             )
         return make_chain_edge_index(num_landmarks)
+    elif topology_name == "lizard_ladder":
+        n = num_landmarks if num_landmarks is not None else 9
+        return make_lizard_ladder_edge_index(n)
     elif topology_name == "wflw":
         if landmark_indices and len(landmark_indices) < 98:
             return make_subsampled_wflw_edge_index(landmark_indices)

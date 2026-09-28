@@ -292,6 +292,88 @@ def heatmap_loss(
     return hm_loss + coord_weight * coord_loss
 
 
+def _gaussian_target_dist(
+    gt_coords: torch.Tensor, heatmap_size: int, sigma: float
+) -> torch.Tensor:
+    """Normalized (sum-to-1) Gaussian target distribution per landmark.
+
+    Shared helper for cross-entropy heatmap terms. Returns (B, K, H*W) where each
+    landmark's row sums to 1, suitable as the target of a cross entropy against a
+    predicted log-distribution.
+    """
+    B, K, _ = gt_coords.shape
+    device = gt_coords.device
+    px = gt_coords[:, :, 0] * (heatmap_size - 1)
+    py = gt_coords[:, :, 1] * (heatmap_size - 1)
+    ys = torch.arange(heatmap_size, device=device, dtype=torch.float32)
+    xs = torch.arange(heatmap_size, device=device, dtype=torch.float32)
+    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+    dx = grid_x.unsqueeze(0).unsqueeze(0) - px.unsqueeze(-1).unsqueeze(-1)
+    dy = grid_y.unsqueeze(0).unsqueeze(0) - py.unsqueeze(-1).unsqueeze(-1)
+    gt = torch.exp(-(dx ** 2 + dy ** 2) / (2 * sigma ** 2)).view(B, K, -1)
+    return gt / gt.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+
+
+def graph_prior_fusion_loss(
+    appearance_logits: torch.Tensor,
+    fused_logits: torch.Tensor,
+    pred_coords: torch.Tensor,
+    gt_coords: torch.Tensor,
+    heatmap_size: int,
+    sigma: float = 1.5,
+    coord_weight: float = 100.0,
+    fused_ce_weight: float = 1.0,
+) -> torch.Tensor:
+    """Loss for graph_prior_fusion: appearance CE + fused CE + coordinate MSE.
+
+    The base ``heatmap_loss`` supervises only the APPEARANCE head (its cross
+    entropy is computed on ``appearance_logits``) plus a coordinate MSE on the
+    fused-decoded coordinates. In that setup the graph prior's ONLY learning
+    signal is the scalar coordinate term, while the appearance head gets a full
+    distributional gradient — a lopsided objective that lets a well-trained
+    heatmap dominate a weakly-trained prior, so the fused output can underperform
+    pure appearance.
+
+    This loss adds a cross-entropy term on the FUSED log-posterior
+    (``log_softmax(H) + log_prior``, exposed by the model as ``last_fused_logits``)
+    against the same normalized Gaussian target. The prior now receives a
+    distributional gradient: sharpening/relocating the posterior toward the true
+    location is rewarded directly, not only through soft-argmax coordinates.
+
+    Total = CE(appearance) + fused_ce_weight * CE(fused) + coord_weight * MSE(coords).
+
+    Args:
+        appearance_logits: (B, N, H, W) raw appearance-head logits.
+        fused_logits: (B, N, H, W) fused log-posterior (already log-space).
+        pred_coords: (B, N, 2) coordinates decoded from the fused posterior, [0,1].
+        gt_coords: (B, N, 2) ground-truth coordinates in [0, 1].
+        heatmap_size: Spatial size of the target heatmaps (H = W).
+        sigma: Gaussian sigma for the target heatmap.
+        coord_weight: Weight on the coordinate MSE term.
+        fused_ce_weight: Weight on the fused-posterior CE term. 0.0 recovers the
+            appearance-CE + coord-MSE objective (prior via coord loss only).
+
+    Returns:
+        Scalar combined loss.
+    """
+    B, N, H, W = appearance_logits.shape
+    tgt = _gaussian_target_dist(gt_coords, heatmap_size, sigma)  # (B, N, HW)
+
+    # Appearance-head cross entropy (same as heatmap_loss mode="ce").
+    app_logp = F.log_softmax(appearance_logits.view(B, N, -1), dim=-1)
+    app_ce = -(tgt * app_logp).sum(dim=-1).mean()
+
+    # Fused-posterior cross entropy. fused_logits are already log-space
+    # (log_softmax(H) + log_prior); renormalize over space so it is a proper
+    # log-distribution before the CE, keeping the term scale-comparable to app_ce.
+    fused_logp = F.log_softmax(fused_logits.view(B, N, -1), dim=-1)
+    fused_ce = -(tgt * fused_logp).sum(dim=-1).mean()
+
+    coord_loss = F.mse_loss(pred_coords, gt_coords)
+
+    return app_ce + fused_ce_weight * fused_ce + coord_weight * coord_loss
+
+
 def pipnet_loss(
     cls: torch.Tensor,
     off_x: torch.Tensor,

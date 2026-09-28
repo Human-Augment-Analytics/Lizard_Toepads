@@ -205,6 +205,19 @@ class TrainingConfig:
     structural_loss_weight: float = 0.0
     structural_dist_weight: float = 1.0
     structural_angle_weight: float = 1.0
+    # Horizontal-flip augmentation probability for the Lizard dataset. The flip
+    # relabels bilateral pairs (0<->1, 2<->3, 4<->5, 6<->7) so it is label-correct
+    # for the toe/finger anatomy. 0.0 disables (previous behaviour); 0.5 is the
+    # usual setting and roughly doubles effective data on the ~800-sample set.
+    # Only applies when the dataset is built with augment=True (training).
+    flip_prob: float = 0.5
+    # Weight on the fused-posterior cross-entropy term for graph_prior_fusion.
+    # The base heatmap CE trains only the APPEARANCE head; without this term the
+    # graph prior is supervised solely by the weak coordinate MSE. This term
+    # applies the same CE (vs the normalized Gaussian target) to the FUSED
+    # log-posterior, giving the prior a distributional gradient. 0.0 disables it
+    # (recovers the prior-via-coord-loss-only behaviour).
+    fused_ce_weight: float = 1.0
 
 
 @dataclass

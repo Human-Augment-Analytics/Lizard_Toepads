@@ -14,6 +14,7 @@ import albumentations as A
 
 from ..base import BaseDataset
 from ...common.heatmap_utils import generate_gaussian_heatmap
+from .topology import get_flip_permutation
 
 
 class LizardDataset(BaseDataset):
@@ -41,6 +42,7 @@ class LizardDataset(BaseDataset):
         mode: str = "coord",
         heatmap_size: int = 128,
         sigma: float = 4.0,
+        flip_prob: float = 0.5,
     ):
         self.paths = pt_paths
         self.input_size = input_size
@@ -49,6 +51,12 @@ class LizardDataset(BaseDataset):
         self.mode = mode
         self.heatmap_size = heatmap_size
         self.sigma = sigma
+        # Horizontal-flip probability. Flip is handled explicitly (not via
+        # albumentations) so the bilateral pairs can be RELABELED via the flip
+        # permutation; a raw mirror without relabeling corrupts left/right
+        # landmark identities. Set flip_prob=0 to disable.
+        self.flip_prob = flip_prob if augment else 0.0
+        self.flip_perm = get_flip_permutation(num_landmarks)
 
         # Augmentation pipeline with keypoint awareness
         if augment:
@@ -107,6 +115,18 @@ class LizardDataset(BaseDataset):
         H, W = img.shape[:2]
         coords[:, 0] = np.clip(coords[:, 0], 0, W - 1)
         coords[:, 1] = np.clip(coords[:, 1], 0, H - 1)
+
+        # Horizontal flip with bilateral relabeling. Done BEFORE the keypoint
+        # augmentation so downstream steps see label-correct coordinates. Mirror
+        # x about the image width, then swap each bilateral pair's identity so a
+        # left-side point keeps a left-side label after the mirror.
+        was_flipped = False
+        if self.flip_prob > 0.0 and np.random.rand() < self.flip_prob:
+            img = np.ascontiguousarray(img[:, ::-1, :])
+            coords[:, 0] = (W - 1) - coords[:, 0]
+            coords = coords[self.flip_perm]
+            was_flipped = True
+
         keypoints = coords.tolist()
 
         # Apply augmentation with retry on keypoint dropout
@@ -134,6 +154,7 @@ class LizardDataset(BaseDataset):
             "orig_size": data.get(
                 "orig_size", torch.tensor([H, W], dtype=torch.float32)
             ),
+            "was_flipped": torch.tensor(was_flipped, dtype=torch.bool),
         }
         # Include back-projection info if available
         if "M" in data:

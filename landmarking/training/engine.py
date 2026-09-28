@@ -22,6 +22,7 @@ from ..models.registry import get_model
 from .loss import (
     landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss,
     heatmap_star_loss, cascade_heatmap_loss, structural_loss, chain_triples,
+    graph_prior_fusion_loss,
 )
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
@@ -570,6 +571,7 @@ class TrainingEngine:
                 input_size=cfg.dataset.input_size,
                 num_landmarks=cfg.dataset.num_landmarks,
                 augment=True,
+                flip_prob=getattr(cfg.training, "flip_prob", 0.5),
             )
             val_ds = LizardDataset(
                 pt_paths=val_paths,
@@ -713,18 +715,34 @@ class TrainingEngine:
                 # Pure heatmap MSE loss — no coordinate loss
                 loss = torch.nn.functional.mse_loss(pred_heatmaps, target_hm)
             elif self._is_graph_cond_heatmap:
-                # Graph-conditioned heatmap: forward(imgs, edge_index) → (heatmaps, coords)
+                # Graph-conditioned heatmap family: forward(imgs, edge_index) →
+                # (heatmaps, coords). graph_prior_fusion shares this interface but
+                # needs an extra CE term on its fused posterior (see below).
                 imgs, coords, *rest = batch
                 imgs = imgs.to(self.device)
                 coords = coords.to(self.device)
                 B = imgs.shape[0]
 
                 pred_heatmaps, pred_coords = self.model(imgs, self.edge_index)
-                loss = heatmap_loss(
-                    pred_heatmaps, pred_coords, coords,
-                    cfg.model.heatmap_size, cfg.model.sigma,
-                    mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
-                )
+                if self._is_graph_prior_fusion and self.model.prior_active:
+                    # Appearance CE (on pred_heatmaps) + fused CE (on the model's
+                    # stashed fused log-posterior) + coordinate MSE. When the prior
+                    # is in warm-up (prior_active False) last_fused_logits equals
+                    # the appearance logits, so fall through to plain heatmap_loss
+                    # to avoid double-counting the same CE.
+                    loss = graph_prior_fusion_loss(
+                        pred_heatmaps,
+                        self.model.last_fused_logits,
+                        pred_coords, coords,
+                        cfg.model.heatmap_size, cfg.model.sigma,
+                        fused_ce_weight=getattr(cfg.training, "fused_ce_weight", 1.0),
+                    )
+                else:
+                    loss = heatmap_loss(
+                        pred_heatmaps, pred_coords, coords,
+                        cfg.model.heatmap_size, cfg.model.sigma,
+                        mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
+                    )
             elif self._is_heatmap_on_coords:
                 # Heatmap model on non-WFLW dataset: forward(imgs) → (heatmaps, coords)
                 imgs, coords, *rest = batch
