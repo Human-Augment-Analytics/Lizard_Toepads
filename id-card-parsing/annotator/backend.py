@@ -30,7 +30,7 @@ class AnnotatorBackend:
     def existing_record(self, image_id: str) -> AnnotationRecord | None:
         return load_record(image_id, self.config.out_dir)
 
-    def export(self, image_id: str, preview: PreviewImage, obb: OBB) -> Path:
+    def export(self, image_id: str, preview: PreviewImage, obb: OBB, *, overwrite=True, cancel=None) -> Path:
         """Assemble and persist an AnnotationRecord for one image.
 
         Corner coordinates are clamped into ``[0, target_resolution]`` so the
@@ -54,4 +54,4 @@ class AnnotatorBackend:
             obb_xywhr=[clamped.cx, clamped.cy, clamped.w, clamped.h, clamped.angle],
             obb_corners=corners.tolist(),
         )
-        return save_record(record, self.config.out_dir)
+        return save_record(record, self.config.out_dir, overwrite=overwrite, cancel=cancel)

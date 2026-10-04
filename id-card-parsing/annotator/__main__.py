@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from .backend import AnnotatorBackend
-from .config import AnnotatorConfig
 from .ui.app import App
 
 
 def main() -> None:
-    config = AnnotatorConfig()
-    backend = AnnotatorBackend(config)
-    App(backend).mainloop()
+    app = App()
+    while not app._closed.is_set():
+        try:
+            app.mainloop()
+            break
+        except KeyboardInterrupt:
+            app._close()
 
 
 if __name__ == "__main__":
