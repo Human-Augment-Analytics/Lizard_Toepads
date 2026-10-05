@@ -9,12 +9,19 @@ box back to original pixels is self-contained.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
 @dataclass
 class AnnotationRecord:
+    """Store an image's annotation geometry and coordinate transforms.
+
+    Includes the image ID, target resolution, forward and inverse affine
+    transforms, and oriented box coordinates and corners.
+    """
     image_id: str
     target_resolution: int
     transform: list[list[float]]          # 2x3 original -> preview
@@ -30,12 +37,38 @@ class AnnotationRecord:
         return cls(**json.loads(s))
 
 
-def save_record(record: AnnotationRecord, out_dir: Path) -> Path:
-    """Write ``{image_id}.json`` into ``out_dir`` (created if needed)."""
+def save_record(record: AnnotationRecord, out_dir: Path, *, overwrite=True, cancel=None) -> Path:
+    """Save a complete image_id JSON record without exposing a partially written file.
+
+    Write and flush a temporary file in the destination directory, then save
+    it atomically. Replace an existing annotation when overwrite=True; otherwise,
+    raise FileExistsError if the destination already exists.
+
+    If cancellation is observed before saving, raise InterruptedError.
+    Always remove the temporary file and return the destination path on success.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{record.image_id}.json"
-    path.write_text(record.to_json(), encoding="utf-8")
+    payload = record.to_json()
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=out_dir,
+                                         prefix=f".{record.image_id}.", suffix=".tmp", delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError("Save cancelled before committing the file")
+        if overwrite:
+            os.replace(temp_path, path)
+        else:
+            # Prevent overwrite
+            os.link(temp_path, path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
     return path
 
 

@@ -17,6 +17,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 class AnnotatorConfig:
     data_dir: Path = _ROOT / "data"
     out_dir: Path = _ROOT / "annotations"
+    template_path: Path = _ROOT / "template" / "template.jpg"
     target_resolution: int = 1024
 
     def __post_init__(self) -> None:

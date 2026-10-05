@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+import threading
 
 from annotator.geometry import apply_affine, build_transform, invert_affine
 from annotator.obb import OBB
@@ -46,3 +48,49 @@ def test_inverse_corners_land_in_original_bounds():
     orig_corners = apply_affine(m_inv, np.array(rec.obb_corners))
     assert np.all(orig_corners[:, 0] >= 0) and np.all(orig_corners[:, 0] <= orig_w)
     assert np.all(orig_corners[:, 1] >= 0) and np.all(orig_corners[:, 1] <= orig_h)
+
+
+def test_failed_atomic_save_preserves_existing_record(tmp_path, monkeypatch):
+    rec = _sample_record()
+    path = save_record(rec, tmp_path)
+    before = path.read_bytes()
+    rec.obb_xywhr[0] += 10
+    def fail(*args):
+        raise OSError("Disk write failed")
+    monkeypatch.setattr('annotator.record.os.replace', fail)
+    with pytest.raises(OSError):
+        save_record(rec, tmp_path)
+    assert path.read_bytes() == before
+    assert list(tmp_path.glob('*.tmp')) == []
+
+
+def test_exclusive_save_never_overwrites_existing_file(tmp_path):
+    rec = _sample_record()
+    path = save_record(rec, tmp_path)
+    before = path.read_bytes()
+    rec.obb_xywhr[0] += 10
+    with pytest.raises(FileExistsError):
+        save_record(rec, tmp_path, overwrite=False)
+    assert path.read_bytes() == before
+    assert list(tmp_path.glob('*.tmp')) == []
+
+
+def test_cancellation_before_commit_leaves_no_partial_file(tmp_path):
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(InterruptedError):
+        save_record(_sample_record(), tmp_path, cancel=cancel)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cancellation_during_write_preserves_previous_record(tmp_path, monkeypatch):
+    rec = _sample_record()
+    path = save_record(rec, tmp_path)
+    before = path.read_bytes()
+    cancel = threading.Event()
+    monkeypatch.setattr('annotator.record.os.fsync', lambda fd: cancel.set())
+    rec.obb_xywhr[0] += 10
+    with pytest.raises(InterruptedError):
+        save_record(rec, tmp_path, cancel=cancel)
+    assert path.read_bytes() == before
+    assert list(tmp_path.glob('*.tmp')) == []
