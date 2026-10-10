@@ -1,0 +1,4 @@
+{
+  "description": "Define reviewed fields as normalized [left, top, right, bottom] rectangles on an upright rectified card. Empty until the team agrees on the card layout.",
+  "fields": {}
+}

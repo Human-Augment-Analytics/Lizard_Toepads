@@ -1,0 +1,38 @@
+# Paths resolve relative to the repository root.
+images: id-card-parsing/data
+annotations: id-card-parsing/annotations
+manifest: id-card-parsing/splits.csv
+output: data/id_cards/v1
+# Reviewed normalized field rectangles go here. Never use guessed field positions.
+template: configs/id_card_fields.json
+card_size: [800, 1200]  # width, height; agree on orientation and aspect ratio
+scan_max_side: 2048
+train:
+  model: yolo11m-obb.pt
+  epochs: 200
+  batch: 4
+  imgsz: 1280
+  workers: 4
+  device: 0
+  patience: 40
+  seed: 42
+  cache: false
+  amp: true
+  degrees: 15.0
+  translate: 0.1
+  scale: 0.25
+  fliplr: 0.0
+  flipud: 0.0
+  mosaic: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.5
+  hsv_v: 0.3
+  close_mosaic: 0
+  save_period: 5
+ocr:
+  executable: tesseract
+  language: eng
+  psm: 7
+  # CSV: image_id,field,value. Not used for model training.
+  truth: null
+  detection_conf: 0.25

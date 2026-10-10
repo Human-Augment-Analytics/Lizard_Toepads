@@ -335,3 +335,8 @@ Lizard_Toepads/
 
 - [PACE Documentation](Georgia Tech Service Portal)
 - [Ultralytics YOLO](https://www.ultralytics.com/yolo)
+
+### ID-card detection and OCR
+
+See [ID-card pipeline](docs/ID_CARD_PIPELINE.md) for JSON annotation conversion,
+card-only YOLO OBB training, fixed-template field crops, and OCR evaluation.
