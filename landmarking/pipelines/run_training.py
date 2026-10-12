@@ -53,6 +53,20 @@ def parse_args(argv=None):
         help="Override number of training epochs.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Override training (and validation) batch size. Exists because the "
+            "experiment configs are sized for a 48GB cluster GPU: the HRNet "
+            "4-branch fusion is 960 channels at 256x256 for a 512px input, "
+            "which is ~252MB of activations PER SAMPLE, so batch 32 needs tens "
+            "of GB. Lower this to run the same config interactively on a "
+            "desktop GPU without editing the config and desynchronizing an arm "
+            "from its controls."
+        ),
+    )
+    parser.add_argument(
         "--variant",
         type=str,
         default=None,
@@ -79,11 +93,19 @@ def main(argv=None):
         config.training.epochs = args.epochs
     if args.variant is not None:
         config.model.variant = args.variant
+    if args.batch_size is not None:
+        # Applied to BOTH loaders. The experiment configs set batch_size ==
+        # val_batch_size, and leaving validation at the config's larger value
+        # would reintroduce the memory spike this override exists to avoid --
+        # validation forwards the same backbone at the same resolution.
+        config.training.batch_size = args.batch_size
+        config.training.val_batch_size = args.batch_size
 
     logger.info(
         f"Training: dataset={config.dataset.name}, "
         f"variant={config.model.variant}, "
         f"epochs={config.training.epochs}, "
+        f"batch_size={config.training.batch_size}, "
         f"device={config.training.device}"
     )
 

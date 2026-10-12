@@ -1,0 +1,42 @@
+{
+  "_comment": "DECODE-GRANULARITY PROBE, arm 1 of 3. Single-variable change from shape_prior/lizard_heatmap_baseline.json: heatmap_size 128 -> 64, with model.sigma scaled 5.0 -> 2.5 and decode_radius 5 -> 3 so the target width and the decode window keep the same PHYSICAL size (8 canvas px per cell at hm64, so 2.5 cells = 20 canvas px, matching 5 cells at hm128). This is the COARSE arm and it is the most informative one: it is cheap, and if error at 64 is materially worse than at 128 then grid granularity demonstrably costs accuracy on this dataset, which is the premise SimCC rests on. Arm 2 is probe_heatmap_hm256.json; arm 3 is shape_prior/lizard_heatmap_baseline.json unchanged.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "heatmap",
+    "heatmap_size": 64,
+    "sigma": 2.5,
+    "decode_mode": "windowed",
+    "decode_radius": 3,
+    "bn_momentum": 0.1,
+    "heatmap_use_star": false
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
+    "lr_backbone": 1e-4,
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "flip_prob": 0.5,
+    "heatmap_loss_mode": "ce"
+  }
+}

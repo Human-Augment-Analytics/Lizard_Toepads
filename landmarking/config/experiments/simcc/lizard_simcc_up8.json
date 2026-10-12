@@ -1,0 +1,42 @@
+{
+  "_comment": "Bin-resolution arm of the SimCC experiment. Single-variable change from lizard_simcc.json: simcc_upsample 4 -> 8, i.e. 1024 bins per axis = 0.5 canvas px per bin, with simcc_decode_radius doubled (16 bins) so the decode WINDOW covers the same physical +/-8px and resolution is the only thing that changes. simcc_sigma is also doubled (12 bins) to hold the target's physical width at 6px -- leaving it at 6 bins would simultaneously halve the target width and confound the comparison. Purpose: if SimCC beats the heatmap control but up8 is flat against up4, the win came from escaping the input/4 grid and 1px bins are already enough; if up8 keeps improving, localization precision is still the binding constraint and the next lever is backbone output stride, not bin count.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "simcc",
+    "heatmap_size": 128,
+    "simcc_upsample": 8,
+    "simcc_decode_mode": "windowed",
+    "simcc_decode_radius": 16,
+    "simcc_sigma": 12.0,
+    "bn_momentum": 0.1
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
+    "lr_backbone": 1e-4,
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "flip_prob": 0.5,
+    "simcc_coord_weight": 100.0
+  }
+}

@@ -31,6 +31,7 @@ _MODEL_MODULES = [
     "pipnet",                 # "pipnet"
     "hrnet_cascade",          # "hrnet_cascade"
     "shape_projection",       # "heatmap_shape"
+    "hrnet_simcc",            # "simcc"
 ]
 
 for _mod_name in _MODEL_MODULES:

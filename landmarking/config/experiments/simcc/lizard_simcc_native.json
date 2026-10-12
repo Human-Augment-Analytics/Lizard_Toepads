@@ -1,0 +1,42 @@
+{
+  "_comment": "Native-backbone-resolution arm of the SimCC experiment. Single-variable change from lizard_simcc.json: heatmap_size 128 -> 256 with simcc_upsample 4 -> 2. Bin count is therefore IDENTICAL (512 bins = 1 canvas px per bin), and because bins are unchanged, simcc_decode_radius 8 and simcc_sigma 6.0 also keep their same physical meaning (+/-8px window, 6px target) with no rescaling needed. The only thing that changes is the resolution of the intermediate 2D map the marginals are taken from. Motivation: timm hrnet_w18 features_only emits 5 maps at reductions [2,4,8,16,32], so the 4-branch HRNetV2 fusion used by this package sits at input/2 = 256x256 for a 512px canvas. Every Lizard heatmap config sets heatmap_size 128, which DOWNSAMPLES that map 2x before anything is decoded from it -- a factor of 2 of backbone resolution discarded before the readout. This arm marginalizes from the native 256 map instead. Reading the result: if this beats lizard_simcc.json, the intermediate downsample was costing accuracy and the same one-line fix (heatmap_size 128 -> 256) should be applied to the 2D heatmap configs too; if it is flat, 128 cells is sufficient intermediate resolution and the 1-D bins are doing all the work.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "simcc",
+    "heatmap_size": 256,
+    "simcc_upsample": 2,
+    "simcc_decode_mode": "windowed",
+    "simcc_decode_radius": 8,
+    "simcc_sigma": 6.0,
+    "bn_momentum": 0.1
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
+    "lr_backbone": 1e-4,
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "flip_prob": 0.5,
+    "simcc_coord_weight": 100.0
+  }
+}

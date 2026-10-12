@@ -727,3 +727,91 @@ def cascade_heatmap_loss(
 
     total = weighted_sum / float(sum(stage_weights))
     return total, per_stage
+
+
+def _gaussian_target_1d(
+    gt_norm: torch.Tensor, num_bins: int, sigma: float
+) -> torch.Tensor:
+    """Normalized (sum-to-1) 1-D Gaussian target over bins.
+
+    The 1-D counterpart of ``_gaussian_target_dist``. Bin ``i`` is the normalized
+    coordinate ``(i + 0.5) / num_bins``, so a coordinate ``c`` has its centre at
+    bin index ``c * num_bins - 0.5``. This MUST match the bin-centre convention
+    in ``models/hrnet_simcc.decode_simcc``; using ``c * num_bins`` here instead
+    would bias every prediction by half a bin.
+
+    Args:
+        gt_norm: (B, K) ground-truth coordinates along one axis, in [0, 1].
+        num_bins: Number of bins on that axis.
+        sigma: Gaussian sigma in BINS (not pixels, not normalized units).
+
+    Returns:
+        (B, K, num_bins) where each row sums to 1.
+    """
+    device = gt_norm.device
+    centre = gt_norm * num_bins - 0.5                      # (B, K)
+    pos = torch.arange(num_bins, device=device, dtype=torch.float32)
+    d = pos.view(1, 1, -1) - centre.unsqueeze(-1)          # (B, K, num_bins)
+    t = torch.exp(-(d ** 2) / (2 * sigma ** 2))
+    return t / t.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+
+
+def simcc_loss(
+    logits_x: torch.Tensor,
+    logits_y: torch.Tensor,
+    pred_coords: torch.Tensor,
+    gt_coords: torch.Tensor,
+    sigma: float = 6.0,
+    coord_weight: float = 100.0,
+):
+    """SimCC loss: per-axis cross entropy over bins + coordinate MSE.
+
+    Deliberately the 1-D transcription of ``heatmap_loss(mode="ce")``, which is
+    the only heatmap objective in this package measured to actually shape the
+    predicted distribution (the MSE alternative contributes ~0.01% of the
+    gradient -- see that function's docstring). Each axis is treated as a
+    distribution over bins and trained against the normalized Gaussian target:
+
+        -sum_i  target_norm(i) * log_softmax(logits)(i)
+
+    The coordinate MSE term is kept, with the same default weight as
+    ``heatmap_loss``, for the same reason: it is what puts the DECODER in the
+    gradient path. Without it the bins could be well-classified while the
+    windowed soft-argmax readout stays miscalibrated.
+
+    Note on ``sigma``. It is in bins, and bins are much finer than heatmap cells,
+    so the value does NOT carry over from ``model.sigma``. At the Lizard defaults
+    (``heatmap_size`` 128, ``simcc_upsample`` 4) one bin is one canvas pixel, so
+    sigma 6.0 is a 6px-wide target. The 2D Lizard configs use ``sigma: 5.0`` at
+    heatmap_size 128, which is 5 cells = 20 canvas px; matching that breadth here
+    would mean sigma 20, which throws away most of the resolution this head
+    exists to buy.
+
+    Args:
+        logits_x: (B, K, Lx) raw x-axis per-bin logits.
+        logits_y: (B, K, Ly) raw y-axis per-bin logits.
+        pred_coords: (B, K, 2) decoded coordinates in [0, 1].
+        gt_coords: (B, K, 2) ground-truth coordinates in [0, 1].
+        sigma: Gaussian sigma in bins for the target distributions.
+        coord_weight: Weight on the coordinate MSE term.
+
+    Returns:
+        ``(total, ce_x, ce_y, coord_loss)``; ``total`` is the scalar to backprop
+        and the rest are the unweighted components for logging and tests.
+    """
+    num_bins_x = logits_x.shape[-1]
+    num_bins_y = logits_y.shape[-1]
+
+    tgt_x = _gaussian_target_1d(gt_coords[:, :, 0], num_bins_x, sigma)
+    tgt_y = _gaussian_target_1d(gt_coords[:, :, 1], num_bins_y, sigma)
+
+    logp_x = F.log_softmax(logits_x, dim=-1)
+    logp_y = F.log_softmax(logits_y, dim=-1)
+
+    ce_x = -(tgt_x * logp_x).sum(dim=-1).mean()
+    ce_y = -(tgt_y * logp_y).sum(dim=-1).mean()
+
+    coord_loss = F.mse_loss(pred_coords, gt_coords)
+
+    total = ce_x + ce_y + coord_weight * coord_loss
+    return total, ce_x, ce_y, coord_loss

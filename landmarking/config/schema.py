@@ -121,6 +121,29 @@ class ModelConfig:
     num_stages: int = 3
     shared_weights: bool = True
     cascade_width: int = 256
+    # --- SimCC (variant "simcc") only -----------------------------------------
+    # 1-D coordinate classification. num_bins = heatmap_size * simcc_upsample per
+    # axis, so resolution costs O(bins) rather than the O(bins^2) a 2D heatmap
+    # pays. Must be EVEN and >= 2 (the depthwise ConvTranspose1d length
+    # arithmetic only lands exactly for even factors). At heatmap_size 128 and
+    # upsample 4 that is 512 bins over the 512px Lizard canvas -- one bin per
+    # canvas pixel, which removes the input/4 quantization ceiling that every
+    # other heatmap-family variant here is pinned to.
+    simcc_upsample: int = 4
+    # Readout over the bin axis. "windowed" = softmax expectation within
+    # simcc_decode_radius bins of the peak (differentiable AND unbiased).
+    # "global" has exactly the centre-bias pathology documented for the 2D
+    # soft-argmax (a near-uniform softmax over 512 bins has expectation 0.5), so
+    # it is for ablation only. "hard" = argmax bin centre, not differentiable.
+    simcc_decode_mode: str = "windowed"
+    # Window half-width in BINS, not feature cells. At the Lizard defaults one
+    # bin is one canvas pixel, so 8 means +/-8px.
+    simcc_decode_radius: int = 8
+    # Gaussian target width in BINS. Does NOT carry over from model.sigma, which
+    # is in heatmap cells: sigma 5.0 at heatmap_size 128 is 20 canvas px, and
+    # reproducing that breadth here (sigma 20) would discard most of the
+    # resolution this variant exists to buy. 6.0 = a 6px target at the defaults.
+    simcc_sigma: float = 6.0
     # --- Shape projection (variant "heatmap_shape") only -----------------------
     # Constrains decoded coordinates to a point-distribution model fitted offline
     # by landmarking.scripts.shape_bound_report --save-basis. Required: there is
@@ -195,6 +218,11 @@ class TrainingConfig:
     pipnet_star_weight: float = 1.0
     # Weight on the STAR coordinate term when model.heatmap_use_star is True.
     heatmap_star_weight: float = 1.0
+    # Coordinate-MSE weight in simcc_loss, alongside the two per-axis cross
+    # entropies. Same default and same purpose as heatmap_loss's coord_weight:
+    # it is what puts the windowed decoder in the gradient path, so the bins
+    # cannot be well-classified while the readout stays miscalibrated.
+    simcc_coord_weight: float = 100.0
     # Per-stage loss weights for hrnet_cascade intermediate supervision.
     # Empty list => equal weighting across all stages.
     cascade_stage_weights: list = field(default_factory=list)

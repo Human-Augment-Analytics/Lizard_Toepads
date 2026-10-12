@@ -1,0 +1,42 @@
+{
+  "_comment": "DECODE-GRANULARITY PROBE, arm 2 of 3. Run this BEFORE committing to SimCC -- it is the cheap diagnostic that decides whether a finer output grid can pay off at all. Single-variable change from shape_prior/lizard_heatmap_baseline.json: heatmap_size 128 -> 256, with model.sigma scaled 5.0 -> 10.0 so the Gaussian target keeps the same PHYSICAL width (5 cells at hm128 = 20 canvas px = 10 cells at hm256); leaving sigma at 5.0 would halve the target width and confound the comparison. Note this adds decode granularity, NOT backbone resolution: HRNet branch-0 is 128 at input 512, so the 2D map is bilinearly upsampled to 256. That is deliberate, because it is the same thing SimCC's ConvTranspose1d does per axis, so this probe isolates exactly the variable SimCC is betting on. Arm 1 is probe_heatmap_hm64.json, arm 3 is the hm128 control itself. READ: if error falls monotonically 64 -> 128 -> 256, grid granularity is binding and SimCC should pay off. If it is flat 128 -> 256, the ~6.5px baseline is limited by something else (appearance ambiguity or annotation noise) and the effort belongs in shape_prior/ or the init-robustness diagnostic instead.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "heatmap",
+    "heatmap_size": 256,
+    "sigma": 10.0,
+    "decode_mode": "windowed",
+    "decode_radius": 10,
+    "bn_momentum": 0.1,
+    "heatmap_use_star": false
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
+    "lr_backbone": 1e-4,
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "flip_prob": 0.5,
+    "heatmap_loss_mode": "ce"
+  }
+}

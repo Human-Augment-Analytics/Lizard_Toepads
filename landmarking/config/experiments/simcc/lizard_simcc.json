@@ -1,0 +1,42 @@
+{
+  "_comment": "SimCC (1-D coordinate classification) on Lizard. Recipe is copied field-for-field from landmarking/config/experiments/shape_prior/lizard_heatmap_baseline.json -- the setup that produced the established ~6.5px lizard heatmap number (120 epochs, milestones [80,105], batch 32, head LR 1e-3 / backbone 1e-4, grad_clip 1.0, wd 1e-4) -- so the A/B against that config is single-variable: variant heatmap -> simcc, plus the simcc_* keys. RUN THAT CONTROL TOO rather than comparing against the older ~6.5px run, whose metrics artifact was never committed. heatmap_size 128 x simcc_upsample 4 = 512 bins per axis over the 512px canvas, i.e. ONE BIN PER CANVAS PIXEL, which is the point: the 2D heatmap family is pinned at input/4 = 4 canvas px per cell. NOTE graph_topology and flip_pairs are inert for this variant (no graph; the Lizard flip permutation comes from datasets/lizard/topology.py, and flip augmentation is governed by training.flip_prob) -- they are kept at the control's values so the two configs diff cleanly. model.sigma is likewise unused by simcc_loss; simcc_sigma is in BINS and is the one that matters.",
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "/home/hice1/axu39/lizard/Lizard_Toepads/runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "simcc",
+    "heatmap_size": 128,
+    "simcc_upsample": 4,
+    "simcc_decode_mode": "windowed",
+    "simcc_decode_radius": 8,
+    "simcc_sigma": 6.0,
+    "bn_momentum": 0.1
+  },
+  "training": {
+    "epochs": 120,
+    "batch_size": 32,
+    "val_batch_size": 32,
+    "lr": 1e-3,
+    "lr_backbone": 1e-4,
+    "weight_decay": 1e-4,
+    "lr_milestones": [80, 105],
+    "lr_gamma": 0.1,
+    "grad_clip": 1.0,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda",
+    "flip_prob": 0.5,
+    "simcc_coord_weight": 100.0
+  }
+}

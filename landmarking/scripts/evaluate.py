@@ -79,6 +79,12 @@ def parse_args(argv=None):
 # fell through to the 3-argument call and raised a TypeError at eval time.
 GRAPH_COND_HEATMAP_VARIANTS = ("graph_cond_heatmap", "graph_prior_fusion")
 
+# SimCC returns a THREE-element tuple (logits_x, logits_y, coords) rather than
+# the heatmap family's (heatmaps, coords). Every forward-dispatch site below has
+# to special-case it; a `_, pred = model(imgs)` would raise on unpacking, which
+# is the intended loud failure rather than a silent wrong-tensor bug.
+SIMCC_VARIANTS = ("simcc",)
+
 
 def build_model_kwargs(config) -> dict:
     """Construct model kwargs for evaluation, mirroring TrainingEngine.setup().
@@ -142,6 +148,20 @@ def build_model_kwargs(config) -> dict:
             "shape_n_sigma": getattr(config.model, "shape_n_sigma", 3.0),
             "shape_blend": getattr(config.model, "shape_blend", 1.0),
             "shape_fit_iters": getattr(config.model, "shape_fit_iters", 20),
+        })
+        return kwargs
+
+    if variant == "simcc":
+        # Mirror TrainingEngine.setup. heatmap_size and simcc_upsample together
+        # fix num_bins, which sets the ConvTranspose1d output length -- a
+        # mismatch here builds a different architecture than the checkpoint.
+        kwargs.update({
+            "pretrained": False,  # weights come from the checkpoint
+            "heatmap_size": getattr(config.model, "heatmap_size", 128),
+            "simcc_upsample": getattr(config.model, "simcc_upsample", 4),
+            "simcc_decode_mode": getattr(config.model, "simcc_decode_mode", "windowed"),
+            "simcc_decode_radius": getattr(config.model, "simcc_decode_radius", 8),
+            "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
         })
         return kwargs
 
@@ -228,6 +248,9 @@ def evaluate_wflw_gcn(model, test_loader, mean_shape, edge_index, device, num_la
             if variant in GRAPH_COND_HEATMAP_VARIANTS:
                 # forward(imgs, edge_index) -> (heatmaps, coords); no init coords.
                 _, pred_coords = model(imgs, edge_index)
+            elif variant in SIMCC_VARIANTS:
+                # forward(imgs) -> (logits_x, logits_y, coords).
+                _, _, pred_coords = model(imgs)
             else:
                 # Mean shape initialization (no noise at eval)
                 if mean_shape is not None:
@@ -338,6 +361,7 @@ def evaluate_cephalometric_split(
     num_landmarks = config.dataset.num_landmarks
     is_coord_only = config.model.variant in ("hrnet_coord",)
     is_graph_cond_heatmap = config.model.variant in GRAPH_COND_HEATMAP_VARIANTS
+    is_simcc = config.model.variant in SIMCC_VARIANTS
 
     radial_errors_mm = []
     n_samples = 0
@@ -354,6 +378,9 @@ def evaluate_cephalometric_split(
             # Variant-aware forward pass (mirror the TrainingEngine).
             if is_graph_cond_heatmap:
                 _, pred = model(imgs, edge_index)
+            elif is_simcc:
+                # forward(imgs) -> (logits_x, logits_y, coords).
+                _, _, pred = model(imgs)
             elif is_heatmap:
                 # Heatmap model on coords dataset: forward(imgs) -> (hm, coords)
                 _, pred = model(imgs)
@@ -635,6 +662,9 @@ def main(argv=None):
                 if is_pipnet:
                     # Direct or neighbor-averaged decode per --no-merge.
                     pred = model.predict_coords(imgs, merge=pip_merge)
+                elif config.model.variant in SIMCC_VARIANTS:
+                    # forward(imgs) -> (logits_x, logits_y, coords).
+                    _, _, pred = model(imgs)
                 elif config.model.variant in ("heatmap", "heatmap_shape"):
                     # HRNet heatmap: forward(imgs) -> (heatmaps, coords). Works
                     # for both plain and STAR variants (forward is unchanged;

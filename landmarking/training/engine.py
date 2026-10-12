@@ -22,7 +22,7 @@ from ..models.registry import get_model
 from .loss import (
     landmark_loss, heatmap_loss, star_loss, pipnet_loss, pipnet_star_loss,
     heatmap_star_loss, cascade_heatmap_loss, structural_loss, chain_triples,
-    graph_prior_fusion_loss,
+    graph_prior_fusion_loss, simcc_loss,
 )
 from .utils import set_seed, get_device, make_param_groups, make_output_dir
 from .visualization import save_training_overlays
@@ -205,7 +205,7 @@ class TrainingEngine:
             "num_landmarks": cfg.dataset.num_landmarks,
         }
         # GCN-specific kwargs
-        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion", "pipnet", "hrnet_cascade"):
+        if cfg.model.variant not in ("heatmap", "hrnet_coord", "stacked_hourglass", "vit", "graph_cond_heatmap", "graph_prior_fusion", "pipnet", "hrnet_cascade", "simcc"):
             model_kwargs.update({
                 "feat_dim": cfg.model.feat_dim,
                 "gnn_hidden": cfg.model.gnn_hidden,
@@ -252,6 +252,14 @@ class TrainingEngine:
                 "shape_n_sigma": getattr(cfg.model, "shape_n_sigma", 3.0),
                 "shape_blend": getattr(cfg.model, "shape_blend", 1.0),
                 "shape_fit_iters": getattr(cfg.model, "shape_fit_iters", 20),
+            })
+        if cfg.model.variant == "simcc":
+            model_kwargs.update({
+                "heatmap_size": getattr(cfg.model, "heatmap_size", 128),
+                "simcc_upsample": getattr(cfg.model, "simcc_upsample", 4),
+                "simcc_decode_mode": getattr(cfg.model, "simcc_decode_mode", "windowed"),
+                "simcc_decode_radius": getattr(cfg.model, "simcc_decode_radius", 8),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
             })
         if cfg.model.variant == "hrnet_cascade":
             model_kwargs.update({
@@ -304,6 +312,12 @@ class TrainingEngine:
         # graph_prior_fusion needs two extras the shared path doesn't: a fusion
         # warm-up toggle and Sigma monitoring for collapse detection.
         self._is_graph_prior_fusion = cfg.model.variant == "graph_prior_fusion"
+
+        # SimCC: image-only forward -> (logits_x, logits_y, coords); loss is the
+        # two per-axis cross entropies plus a coordinate MSE. Kept off the
+        # heatmap-family flags on purpose -- it shares the CE framing but not the
+        # (heatmaps, coords) forward contract or the 2D Gaussian target.
+        self._is_simcc = cfg.model.variant == "simcc"
 
         # PIPNet: image-only forward returning five raw maps; loss = pipnet_loss.
         # Requires a mean shape to derive neighbor indices (get_meanface).
@@ -785,6 +799,19 @@ class TrainingEngine:
                     mode=getattr(cfg.training, "heatmap_loss_mode", "ce"),
                     stage_weights=getattr(cfg.training, "cascade_stage_weights", None),
                 )[0]
+            elif getattr(self, "_is_simcc", False):
+                # SimCC: forward(imgs) → (logits_x, logits_y, coords).
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                logits_x, logits_y, pred_coords = self.model(imgs)
+                loss = simcc_loss(
+                    logits_x, logits_y, pred_coords, coords,
+                    sigma=getattr(cfg.model, "simcc_sigma", 6.0),
+                    coord_weight=getattr(cfg.training, "simcc_coord_weight", 100.0),
+                )[0]
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch
@@ -957,6 +984,12 @@ class TrainingEngine:
                 elif getattr(self, "_is_cascade", False):
                     # (list[stage heatmaps], final coords) -> take final coords.
                     _, pred_coords = self.model(imgs)
+                elif getattr(self, "_is_simcc", False):
+                    # (logits_x, logits_y, coords) -> take coords. Note the
+                    # reported val_loss below is coordinate MSE, not the simcc
+                    # composite training loss, so the two curves are on
+                    # different scales and should not be compared directly.
+                    _, _, pred_coords = self.model(imgs)
                 elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)
                 elif self._is_pipnet:
