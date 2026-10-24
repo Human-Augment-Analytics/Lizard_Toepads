@@ -172,6 +172,28 @@ class ModelConfig:
     # Alternating refinement steps inside the projection. Cheap relative to the
     # backbone (20 steps ~= 14% of one head conv), so default generously.
     shape_fit_iters: int = 20
+    # --- AttnLocalRefine (variant "attn_local_refine") only --------------------
+    # Two-stage: a FROZEN global model places coarse coords, then a high-res
+    # local-attention head predicts sub-pixel offsets. Stage A is any registered
+    # coordinate/heatmap model; its checkpoint and the hyperparameters it was
+    # trained with are specified here so the loaded architecture matches.
+    stage_a_variant: str = "fused_global"
+    stage_a_checkpoint: str = ""
+    stage_a_feat_dim: int = 64
+    stage_a_gnn_hidden: int = 256
+    stage_a_num_layers: int = 3
+    stage_a_num_iters: int = 4
+    # Stage B (the floor-breaker). hires_ch = channels of the input/1 conv stem;
+    # window = odd side length (in high-res px) of the per-landmark attention
+    # window; attn_dim/num_blocks/num_refine_iters size the refiner; max_offset_frac
+    # bounds a single step to this fraction of the window half-width (keeps it a
+    # LOCAL refiner, not a second global predictor).
+    hires_ch: int = 64
+    window: int = 17
+    attn_dim: int = 128
+    num_blocks: int = 2
+    num_refine_iters: int = 2
+    max_offset_frac: float = 0.5
 
 
 @dataclass
@@ -207,6 +229,10 @@ class TrainingConfig:
     heatmap_loss_mode: str = "ce"
     star_omega: float = 1.0
     star_eigenvalue_clamp: float = 6.0
+    # Weight on the coarse-coord term for attn_local_refine. Keeps the frozen
+    # Stage A anchor in the loss so Stage B's refinement is measured against it
+    # rather than drifting. Stage A params are frozen, so this only shapes Stage B.
+    coarse_loss_weight: float = 0.1
     # --- PIPNet (variant "pipnet") only ---------------------------------------
     # Composite-loss weights, matching the reference: cls (score-map MSE) is
     # weighted 10, and each of the four L1 offset terms is weighted 1. Total is

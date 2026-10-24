@@ -32,6 +32,7 @@ _MODEL_MODULES = [
     "hrnet_cascade",          # "hrnet_cascade"
     "shape_projection",       # "heatmap_shape"
     "hrnet_simcc",            # "simcc"
+    "attn_local_refine",      # "attn_local_refine" — frozen global + hi-res local attention
 ]
 
 for _mod_name in _MODEL_MODULES:

@@ -1,0 +1,52 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "./runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "attn_local_refine",
+
+    "stage_a_variant": "fused_global",
+    "stage_a_checkpoint": "./runs/lizard/fused_global/RUN_ID/checkpoints/best.pth",
+    "stage_a_feat_dim": 64,
+    "stage_a_gnn_hidden": 256,
+    "stage_a_num_layers": 3,
+    "stage_a_num_iters": 4,
+
+    "hires_ch": 64,
+    "window": 17,
+    "attn_dim": 128,
+    "num_heads": 4,
+    "num_blocks": 2,
+    "num_refine_iters": 2,
+    "max_offset_frac": 0.5
+  },
+  "training": {
+    "epochs": 150,
+    "batch_size": 8,
+    "val_batch_size": 16,
+    "lr": 2e-4,
+    "lr_backbone": 2e-4,
+    "weight_decay": 0.0,
+    "lr_milestones": [100, 130],
+    "lr_gamma": 0.2,
+    "grad_clip": 5.0,
+    "init_noise_sigma": 0.0,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "coarse_loss_weight": 0.1,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda"
+  }
+}

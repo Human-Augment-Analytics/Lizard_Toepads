@@ -319,6 +319,13 @@ class TrainingEngine:
         # (heatmaps, coords) forward contract or the 2D Gaussian target.
         self._is_simcc = cfg.model.variant == "simcc"
 
+        # AttnLocalRefine: image-only forward -> (coarse_coords, final_coords).
+        # Frozen global Stage A + high-res local-attention Stage B (no GCN). Loss
+        # supervises final coords, with a small weight on the coarse coords so the
+        # refiner cannot mask a degenerate Stage A. Needs the real mean shape +
+        # edge index handed to the constructor (Stage A runs them internally).
+        self._is_attn_local = cfg.model.variant == "attn_local_refine"
+
         # PIPNet: image-only forward returning five raw maps; loss = pipnet_loss.
         # Requires a mean shape to derive neighbor indices (get_meanface).
         self._is_pipnet = cfg.model.variant == "pipnet"
@@ -351,6 +358,36 @@ class TrainingEngine:
             # and lr_backbone is not applied. This matches the reference, which
             # trains all params with one Adam LR; keep lr == lr_backbone in
             # configs to avoid a misleading lr_backbone value.
+
+        if self._is_attn_local:
+            # Strip the GCN-family kwargs that were added above; this model does
+            # not take feat_dim/gnn_hidden/num_layers/num_iters.
+            for k in ("feat_dim", "gnn_hidden", "num_layers", "num_iters"):
+                model_kwargs.pop(k, None)
+            stage_a_variant = getattr(cfg.model, "stage_a_variant", "fused_global")
+            # Forward the GCN hyperparameters Stage A was TRAINED with so its
+            # architecture matches the checkpoint being loaded.
+            stage_a_kwargs = {
+                "feat_dim": getattr(cfg.model, "stage_a_feat_dim", 64),
+                "gnn_hidden": getattr(cfg.model, "stage_a_gnn_hidden", 256),
+                "num_layers": getattr(cfg.model, "stage_a_num_layers", 3),
+                "num_iters": getattr(cfg.model, "stage_a_num_iters", 4),
+            }
+            model_kwargs.update({
+                "stage_a_variant": stage_a_variant,
+                "stage_a_checkpoint": getattr(cfg.model, "stage_a_checkpoint", ""),
+                "stage_a_kwargs": stage_a_kwargs,
+                "mean_shape": self.mean_shape,
+                "edge_index": self.edge_index,
+                "hires_ch": getattr(cfg.model, "hires_ch", 64),
+                "window": getattr(cfg.model, "window", 17),
+                "dim": getattr(cfg.model, "attn_dim", 128),
+                "num_heads": getattr(cfg.model, "num_heads", 4),
+                "num_blocks": getattr(cfg.model, "num_blocks", 2),
+                "num_refine_iters": getattr(cfg.model, "num_refine_iters", 2),
+                "max_offset_frac": getattr(cfg.model, "max_offset_frac", 0.5),
+                "input_size": cfg.dataset.input_size,
+            })
 
         self.model = get_model(cfg.model.variant, **model_kwargs)
         self.model.to(self.device)
@@ -812,6 +849,22 @@ class TrainingEngine:
                     sigma=getattr(cfg.model, "simcc_sigma", 6.0),
                     coord_weight=getattr(cfg.training, "simcc_coord_weight", 100.0),
                 )[0]
+            elif self._is_attn_local:
+                # AttnLocalRefine: forward(imgs) -> (coarse, final).
+                # Supervise final coords; add a small coarse-coord term so the
+                # refiner can't hide behind a degenerate Stage A (Stage A is
+                # frozen, so this term only trains Stage B to not drift when the
+                # anchor is already good).
+                imgs, coords, *rest = batch
+                imgs = imgs.to(self.device)
+                coords = coords.to(self.device)
+                B = imgs.shape[0]
+
+                coarse_coords, pred_coords = self.model(imgs)
+                coarse_w = getattr(cfg.training, "coarse_loss_weight", 0.1)
+                loss = landmark_loss(pred_coords, coords)
+                if coarse_w > 0:
+                    loss = loss + coarse_w * landmark_loss(coarse_coords, coords)
             elif self._is_coord_only_model:
                 # Coordinate-only model (e.g. hrnet_coord): forward(imgs) → (B, N, 2)
                 imgs, coords, *rest = batch
@@ -992,6 +1045,9 @@ class TrainingEngine:
                     _, _, pred_coords = self.model(imgs)
                 elif self._is_coord_only_model:
                     pred_coords = self.model(imgs)
+                elif getattr(self, "_is_attn_local", False):
+                    # (coarse, final) -> report the refined final coords.
+                    _, pred_coords = self.model(imgs)
                 elif self._is_pipnet:
                     # Direct decode for per-epoch validation (cheap). The
                     # neighbor-averaged merge (predict_coords(merge=True)) is
