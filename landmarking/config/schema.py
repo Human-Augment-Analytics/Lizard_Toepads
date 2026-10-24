@@ -194,6 +194,13 @@ class ModelConfig:
     num_blocks: int = 2
     num_refine_iters: int = 2
     max_offset_frac: float = 0.5
+    # --- LiteShape (variant "lite_shape") only ---------------------------------
+    # Single-resolution backbone + query-attention head + optional shape
+    # projection. Reuses `backbone`, `feat_dim` (as the attention width),
+    # `num_heads`, and the shape_* fields above. feature_index selects WHICH
+    # single backbone stage is used (no multi-scale fusion); -2 is a mid/high-res
+    # stage. Leave shape_basis_path empty to run as a pure coord regressor.
+    feature_index: int = -2
 
 
 @dataclass
