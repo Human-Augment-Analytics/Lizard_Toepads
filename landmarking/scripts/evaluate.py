@@ -165,6 +165,30 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
+    if variant == "lite_shape":
+        # Mirror TrainingEngine.setup: single-resolution backbone + query-attn
+        # head + optional shape projection. Must NOT fall through to the GCN
+        # branch, which would pass feat_dim/gnn_hidden/num_layers/num_iters that
+        # this model does not accept. pretrained False: weights come from ckpt.
+        kwargs.update({
+            "backbone": getattr(config.model, "backbone", "efficientnet_b0"),
+            "pretrained": False,
+            "feature_index": getattr(config.model, "feature_index", -2),
+            "feature_dim": getattr(config.model, "feat_dim", 256),
+            "num_heads": getattr(config.model, "num_heads", 8),
+            "input_size": config.dataset.input_size,
+            "shape_basis_path": getattr(config.model, "shape_basis_path", ""),
+            "shape_basis_group": getattr(config.model, "shape_basis_group", "all"),
+            "shape_basis_variant": getattr(
+                config.model, "shape_basis_variant", "similarity"
+            ),
+            "shape_components": getattr(config.model, "shape_components", 6),
+            "shape_n_sigma": getattr(config.model, "shape_n_sigma", 3.0),
+            "shape_blend": getattr(config.model, "shape_blend", 1.0),
+            "shape_fit_iters": getattr(config.model, "shape_fit_iters", 20),
+        })
+        return kwargs
+
     if variant == "hrnet_cascade":
         # Mirror TrainingEngine.setup so the architecture matches the checkpoint
         # (num_stages / shared_weights change the parameter set).
@@ -674,6 +698,10 @@ def main(argv=None):
                     _, pred = model(imgs)
                 elif config.model.variant == "hrnet_cascade":
                     # forward(imgs) -> (list[stage heatmaps], final coords).
+                    _, pred = model(imgs)
+                elif config.model.variant == "lite_shape":
+                    # forward(imgs) -> (coords_raw, coords_out). Take the
+                    # (shape-projected when enabled) output.
                     _, pred = model(imgs)
                 elif config.model.variant in GRAPH_COND_HEATMAP_VARIANTS:
                     # forward(imgs, edge_index) -> (heatmaps, coords); no init.
