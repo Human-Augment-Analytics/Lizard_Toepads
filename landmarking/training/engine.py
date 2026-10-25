@@ -332,6 +332,10 @@ class TrainingEngine:
         # gets a direct coordinate gradient even when the projection is active.
         self._is_lite_shape = cfg.model.variant == "lite_shape"
 
+        # DinoCoord: frozen DINOv2 ViT backbone + query-attention head. Shares the
+        # (coords_raw, coords_out) forward contract and loss path with lite_shape.
+        self._is_dino = cfg.model.variant == "dino_coord"
+
         # PIPNet: image-only forward returning five raw maps; loss = pipnet_loss.
         # Requires a mean shape to derive neighbor indices (get_meanface).
         self._is_pipnet = cfg.model.variant == "pipnet"
@@ -407,6 +411,27 @@ class TrainingEngine:
                 "num_heads": getattr(cfg.model, "num_heads", 8),
                 "input_size": cfg.dataset.input_size,
                 # Shape projection is optional: empty path => pure coord regressor.
+                "shape_basis_path": getattr(cfg.model, "shape_basis_path", ""),
+                "shape_basis_group": getattr(cfg.model, "shape_basis_group", "all"),
+                "shape_basis_variant": getattr(cfg.model, "shape_basis_variant", "similarity"),
+                "shape_components": getattr(cfg.model, "shape_components", 6),
+                "shape_n_sigma": getattr(cfg.model, "shape_n_sigma", 3.0),
+                "shape_blend": getattr(cfg.model, "shape_blend", 1.0),
+                "shape_fit_iters": getattr(cfg.model, "shape_fit_iters", 20),
+            })
+
+        if self._is_dino:
+            # Frozen DINOv2 + query-attention head. Drop GCN-family kwargs.
+            for k in ("feat_dim", "gnn_hidden", "num_layers", "num_iters"):
+                model_kwargs.pop(k, None)
+            model_kwargs.update({
+                "backbone": getattr(cfg.model, "backbone", "vit_small_patch14_reg4_dinov2"),
+                "pretrained": True,
+                "freeze_backbone": getattr(cfg.model, "freeze_backbone", True),
+                "dino_input": getattr(cfg.model, "dino_input", 518),
+                "feature_dim": getattr(cfg.model, "feat_dim", 256),
+                "num_heads": getattr(cfg.model, "num_heads", 8),
+                "input_size": cfg.dataset.input_size,
                 "shape_basis_path": getattr(cfg.model, "shape_basis_path", ""),
                 "shape_basis_group": getattr(cfg.model, "shape_basis_group", "all"),
                 "shape_basis_variant": getattr(cfg.model, "shape_basis_variant", "similarity"),
@@ -892,8 +917,8 @@ class TrainingEngine:
                 loss = landmark_loss(pred_coords, coords)
                 if coarse_w > 0:
                     loss = loss + coarse_w * landmark_loss(coarse_coords, coords)
-            elif self._is_lite_shape:
-                # LiteShape: forward(imgs) -> (coords_raw, coords_out).
+            elif self._is_lite_shape or self._is_dino:
+                # LiteShape / DinoCoord: forward(imgs) -> (coords_raw, coords_out).
                 # Supervise the (possibly shape-projected) output; add a small
                 # weight on the raw head output so the encoder keeps a direct
                 # coordinate gradient even when the projection is active.
@@ -1090,7 +1115,7 @@ class TrainingEngine:
                 elif getattr(self, "_is_attn_local", False):
                     # (coarse, final) -> report the refined final coords.
                     _, pred_coords = self.model(imgs)
-                elif getattr(self, "_is_lite_shape", False):
+                elif getattr(self, "_is_lite_shape", False) or getattr(self, "_is_dino", False):
                     # (coords_raw, coords_out) -> report the shape-projected output.
                     _, pred_coords = self.model(imgs)
                 elif self._is_pipnet:

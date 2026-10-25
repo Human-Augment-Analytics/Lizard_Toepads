@@ -34,6 +34,7 @@ _MODEL_MODULES = [
     "hrnet_simcc",            # "simcc"
     "attn_local_refine",      # "attn_local_refine" — frozen global + hi-res local attention
     "lite_shape",             # "lite_shape" — single-res backbone + query attn + optional shape proj
+    "dino_coord",             # "dino_coord" — frozen DINOv2 ViT + query attn + optional shape proj
 ]
 
 for _mod_name in _MODEL_MODULES:

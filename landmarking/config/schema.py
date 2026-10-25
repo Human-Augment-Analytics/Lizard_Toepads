@@ -201,6 +201,13 @@ class ModelConfig:
     # single backbone stage is used (no multi-scale fusion); -2 is a mid/high-res
     # stage. Leave shape_basis_path empty to run as a pure coord regressor.
     feature_index: int = -2
+    # --- DinoCoord (variant "dino_coord") only ---------------------------------
+    # Frozen DINOv2 ViT backbone + query-attention head. Reuses `backbone`
+    # (a timm dinov2 name), `feat_dim` (attention width), `num_heads`, and the
+    # shape_* fields. freeze_backbone keeps DINOv2 frozen (small-data default);
+    # dino_input is the patch-aligned square size fed to the ViT (multiple of 14).
+    freeze_backbone: bool = True
+    dino_input: int = 518
 
 
 @dataclass

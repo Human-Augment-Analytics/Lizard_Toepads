@@ -1,0 +1,49 @@
+{
+  "paths": {
+    "data_root": "/home/hice1/axu39/scratch/",
+    "output_root": "./runs"
+  },
+  "dataset": {
+    "name": "lizard",
+    "num_landmarks": 9,
+    "input_size": 512,
+    "graph_topology": "chain",
+    "mean_shape_path": "./runs/lizard/mean_shapes/mean_shape_lizard.pt",
+    "flip_pairs": [],
+    "data_dir": "/home/hice1/axu39/scratch/Lizard_data/lizard"
+  },
+  "model": {
+    "variant": "dino_coord",
+    "backbone": "vit_small_patch14_reg4_dinov2",
+    "freeze_backbone": true,
+    "dino_input": 518,
+    "feat_dim": 256,
+    "num_heads": 8,
+    "shape_basis_path": "./runs/lizard/shape_basis.npz",
+    "shape_basis_group": "all",
+    "shape_basis_variant": "similarity",
+    "shape_components": 6,
+    "shape_n_sigma": 3.0,
+    "shape_blend": 1.0,
+    "shape_fit_iters": 20
+  },
+  "training": {
+    "epochs": 250,
+    "batch_size": 16,
+    "val_batch_size": 32,
+    "lr": 3e-4,
+    "lr_backbone": 0.0,
+    "weight_decay": 0.0,
+    "lr_milestones": [150, 200],
+    "lr_gamma": 0.2,
+    "grad_clip": 5.0,
+    "init_noise_sigma": 0.0,
+    "init_mode": "mean",
+    "rot_factor": 0.0,
+    "coarse_loss_weight": 0.1,
+    "checkpoint_interval": 10,
+    "vis_interval": 10,
+    "seed": 42,
+    "device": "cuda"
+  }
+}
