@@ -189,6 +189,22 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
+    if variant == "dino_heatmap":
+        # Mirror TrainingEngine.setup: DINOv2 + HRNet heatmap head. head_size
+        # must equal heatmap_size so the architecture matches the checkpoint.
+        kwargs.update({
+            "backbone": getattr(config.model, "backbone", "vit_small_patch14_reg4_dinov2"),
+            "pretrained": False,
+            "freeze_backbone": getattr(config.model, "freeze_backbone", False),
+            "dino_input": getattr(config.model, "dino_input", 518),
+            "head_size": getattr(config.model, "heatmap_size", 128),
+            "decode_mode": getattr(config.model, "decode_mode", "windowed"),
+            "decode_radius": getattr(config.model, "decode_radius", 5),
+            "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
+            "input_size": config.dataset.input_size,
+        })
+        return kwargs
+
     if variant == "dino_coord":
         # Mirror TrainingEngine.setup: frozen DINOv2 + query-attn head + optional
         # shape projection. pretrained False: DINOv2 weights are already captured
@@ -711,9 +727,9 @@ def main(argv=None):
                 elif config.model.variant in SIMCC_VARIANTS:
                     # forward(imgs) -> (logits_x, logits_y, coords).
                     _, _, pred = model(imgs)
-                elif config.model.variant in ("heatmap", "heatmap_shape"):
-                    # HRNet heatmap: forward(imgs) -> (heatmaps, coords). Works
-                    # for both plain and STAR variants (forward is unchanged;
+                elif config.model.variant in ("heatmap", "heatmap_shape", "dino_heatmap"):
+                    # HRNet / DINOv2 heatmap: forward(imgs) -> (heatmaps, coords).
+                    # Works for both plain and STAR variants (forward is unchanged;
                     # STAR only adds forward_star used in training). Take coords.
                     # heatmap_shape shares the contract and returns projected
                     # coords in the same slot.

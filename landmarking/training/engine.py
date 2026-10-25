@@ -75,7 +75,7 @@ def heatmap_family_flags(cfg) -> dict:
     return {
         "is_heatmap_model": variant == "heatmap" and is_wflw,
         "is_heatmap_on_coords": (
-            variant in ("heatmap", "heatmap_shape") and not is_wflw
+            variant in ("heatmap", "heatmap_shape", "dino_heatmap") and not is_wflw
         ),
         # STAR stays gated to the plain heatmap variant; heatmap_shape rejects it
         # in its constructor because the STAR head reads uncertainty at the
@@ -418,6 +418,23 @@ class TrainingEngine:
                 "shape_n_sigma": getattr(cfg.model, "shape_n_sigma", 3.0),
                 "shape_blend": getattr(cfg.model, "shape_blend", 1.0),
                 "shape_fit_iters": getattr(cfg.model, "shape_fit_iters", 20),
+            })
+
+        if cfg.model.variant == "dino_heatmap":
+            for k in ("feat_dim", "gnn_hidden", "num_layers", "num_iters"):
+                model_kwargs.pop(k, None)
+            model_kwargs.update({
+                "backbone": getattr(cfg.model, "backbone", "vit_small_patch14_reg4_dinov2"),
+                "pretrained": True,
+                "freeze_backbone": getattr(cfg.model, "freeze_backbone", False),
+                "dino_input": getattr(cfg.model, "dino_input", 518),
+                # head_size mirrors heatmap_size so the loss's Gaussian target
+                # (built at heatmap_size) matches the predicted map resolution.
+                "head_size": getattr(cfg.model, "heatmap_size", 128),
+                "decode_mode": getattr(cfg.model, "decode_mode", "windowed"),
+                "decode_radius": getattr(cfg.model, "decode_radius", 5),
+                "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
+                "input_size": cfg.dataset.input_size,
             })
 
         if self._is_dino:
