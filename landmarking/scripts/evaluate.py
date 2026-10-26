@@ -189,7 +189,7 @@ def build_model_kwargs(config) -> dict:
         })
         return kwargs
 
-    if variant == "dino_heatmap":
+    if variant in ("dino_heatmap", "dino_heatmap_refine"):
         # Mirror TrainingEngine.setup: DINOv2 + HRNet heatmap head. head_size
         # must equal heatmap_size so the architecture matches the checkpoint.
         kwargs.update({
@@ -203,6 +203,12 @@ def build_model_kwargs(config) -> dict:
             "bn_momentum": getattr(config.model, "bn_momentum", 0.1),
             "input_size": config.dataset.input_size,
         })
+        if variant == "dino_heatmap_refine":
+            kwargs.update({
+                "refine_dim": getattr(config.model, "refine_dim", 128),
+                "refine_heads": getattr(config.model, "refine_heads", 4),
+                "max_offset": getattr(config.model, "max_offset", 0.05),
+            })
         return kwargs
 
     if variant == "dino_coord":
@@ -727,7 +733,7 @@ def main(argv=None):
                 elif config.model.variant in SIMCC_VARIANTS:
                     # forward(imgs) -> (logits_x, logits_y, coords).
                     _, _, pred = model(imgs)
-                elif config.model.variant in ("heatmap", "heatmap_shape", "dino_heatmap"):
+                elif config.model.variant in ("heatmap", "heatmap_shape", "dino_heatmap", "dino_heatmap_refine"):
                     # HRNet / DINOv2 heatmap: forward(imgs) -> (heatmaps, coords).
                     # Works for both plain and STAR variants (forward is unchanged;
                     # STAR only adds forward_star used in training). Take coords.

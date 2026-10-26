@@ -36,6 +36,7 @@ _MODEL_MODULES = [
     "lite_shape",             # "lite_shape" — single-res backbone + query attn + optional shape proj
     "dino_coord",             # "dino_coord" — frozen DINOv2 ViT + query attn + optional shape proj
     "dino_heatmap",           # "dino_heatmap" — DINOv2 ViT + exact HRNet heatmap head
+    "dino_heatmap_refine",    # "dino_heatmap_refine" — + image/neighbor offset refinement
 ]
 
 for _mod_name in _MODEL_MODULES:

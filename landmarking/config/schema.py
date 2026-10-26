@@ -208,6 +208,14 @@ class ModelConfig:
     # dino_input is the patch-aligned square size fed to the ViT (multiple of 14).
     freeze_backbone: bool = True
     dino_input: int = 518
+    # --- DinoHeatmapRefine (variant "dino_heatmap_refine") only ----------------
+    # Image+neighbor bounded-offset refinement on top of the dino_heatmap coarse
+    # stage. refine_dim/refine_heads size the refinement attention; max_offset
+    # bounds the per-landmark nudge as a fraction of the canvas (local, not a
+    # re-placement).
+    refine_dim: int = 128
+    refine_heads: int = 4
+    max_offset: float = 0.05
 
 
 @dataclass

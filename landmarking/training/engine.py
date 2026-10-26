@@ -75,7 +75,8 @@ def heatmap_family_flags(cfg) -> dict:
     return {
         "is_heatmap_model": variant == "heatmap" and is_wflw,
         "is_heatmap_on_coords": (
-            variant in ("heatmap", "heatmap_shape", "dino_heatmap") and not is_wflw
+            variant in ("heatmap", "heatmap_shape", "dino_heatmap", "dino_heatmap_refine")
+            and not is_wflw
         ),
         # STAR stays gated to the plain heatmap variant; heatmap_shape rejects it
         # in its constructor because the STAR head reads uncertainty at the
@@ -420,7 +421,7 @@ class TrainingEngine:
                 "shape_fit_iters": getattr(cfg.model, "shape_fit_iters", 20),
             })
 
-        if cfg.model.variant == "dino_heatmap":
+        if cfg.model.variant in ("dino_heatmap", "dino_heatmap_refine"):
             for k in ("feat_dim", "gnn_hidden", "num_layers", "num_iters"):
                 model_kwargs.pop(k, None)
             model_kwargs.update({
@@ -436,6 +437,12 @@ class TrainingEngine:
                 "bn_momentum": getattr(cfg.model, "bn_momentum", 0.1),
                 "input_size": cfg.dataset.input_size,
             })
+            if cfg.model.variant == "dino_heatmap_refine":
+                model_kwargs.update({
+                    "refine_dim": getattr(cfg.model, "refine_dim", 128),
+                    "refine_heads": getattr(cfg.model, "refine_heads", 4),
+                    "max_offset": getattr(cfg.model, "max_offset", 0.05),
+                })
 
         if self._is_dino:
             # Frozen DINOv2 + query-attention head. Drop GCN-family kwargs.
