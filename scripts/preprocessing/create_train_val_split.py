@@ -88,12 +88,18 @@ def make_link_or_copy(src: Path, dst: Path, copy: bool) -> None:
 def write_split_lists(output_dir: Path, train_imgs: List[Path], val_imgs: List[Path]) -> None:
     splits_dir = output_dir / "splits"
     splits_dir.mkdir(parents=True, exist_ok=True)
-    with open(splits_dir / "train.txt", "w") as f:
-        for p in train_imgs:
-            f.write(str(p.resolve()) + "\n")
-    with open(splits_dir / "val.txt", "w") as f:
-        for p in val_imgs:
-            f.write(str(p.resolve()) + "\n")
+    for split_name, images in (("train", train_imgs), ("val", val_imgs)):
+        with open(splits_dir / f"{split_name}.txt", "w") as f:
+            for image in images:
+                f.write(str(image.resolve()) + "\n")
+
+
+def materialize_split(output_root: Path, split_name: str, pairs: List[Tuple[Path, Path]], copy: bool) -> None:
+    images_dir = output_root / "images" / split_name
+    labels_dir = output_root / "labels" / split_name
+    for image, label in pairs:
+        make_link_or_copy(image, images_dir / image.name, copy)
+        make_link_or_copy(label, labels_dir / label.name, copy)
 
 
 def split_and_materialize(
@@ -139,17 +145,8 @@ def split_and_materialize(
         train_pairs = pairs[:num_train]
         val_pairs = pairs[num_train:]
 
-    images_train_dir = output_root / "images" / "train"
-    images_val_dir = output_root / "images" / "val"
-    labels_train_dir = output_root / "labels" / "train"
-    labels_val_dir = output_root / "labels" / "val"
-
-    for img, lbl in train_pairs:
-        make_link_or_copy(img, images_train_dir / f"{img.name}", copy)
-        make_link_or_copy(lbl, labels_train_dir / f"{lbl.name}", copy)
-    for img, lbl in val_pairs:
-        make_link_or_copy(img, images_val_dir / f"{img.name}", copy)
-        make_link_or_copy(lbl, labels_val_dir / f"{lbl.name}", copy)
+    materialize_split(output_root, "train", train_pairs, copy)
+    materialize_split(output_root, "val", val_pairs, copy)
 
     # Write lists for convenience
     write_split_lists(output_root, [p for p, _ in train_pairs], [p for p, _ in val_pairs])
