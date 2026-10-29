@@ -102,6 +102,21 @@ def materialize_split(output_root: Path, split_name: str, pairs: List[Tuple[Path
         make_link_or_copy(label, labels_dir / label.name, copy)
 
 
+def validate_split_output(output_root: Path, split_name: str, pairs: List[Tuple[Path, Path]]) -> None:
+    """Reject stale members without deleting files that may belong to the user."""
+    for folder, pair_index in (("images", 0), ("labels", 1)):
+        directory = output_root / folder / split_name
+        if not directory.exists() and not directory.is_symlink():
+            continue
+        expected_names = {pair[pair_index].name for pair in pairs}
+        unexpected = sorted(path.name for path in directory.iterdir() if path.name not in expected_names)
+        if unexpected:
+            raise RuntimeError(
+                f"Existing split output has unexpected entries in {directory}: {unexpected}. "
+                "Use a fresh --output-dir to avoid stale train/validation membership."
+            )
+
+
 def split_and_materialize(
     images_dir: Path,
     labels_dir: Path,
@@ -145,8 +160,12 @@ def split_and_materialize(
         train_pairs = pairs[:num_train]
         val_pairs = pairs[num_train:]
 
-    materialize_split(output_root, "train", train_pairs, copy)
-    materialize_split(output_root, "val", val_pairs, copy)
+    splits = (("train", train_pairs), ("val", val_pairs))
+    # Check every destination before writing either split or its manifests.
+    for split_name, split_pairs in splits:
+        validate_split_output(output_root, split_name, split_pairs)
+    for split_name, split_pairs in splits:
+        materialize_split(output_root, split_name, split_pairs, copy)
 
     # Write lists for convenience
     write_split_lists(output_root, [p for p, _ in train_pairs], [p for p, _ in val_pairs])

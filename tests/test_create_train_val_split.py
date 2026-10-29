@@ -30,14 +30,14 @@ class TrainValSplitTests(unittest.TestCase):
         (self.labels / "ignored.txt").write_text("unsupported")
         (self.labels / "label-only.txt").write_text("no image")
 
-    def split(self, *, copy, train_ratio=0.6, group_by_suffix=None):
+    def split(self, *, copy, train_ratio=0.6, seed=42, group_by_suffix=None):
         with contextlib.redirect_stdout(io.StringIO()):
             return splitter.split_and_materialize(
                 self.images,
                 self.labels,
                 self.output,
                 train_ratio,
-                42,
+                seed,
                 copy,
                 (".jpg", ".png"),
                 group_by_suffix,
@@ -70,6 +70,28 @@ class TrainValSplitTests(unittest.TestCase):
         expected = self.assert_split("train", train, copy=copy) + self.assert_split("val", val, copy=copy)
         actual = [path.relative_to(self.output) for path in self.output.rglob("*") if path.is_file()]
         self.assertEqual(sorted(actual), sorted(expected))
+
+    def snapshot_output(self):
+        snapshot = {}
+        for path in self.output.rglob("*"):
+            relative = path.relative_to(self.output)
+            if path.is_symlink():
+                snapshot[relative] = ("link", os.readlink(path))
+            elif path.is_file():
+                snapshot[relative] = ("file", path.read_bytes())
+            else:
+                snapshot[relative] = ("directory",)
+        return snapshot
+
+    def assert_rejected_without_writes(self, **options):
+        before = self.snapshot_output()
+        with patch.object(splitter, "make_link_or_copy") as materialize:
+            with patch.object(splitter, "write_split_lists") as write_lists:
+                with self.assertRaisesRegex(RuntimeError, "unexpected entries.*fresh --output-dir"):
+                    self.split(**options)
+        materialize.assert_not_called()
+        write_lists.assert_not_called()
+        self.assertEqual(self.snapshot_output(), before)
 
     def test_seeded_split_preserves_pair_and_manifest_order(self):
         train = ["b_flipud.JPG", "a_flipud.png", "b.jpg"]
@@ -126,6 +148,58 @@ class TrainValSplitTests(unittest.TestCase):
         (self.output / "splits/train.txt").write_text("stale manifest\n")
         for copy in (False, True):
             with self.subTest(copy=copy):
+                self.assertEqual(self.split(copy=copy), (3, 2))
+                self.check_dataset(["b_flipud.JPG", "a_flipud.png", "b.jpg"], ["z.jpg", "a.jpg"], copy=copy)
+
+    def test_changed_ratio_is_rejected_before_stale_validation_can_leak(self):
+        for copy in (False, True):
+            with self.subTest(copy=copy):
+                self.output = self.root / f"ratio-{copy}"
+                self.split(copy=copy)
+                self.assert_rejected_without_writes(copy=copy, train_ratio=1.0)
+
+    def test_changed_seed_is_rejected_without_modifying_existing_split(self):
+        for copy in (False, True):
+            with self.subTest(copy=copy):
+                self.output = self.root / f"seed-{copy}"
+                self.split(copy=copy)
+                self.assert_rejected_without_writes(copy=copy, seed=0)
+
+    def test_removed_source_pair_is_rejected_even_when_output_link_is_dangling(self):
+        image = self.images / "z.jpg"
+        label = self.labels / "z.txt"
+        image_content, label_content = image.read_bytes(), label.read_bytes()
+        for copy in (False, True):
+            with self.subTest(copy=copy):
+                self.output = self.root / f"removed-{copy}"
+                self.split(copy=copy)
+                image.unlink()
+                label.unlink()
+                try:
+                    self.assert_rejected_without_writes(copy=copy)
+                finally:
+                    image.write_bytes(image_content)
+                    label.write_bytes(label_content)
+
+    def test_unexpected_entries_in_every_output_directory_are_preserved(self):
+        for folder in ("images", "labels"):
+            for split_name in ("train", "val"):
+                for copy in (False, True):
+                    with self.subTest(folder=folder, split=split_name, copy=copy):
+                        self.output = self.root / f"extra-{folder}-{split_name}-{copy}"
+                        self.split(copy=copy)
+                        directory = self.output / folder / split_name
+                        (directory / "notes.txt").write_text("user-owned notes")
+                        (directory / "dangling-link").symlink_to("absent")
+                        self.assert_rejected_without_writes(copy=copy)
+
+    def test_missing_members_of_same_split_are_repaired(self):
+        for copy in (False, True):
+            with self.subTest(copy=copy):
+                self.output = self.root / f"repair-{copy}"
+                self.split(copy=copy)
+                (self.output / "images/train/b.jpg").unlink()
+                (self.output / "labels/val/z.txt").unlink()
                 self.assertEqual(self.split(copy=copy), (3, 2))
                 self.check_dataset(["b_flipud.JPG", "a_flipud.png", "b.jpg"], ["z.jpg", "a.jpg"], copy=copy)
 
