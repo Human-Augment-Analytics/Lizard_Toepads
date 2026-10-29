@@ -1,0 +1,109 @@
+{
+  "fields": {
+    "day": {
+      "type": "integer",
+      "pattern": "(?<![\\w.])(?:[0-9]{1,2}|[0-9]\\.[0-9])(?![\\w.])",
+      "min": 1,
+      "max": 31,
+      "remove_characters": "."
+    },
+    "month": {
+      "type": "integer",
+      "pattern": "(?<![\\w.])(?:[0-9]{1,2}|[0-9]\\.[0-9])(?![\\w.])",
+      "min": 1,
+      "max": 12,
+      "remove_characters": "."
+    },
+    "year": {
+      "type": "integer",
+      "pattern": "(?<![\\w.])(?:[0-9]{1,2}|[0-9]\\.[0-9])(?![\\w.])",
+      "remove_characters": ".",
+      "min": 0,
+      "max": 99
+    },
+    "time": {
+      "type": "time",
+      "pattern": "(?<![\\w.:])[0-9]{1,2}[:.][0-9]{2}(?![\\w.:])|(?<![\\w.:])[0-9]{4}(?![\\w.:])",
+      "input_formats": [
+        "%H:%M",
+        "%H.%M",
+        "%H%M"
+      ],
+      "format": "%H:%M"
+    },
+    "flag": {
+      "type": "text",
+      "pattern": "\\b[A-Za-z]*[0-9]+\\b",
+      "case": "upper"
+    },
+    "tb": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "ta": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "ph": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "min": 0,
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "pw": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "min": 0,
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "svl": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "min": 0,
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "mass": {
+      "type": "number",
+      "pattern": "(?<![\\w.+-])[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?![\\w.+-])",
+      "min": 0,
+      "retry_decimal_aliases": [
+        "-"
+      ]
+    },
+    "perch": {
+      "type": "text",
+      "pattern": "[A-Za-z]+(?:[ /'-][A-Za-z]+)*",
+      "case": "upper"
+    },
+    "recapture_id": {
+      "type": "text",
+      "pattern": "\\b[A-Za-z]*[0-9]+\\b",
+      "case": "upper"
+    },
+    "initials": {
+      "type": "text",
+      "pattern": "\\b[A-Za-z]{1,8}(?:\\s*\\.\\s*[A-Za-z]{1,8})*(?:\\s*\\.)?",
+      "case": "upper",
+      "remove_characters": " \t\r\n"
+    }
+  },
+  "date": {
+    "day": "day",
+    "month": "month",
+    "year": "year",
+    "format": "%d/%m/%y",
+    "century": 2000
+  }
+}

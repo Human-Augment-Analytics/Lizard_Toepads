@@ -1,0 +1,375 @@
+{
+  "description": "Expected writing slots in registered template coordinates. Margins expand source pixels before cropping; review raw/cleaned crops for overlaps. Checkboxes are separate from text recognition.",
+  "fields": [
+    {
+      "name": "day_correction",
+      "box": [
+        0.205,
+        0.083,
+        0.365,
+        0.13
+      ],
+      "margin": [
+        0.008,
+        0.002
+      ],
+      "review_note": "Review crossed-out dates and corrections against the full card; preserve literal text until a human resolves the intended value."
+    },
+    {
+      "name": "header_notes",
+      "box": [
+        0.63,
+        0.062,
+        0.765,
+        0.135
+      ],
+      "margin": [
+        0.008,
+        0.004
+      ],
+      "review_note": "Header writing can overlap the printed specimen ID. Compare the full card; printed digits must not be accepted as handwritten notes."
+    },
+    {
+      "name": "day",
+      "box": [
+        0.218,
+        0.143,
+        0.373,
+        0.198
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ],
+      "review_note": "Review crossed-out dates and corrections against the full card; preserve literal text until a human resolves the intended value."
+    },
+    {
+      "name": "month",
+      "box": [
+        0.489,
+        0.143,
+        0.64,
+        0.198
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ],
+      "review_note": "Review crossed-out dates and corrections against the full card; preserve literal text until a human resolves the intended value."
+    },
+    {
+      "name": "year",
+      "box": [
+        0.733,
+        0.143,
+        0.891,
+        0.198
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "time",
+      "box": [
+        0.27,
+        0.214,
+        0.505,
+        0.264
+      ],
+      "margin": [
+        0.015,
+        0.007
+      ]
+    },
+    {
+      "name": "flag",
+      "box": [
+        0.65,
+        0.214,
+        0.92,
+        0.269
+      ],
+      "margin": [
+        0.015,
+        0.01
+      ]
+    },
+    {
+      "name": "tb",
+      "box": [
+        0.198,
+        0.281,
+        0.47,
+        0.338
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "ta",
+      "box": [
+        0.555,
+        0.281,
+        0.891,
+        0.338
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "other_species",
+      "box": [
+        0.46,
+        0.49,
+        0.668,
+        0.546
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "ph",
+      "box": [
+        0.211,
+        0.558,
+        0.508,
+        0.616
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "pw",
+      "box": [
+        0.605,
+        0.558,
+        0.907,
+        0.616
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "perch",
+      "box": [
+        0.3,
+        0.632,
+        0.885,
+        0.684
+      ],
+      "margin": [
+        0.02,
+        0.004
+      ]
+    },
+    {
+      "name": "recapture_id",
+      "box": [
+        0.504,
+        0.697,
+        0.912,
+        0.755
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    },
+    {
+      "name": "svl",
+      "box": [
+        0.245,
+        0.775,
+        0.442,
+        0.815
+      ],
+      "margin": [
+        0.01,
+        0.004
+      ]
+    },
+    {
+      "name": "mass",
+      "box": [
+        0.628,
+        0.768,
+        0.93,
+        0.824
+      ],
+      "margin": [
+        0.014,
+        0.01
+      ]
+    },
+    {
+      "name": "initials",
+      "box": [
+        0.31,
+        0.838,
+        0.87,
+        0.889
+      ],
+      "margin": [
+        0.01,
+        0.01
+      ]
+    },
+    {
+      "name": "notes",
+      "box": [
+        0.125,
+        0.906,
+        0.896,
+        0.962
+      ],
+      "margin": [
+        0.01,
+        0.008
+      ]
+    }
+  ],
+  "checkboxes": [
+    {
+      "name": "caro",
+      "box": [
+        0.125,
+        0.365,
+        0.175,
+        0.402
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "cris",
+      "box": [
+        0.378,
+        0.365,
+        0.428,
+        0.402
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "male",
+      "box": [
+        0.717,
+        0.365,
+        0.767,
+        0.402
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "dist",
+      "box": [
+        0.125,
+        0.435,
+        0.175,
+        0.472
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "eque",
+      "box": [
+        0.378,
+        0.435,
+        0.428,
+        0.472
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "female",
+      "box": [
+        0.717,
+        0.435,
+        0.767,
+        0.472
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "sag",
+      "box": [
+        0.125,
+        0.505,
+        0.175,
+        0.542
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "other_species",
+      "box": [
+        0.378,
+        0.505,
+        0.428,
+        0.542
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "juvenile",
+      "box": [
+        0.717,
+        0.505,
+        0.767,
+        0.542
+      ],
+      "margin": [
+        0.007,
+        0.002
+      ]
+    },
+    {
+      "name": "recapture",
+      "box": [
+        0.35,
+        0.707,
+        0.403,
+        0.751
+      ],
+      "margin": [
+        0.007,
+        0.005
+      ]
+    }
+  ]
+}

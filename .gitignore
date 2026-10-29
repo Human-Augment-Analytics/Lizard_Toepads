@@ -5,12 +5,8 @@
 /data/*
 !/data/data.yaml
 
-# ID card parsing source images (large, do not commit)
-id-card-parsing/data/*.jpg
-id-card-parsing/data/*.jpeg
-id-card-parsing/data/*.png
-id-card-parsing/data/*.tif
-id-card-parsing/data/*.tiff
+# ID card parsing source images and nested scan folders (large, do not commit)
+id-card-parsing/data/
 
 # Documents
 *.pdf
@@ -21,6 +17,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.coverage*
 
 # Virtual environments
 .venv/
