@@ -56,6 +56,50 @@ class CardPipelineTests(unittest.TestCase):
             w=csv.DictWriter(f,fieldnames=['image_id','group_id','split','rotation_quarters'])
             w.writeheader();w.writerows(self.rows)
 
+    def test_polygon_iou_geometry(self):
+        a = np.array([[0,0],[2,0],[2,2],[0,2]], dtype=float)
+        self.assertAlmostEqual(p.polygon_iou(a, a), 1)
+        self.assertEqual(p.polygon_iou(a, a + 10), 0)
+        self.assertAlmostEqual(p.polygon_iou(a, a + [1,0]), 1/3)
+        # A diamond inscribed in the square has half its area.
+        diamond = np.array([[1,0],[2,1],[1,2],[0,1]], dtype=float)
+        self.assertAlmostEqual(p.polygon_iou(a, diamond), .5)
+
+    def test_test_iou_counts_misses_and_uses_confidence(self):
+        p.prepare(self.cfg)
+        out = p.resolve(self.cfg['output'])
+        expected = self.original * np.array([85,128]) / [200,300]
+        class Tensor:
+            def __init__(self, data): self.data = np.asarray(data)
+            def argmax(self): return Tensor(self.data.argmax())
+            def item(self): return self.data.item()
+            def __getitem__(self, i): return Tensor(self.data[i])
+            def cpu(self): return self
+            def numpy(self): return self.data
+        class Boxes:
+            # Higher-confidence box is disjoint: do not choose by ground truth IoU.
+            conf = Tensor([.4,.9])
+            xyxyxyxy = Tensor([expected, expected + [200,0]])
+            def __len__(self): return 2
+        class CorrectBox:
+            conf = Tensor([.8])
+            xyxyxyxy = Tensor([expected])
+            def __len__(self): return 1
+        class Model:
+            calls = 0
+            def predict(self, **kw):
+                self.calls += 1
+                assert kw['conf'] == .25
+                return [types.SimpleNamespace(obb=Boxes() if self.calls == 1 else CorrectBox() if self.calls == 2 else None)]
+        metrics = p.test_iou(Model(), out, self.cfg['train'], out)
+        self.assertEqual(metrics['images'], 20)
+        self.assertEqual(metrics['missed_cards'], 18)
+        self.assertEqual(metrics['extra_detections'], 1)
+        self.assertAlmostEqual(metrics['mean_iou'], .05, places=6)
+        self.assertEqual(metrics['min_iou'], 0)
+        self.assertAlmostEqual(metrics['max_iou'], 1, places=6)
+        self.assertEqual(len(json.loads((out/'iou_per_image.json').read_text())), 20)
+
     def test_inverse_transform_and_invalid_geometry(self):
         np.testing.assert_allclose(p.corners(self.record,(200,300)),self.original)
         bad=deepcopy(self.record);bad['transform_inverse'][0][0]=3
@@ -123,12 +167,14 @@ class CardPipelineTests(unittest.TestCase):
             def val(self,**kw):
                 calls.append(('val',kw));return types.SimpleNamespace(save_dir=str(out),results_dict={'mAP':.5})
         torch=types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda:True))
-        with patch.dict('sys.modules',{'torch':torch,'ultralytics':types.SimpleNamespace(YOLO=FakeModel)}):
+        with patch.object(p, 'torch', torch), patch.object(p, 'YOLO', FakeModel):
             p.model_action(types.SimpleNamespace(command='smoke',resume=None),self.cfg)
             self.assertEqual(calls[-1][1]['epochs'],2)
             self.assertEqual(calls[-1][1]['data'],str(out/'dataset.yaml'))
             checkpoint=self.root/'best.pt';checkpoint.touch()
-            p.model_action(types.SimpleNamespace(command='test',weights=str(checkpoint)),self.cfg)
+            with patch.object(p, 'test_iou') as report:
+                p.model_action(types.SimpleNamespace(command='test',weights=str(checkpoint)),self.cfg)
+                report.assert_called_once()
             self.assertEqual(calls[-1][1]['split'],'test')
             torch.cuda.is_available=lambda:False
             with self.assertRaisesRegex(RuntimeError,'GPU'):p.model_action(types.SimpleNamespace(command='train'),self.cfg)

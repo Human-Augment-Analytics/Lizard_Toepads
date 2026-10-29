@@ -213,6 +213,75 @@ def prepared(cfg):
     return out
 
 
+def polygon_iou(first, second):
+    """Exact area overlap of two convex card quadrilaterals, on a 0–1 scale."""
+    polygons = []
+    for points in (first, second):
+        points = np.asarray(points, dtype=np.float32)
+        if points.shape != (4, 2) or not np.isfinite(points).all():
+            raise ValueError('IoU requires four finite corners per box')
+        if not cv2.isContourConvex(points):
+            raise ValueError('IoU requires convex boxes with ordered corners')
+        polygons.append(points)
+    areas = [abs(cv2.contourArea(points)) for points in polygons]
+    if min(areas) <= 0:
+        raise ValueError('IoU requires nonzero box areas')
+    intersection, _ = cv2.intersectConvexConvex(*polygons)
+    union = sum(areas) - intersection
+    return float(np.clip(intersection / union, 0, 1)) if union > 0 else 0.0
+
+
+def test_iou(model, out, options, save_dir, confidence=0.25):
+    """One card per image: score the highest-confidence detection; misses score 0.
+
+    These polygon IoUs are separate from Ultralytics OBB validation metrics.
+    Confidence is fixed for this report, independent of OCR configuration.
+    """
+    rows = []
+    with (out/'splits.csv').open(newline='') as handle:
+        samples = [row for row in csv.DictReader(handle) if row['split'] == 'test']
+    if not samples:
+        raise ValueError('No test samples for IoU evaluation')
+    for row in samples:
+        image_id = row['image_id']
+        path = out/'images/test'/f'{image_id}.jpg'
+        label = (out/'labels/test'/f'{image_id}.txt').read_text().splitlines()
+        if len(label) != 1:
+            raise ValueError(f'Expected one card label for {image_id}')
+        values = label[0].split()
+        if len(values) != 9 or values[0] != '0':
+            raise ValueError(f'Invalid one-class OBB label for {image_id}')
+        with Image.open(path) as image:
+            size = np.array(image.size)
+        expected = np.array(values[1:], dtype=float).reshape(4, 2) * size
+        result = model.predict(source=str(path), conf=confidence,
+                               device=options['device'], imgsz=options['imgsz'],
+                               verbose=False)[0]
+        boxes = result.obb
+        detected = boxes is not None and len(boxes) > 0
+        value, selected_confidence, count = 0.0, None, 0
+        if detected:
+            count = len(boxes)
+            index = int(boxes.conf.argmax().item())
+            selected_confidence = float(boxes.conf[index].item())
+            value = polygon_iou(boxes.xyxyxyxy[index].cpu().numpy(), expected)
+        rows.append({'image_id': image_id, 'iou': value, 'detected': detected,
+                     'confidence': selected_confidence, 'detections': count})
+    values = [row['iou'] for row in rows]
+    metrics = {'images': len(rows), 'missed_cards': sum(not row['detected'] for row in rows),
+               'min_iou': min(values), 'max_iou': max(values),
+               'mean_iou': float(np.mean(values)), 'confidence_threshold': confidence,
+               'selection': 'highest-confidence prediction per image; misses count as IoU 0',
+               'geometry': 'convex polygon intersection over union',
+               'extra_detections': sum(max(0, row['detections'] - 1) for row in rows)}
+    dump(save_dir/'iou_metrics.json', metrics)
+    dump(save_dir/'iou_per_image.json', rows)
+    print(f"Polygon IoU (misses=0, conf={confidence}): "
+          f"min={metrics['min_iou']:.6f}, max={metrics['max_iou']:.6f}, "
+          f"mean={metrics['mean_iou']:.6f}; missed={metrics['missed_cards']}/{len(rows)}")
+    return metrics
+
+
 def model_action(args, cfg):
     out = prepared(cfg)
     if not torch.cuda.is_available():
@@ -226,9 +295,10 @@ def model_action(args, cfg):
         if model.task != 'obb' or model.names != {0: 'id_card'}:
             raise ValueError('Expected a trained one-class id_card OBB checkpoint')
         results = model.val(data=str(out/'dataset.yaml'), split='test', device=options['device'],
-                            imgsz=options['imgsz'], batch=options['batch'],
+                            imgsz=options['imgsz'], batch=options['batch'], workers=options.get('workers', 4),
                             project=str(out/'runs'), name='yolo_test', plots=True)
         dump(Path(results.save_dir)/'metrics.json', results.results_dict)
+        test_iou(model, out, options, Path(results.save_dir))
         return
     options.update(data=str(out/'dataset.yaml'), project=str(out/'runs'),
                    name=args.command, exist_ok=False)
