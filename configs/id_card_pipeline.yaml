@@ -2,7 +2,7 @@
 images: id-card-parsing/data
 annotations: id-card-parsing/annotations
 manifest: id-card-parsing/splits.csv
-output: data/id_cards/v2
+output: data/id_cards/v3
 # Reviewed normalized field rectangles go here. Never use guessed field positions.
 template: configs/id_card_fields.json
 card_size: [800, 1200]  # width, height; agree on orientation and aspect ratio

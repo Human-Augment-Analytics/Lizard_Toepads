@@ -123,8 +123,8 @@ def manifest(cfg, images, records):
             group_splits[group] = split
             rows.append(row)
     counts = Counter(r['split'] for r in rows)
-    if not 50 <= counts['train'] <= 100 or not 20 <= counts['test'] <= 100 or counts['val'] < 1:
-        raise ValueError(f'Need 50–100 train, 20–100 test, and a separate nonempty validation set; got {dict(counts)}')
+    if not 50 <= counts['train'] <= 500 or not 20 <= counts['test'] <= 500 or counts['val'] < 1:
+        raise ValueError(f'Need 50–500 train, 20–500 test, and a separate nonempty validation set; got {dict(counts)}')
     return rows
 
 
