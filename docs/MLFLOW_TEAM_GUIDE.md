@@ -17,20 +17,41 @@ and [LizardMorph](https://github.com/Human-Augment-Analytics/LizardMorph).
 
 ### Current availability
 
-The private research pilot supports complete pipeline bundles, explicit numeric
-MLflow versions, import into the app catalog, version selection, real-image
-inference, rollback, and provenance in exported analyses. It includes ML-Morph,
-an older Albert ViT checkpoint, and the newly trained dlib candidate below.
+The repositories include the complete-bundle MLflow integration: packaging and
+registration in `Lizard_Toepads`, and model discovery, validated import, version
+selection, inference, rollback and export provenance in `LizardMorph`.
+The private research runtime has exercised ML-Morph, an older Albert ViT checkpoint,
+and the newly trained dlib candidate below. Start with current `main` checkouts;
+the historical source archive below is for reproducing the recorded experiment.
 
-**The pilot and new training implementation are not merged into the shared
-`main` branches.** This documentation change does not publish those implementation
-branches. Pilot-only files such as `register_bundle.py`, `train_dlib_e2e.py`, and
-`deploy/mlflow-pilot/compose.yaml` require the reviewed pilot source described
-below; they are not available simply by checking out this documentation PR.
+The runtime remains private and coordinator-operated. Shared runtime access,
+permanent operating ownership and backup/restore verification remain team work.
+No scientific default-model promotion has been made.
 
-The current runtime is private and coordinator-operated. Shared runtime access,
-permanent operating ownership, and publication of the implementation remain team
-work. No scientific default-model promotion has been made.
+### What happens when a new model version is registered?
+
+**A new model version does not create a new app or deployment.** One LizardMorph
+app can install several model versions side by side:
+
+1. Training/evaluation produces a complete compatible package.
+2. `register_bundle.py` explicitly creates an MLflow run and a numeric version
+   under a named model. Saving a checkpoint alone does not register it.
+3. Open **Research models** in LizardMorph and refresh its registry list. The new
+   version becomes available for inspection; it is not automatically installed.
+4. Choose **Import this version** to download and validate its full bundle.
+5. Choose **Use this version** to open an analysis with that installed model.
+
+Existing analyses retain their model identity. Registration/import does not move
+an alias, change a default, rebuild the app or migrate existing analyses. Compatible
+weights use the existing adapter; a new architecture or preprocessing/output
+contract may require app code, tests and a deployment. A fresh deployment also
+needs its configured registry and persistent data; merging code does not transfer
+the private runtime's models or experiment database.
+
+Read the [interactive HTML guide](mlflow-guide.html) for the system diagram and
+searchable document map. GitHub displays HTML source; download the file and open
+it in a browser. The [PACE handoff checklist](MODEL_HANDOFF.md) and
+[metadata template](model-handoff-metadata.example.json) are the upload references.
 
 ## What each system does
 
@@ -56,14 +77,14 @@ be explicitly logged; missing historical training provenance cannot be recovered
 by registering a checkpoint alone. See the official [tracking](https://mlflow.org/docs/latest/tracking/)
 and [registry](https://mlflow.org/docs/latest/registry/) documentation.
 
-The current pilot serves bundle artifacts from MLflow's persistent artifact
+The integration serves bundle artifacts from MLflow's persistent artifact
 store. The older [MLflow deployment plan](PLAN_MLFLOW_DEPLOYMENT.md) describes an
 earlier GitHub Releases distribution design. Treat that file as historical design
 context; use this guide for the verified bundle workflow.
 
 ## Organize development
 
-The recommended organization reuses the two repositories and the working pilot.
+The recommended organization reuses the two repositories and the working integration.
 The project board and permanent role assignments described here are proposals,
 not claims that those arrangements are already configured.
 
@@ -208,19 +229,19 @@ metric definitions and acceptance thresholds before deciding whether to promote
 a candidate. Check export/native parity and intended-host latency/memory.
 
 New model families need an adapter if their input/output contract differs. The
-pilot supports dlib rectify-512 and the specific older ViT coordinate contract
+integration supports dlib rectify-512 and the specific older ViT coordinate contract
 `albert-vit-aabb-224-bgr-v1`. Its dual-pass detector decoder expects the legacy
 H7 six-class output. A four-class H10/H11 detector or a newer DINO/HRNet model is
 not automatically compatible with that decoder/adapter.
 
 ### 2. Build the complete pipeline bundle
 
-The pilot producer accepts a directory containing `bundle.json` plus all referenced
+The producer accepts a directory containing `bundle.json` plus all referenced
 detector/predictor files. The `lizard-pipeline-v1` bundle records the pipeline
 manifest, preprocessing, landmark schema, checksums, source, and evaluation
 provenance. The importer validates compatibility before exposing a model.
 
-Use the reviewed producer checkout/archive, not a fresh `main` checkout. With
+Use a current `Lizard_Toepads` main checkout. With
 MLflow **2.22.4** installed and an explicit `BUNDLE_DIR` and `MODEL_NAME`, its CLI is:
 
 ```sh
@@ -231,7 +252,7 @@ python scripts/deployment/register_bundle.py \
 ```
 
 The loopback address requires the runtime or the SSH forwarding below. Inside
-the pilot Compose network, use `http://mlflow:5000`. Each invocation creates a
+the Compose network, use `http://mlflow:5000`. Each invocation creates a
 new run/version, so do not re-register a model just to restart a service.
 
 The November 9 orchestration additionally attached training parameters, 32
@@ -332,7 +353,8 @@ python "$workdir/scripts/deployment/verify_dlib_example.py" \
 
 Expected: `verified: true`, nine landmarks, and `max_abs_error_px: 0.0`.
 
-For a new training run, use `train_dlib_e2e.py --help` in that source archive.
+For a new training run, use `python scripts/deployment/train_dlib_e2e.py --help`
+in a current main checkout. Use the archived revision for an exact historical rerun.
 The script expects a verified research-data worktree supplied through
 `--source-root`, with the four original-coordinate finger/toe train/test XMLs
 under `ml-morph/`, OBB label files under `data/bot_obb_from_tps/`, and readable
@@ -411,7 +433,7 @@ Then open the app at `http://127.0.0.1:18603/#/models`, or MLflow at
 `4975c4fe04eb413ba0d1766936284012`. These addresses are private tunnel endpoints,
 not team-wide public URLs. The pilot has no public-serving authentication layer.
 
-From the **reviewed LizardMorph pilot checkout** on the runtime host, the
+From a **current LizardMorph main checkout** on the runtime host, the
 coordinator can use:
 
 ```sh
@@ -436,16 +458,16 @@ the November 9 E2E run**; it remains an operating acceptance task. Avoid
 ## Next team milestones
 
 1. Albert shares one complete newer checkpoint package through `incoming/axu39`.
-2. Publish/review the pilot implementation from both repositories onto current
-   main branches. Account for the earlier
+2. Use the integrated code from both main branches and record the exact compatible
+   pair of source revisions in every release receipt. The older
    [LizardMorph PR #18](https://github.com/Human-Augment-Analytics/LizardMorph/pull/18)
-   before superseding or closing it; do not assume its older branch is the
-   current two-model implementation.
+   targeted an earlier architecture; the current complete-bundle implementation
+   supersedes that integration path.
 3. Name the research/evaluation and runtime owners, agree on an independently
    held-out benchmark/thresholds, and qualify the next model through the same
    package/import/export path.
 4. Establish shared runtime access and test backup/restore before expanding use.
 
-After this guide is merged, the coordinator should keep the PACE handoff README
+The coordinator should keep the PACE handoff README
 and template instructions aligned with it. Preserve experiment receipts as
 historical evidence rather than updating them to describe later code or models.
