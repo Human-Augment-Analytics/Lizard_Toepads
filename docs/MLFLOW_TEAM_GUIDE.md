@@ -17,7 +17,7 @@ and [LizardMorph](https://github.com/Human-Augment-Analytics/LizardMorph).
 
 ### Current availability
 
-The private Mac mini pilot supports complete pipeline bundles, explicit numeric
+The private research pilot supports complete pipeline bundles, explicit numeric
 MLflow versions, import into the app catalog, version selection, real-image
 inference, rollback, and provenance in exported analyses. It includes ML-Morph,
 an older Albert ViT checkpoint, and the newly trained dlib candidate below.
@@ -92,7 +92,7 @@ Environment roles:
 - Laptop: edit, coordinate, review, and run lightweight checks.
 - PACE: research data and scheduled training/evaluation. Run heavy work through
   Slurm; save job IDs, configurations, checkpoints, and resume instructions.
-- Mac mini: isolated Docker integration tests and private staging. Run
+- Integration test/staging host: isolated Docker tests and private staging. Run
   database-backed tests in the project's isolated containers against the exact
   checkout being reviewed.
 - Additional GPU hosts: use only after verifying their role, data access, and
@@ -258,8 +258,8 @@ remains an explicit research-owner decision.
 
 ### 4. Record acceptance evidence
 
-Use isolated Mac mini Docker tests against the reviewed checkout for
-database-backed checks. Include bundle rejection/compatibility, native parity,
+Use isolated Docker test containers on the integration host against the reviewed
+checkout for database-backed checks. Include bundle rejection/compatibility, native parity,
 real registration/download/import, repeated import identity, held-out full-image
 inference, browser rendering/export, version switching, restart persistence,
 and unchanged existing models/aliases. Record exact code/image/model hashes and
@@ -315,8 +315,8 @@ the project group without entering the author's home directory.
 ### Reproduce the native example or prepare another training run
 
 The preserved environment was Python 3.12.2, dlib 19.24.2, OpenCV 4.13.0, and
-NumPy 1.26.4. The same native example was independently checked in the Mac mini
-app container with dlib 19.24.6 and produced identical coordinates.
+NumPy 1.26.4. The same native example was independently checked in the application
+container with dlib 19.24.6 and produced identical coordinates.
 
 On PACE, with a compatible environment, extract the source into a new scratch
 directory and verify the preserved example:
@@ -371,7 +371,7 @@ Verified outcomes:
 - Training pixels matched the app's BGR rectify-512 contract, coordinates
   round-tripped, and the native example agreed across hosts.
 - **19 targeted producer/app bundle tests passed with no skips** in isolated
-  Docker on the Mac mini, including SQLite-backed import checks.
+  Docker test containers, including SQLite-backed import checks.
 - Browser import, upload of withheld specimen 1484, 18 rendered landmarks, and
   the real downloaded export ZIP passed. Its 18 TPS coordinates matched the API;
   model/input/data/split/evaluation hashes matched the package.
