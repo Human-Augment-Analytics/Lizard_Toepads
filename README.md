@@ -4,6 +4,10 @@
 **Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
 **Last Updated**: Junling Zhuang, 2026-03-06
 
+**Team workflow:** See the [LizardMorph / MLflow team guide](docs/MLFLOW_TEAM_GUIDE.md)
+for PACE model sharing, development responsibilities, registration and app verification,
+the completed E2E experiment, and current pilot availability.
+
 ## System Overview
 
 The project is split into two distinct parts:
@@ -324,6 +328,7 @@ Lizard_Toepads/
 
 ## Additional Documentation
 
+- [LizardMorph / MLflow Team Guide](docs/MLFLOW_TEAM_GUIDE.md)
 - [Baseline vs OBB Comparison](docs/COMPARISON_BASELINE_VS_OBB.md)
 - [OBB Crop & Rotate Experiment](docs/EXPERIMENT_CROP_ROTATE_OBB.md)
 - [Inference with Flip Strategy](docs/INFERENCE_WITH_FLIP.md)
