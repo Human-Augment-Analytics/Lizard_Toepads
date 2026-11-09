@@ -4,7 +4,7 @@
 **Cluster**: Georgia Tech PACE/ICE (also applicable to Phoenix and Hive)
 **Last Updated**: Junling Zhuang, 2026-03-06
 
-**Team workflow:** See the [LizardMorph / MLflow team guide](docs/MLFLOW_TEAM_GUIDE.md)
+**MLflow workflow:** See the [LizardMorph / MLflow team guide](docs/MLFLOW_TEAM_GUIDE.md)
 for PACE model sharing, development responsibilities, registration and app verification,
 the completed E2E experiment, and current pilot availability.
 
@@ -20,7 +20,7 @@ The project is split into two distinct parts:
 2.  **[LizardMorph (Web App)](https://github.com/Human-Augment-Analytics/LizardMorph)**: The User Interface & Deployment platform.
     *   **Purpose**: A web application that allows researchers to upload images, run inference using the models trained here, and visualize results.
     *   **Stack**: Backend (Python/FastAPI), Frontend (Next.js/React).
-    *   **Deployment**: Models trained here (e.g., `best.pt` for YOLO, `predictor.dat` for dlib) are registered via **MLflow** or moved to the `backend/models/` directory of the LizardMorph app.
+    *   **Deployment**: Models trained here (e.g., `best.pt` for YOLO, `predictor.dat` for dlib) are registered via **[MLflow](docs/MLFLOW_TEAM_GUIDE.md)** or moved to the `backend/models/` directory of the LizardMorph app.
 
 ---
 
