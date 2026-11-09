@@ -1,5 +1,9 @@
 # Plan: MLflow Model Registry + WebGPU Frontend Deployment
 
+> Historical architecture proposal. For the current private bundle-based pilot,
+> PACE handoff steps, verification results, and remaining integration work, use the
+> [LizardMorph / MLflow team guide](MLFLOW_TEAM_GUIDE.md).
+
 ## Overview
 
 Train YOLO on PACE/ICE → quantize + export ONNX → push metrics to MLflow (app backend) + upload `.onnx` to GitHub Releases → frontend loads model via ONNX Runtime Web + **WebGPU** (browser-native GPU, no server GPU needed).
