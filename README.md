@@ -6,7 +6,8 @@
 
 **MLflow workflow:** See the [LizardMorph / MLflow team guide](docs/MLFLOW_TEAM_GUIDE.md)
 for PACE model sharing, development responsibilities, registration and app verification,
-the completed E2E experiment, and current pilot availability.
+the completed E2E experiment, and current integration availability.
+For a visual walkthrough and document map, download the [HTML guide](docs/mlflow-guide.html) and open it in a browser.
 
 ## System Overview
 
