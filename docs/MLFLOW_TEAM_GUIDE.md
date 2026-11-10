@@ -408,7 +408,7 @@ Verified outcomes:
 
 ## Private access and operations
 
-The pilot binds services to loopback on the Docker host:
+The private runtime binds services to loopback on the Docker host:
 
 | Service | Host port |
 | --- | ---: |
@@ -431,7 +431,7 @@ ssh -N \
 Then open the app at `http://127.0.0.1:18603/#/models`, or MLflow at
 `http://127.0.0.1:18600`. The experiment above is MLflow experiment `1`, run
 `4975c4fe04eb413ba0d1766936284012`. These addresses are private tunnel endpoints,
-not team-wide public URLs. The pilot has no public-serving authentication layer.
+not team-wide public URLs. The private runtime has no public-serving authentication layer.
 
 From a **current LizardMorph main checkout** on the runtime host, the
 coordinator can use:
@@ -453,7 +453,7 @@ project, archive all four named volumes (`registry`, `models`, `work`, `sessions
 together, retain source/image IDs, and restart. Restore into a separate project
 and verify model hashes and inference. **Backup/restore was not exercised by
 the November 9 E2E run**; it remains an operating acceptance task. Avoid
-`down -v` when preserving the pilot's data.
+`down -v` when preserving the runtime's data.
 
 ## Next team milestones
 
