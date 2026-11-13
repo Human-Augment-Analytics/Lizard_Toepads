@@ -1,0 +1,7 @@
+# Card detection metrics
+
+Run `python scripts/id_cards/pipeline.py test --weights PATH_TO_BEST_PT` on PACE. No retraining is needed for metrics on an existing checkpoint. `metrics.json` still contains the detector's standard evaluation. `iou_metrics.json` and `iou_per_image.json` still report polygon overlap, with misses scored as zero.
+
+`pose_metrics.json` reports min, max, and mean absolute rotation error (degrees) and center translation error (prepared image pixels and percent of image diagonal). `pose_per_image.json` records predicted and reference long-edge angles plus signed x/y center offsets. The same highest-confidence OBB at confidence 0.25 is used for both reports. Misses remain visible but are excluded from pose summaries because they have no angle or center. An OBB measures angle modulo 180 degrees; upright text direction needs a separate cue for OCR.
+
+For the next dataset, automatically annotate the 560 new scans and review the boxes before adding them to a new split manifest. Keep existing assignments and group repeated specimens together. If all 560 are accepted, one comparison split is 750 train, 180 validation, and the same 130 test images (450 new train and 110 new validation). The validator now supports up to 1000 training images. Use a new prepared output directory; retain the prior dataset and checkpoint. A separate fresh evaluation set would give stronger evidence of generalization.

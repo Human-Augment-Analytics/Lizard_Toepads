@@ -1,0 +1,7 @@
+# Exact quarter turn augmentation
+
+After reviewing the new labels and approving the expanded manifest, make a separate config with that manifest and a new output path in PACE scratch. Add the top-level setting `quarter_turn_fraction: 0.25`. This selects a seeded 25% sample of the training split, including eligible scans from the original training batch, and generates exact 90° and 270° counterclockwise copies with corresponding YOLO OBB labels. Source images, annotations, and split manifests are unchanged. With 620 unique training scans, that is 155 selected scans, 310 rotated copies, and 930 training files. The existing `train.degrees` setting still controls online augmentation; choose the same value for a controlled comparison of exact turns.
+
+Run `python scripts/id_cards/pipeline.py prepare --config PATH_TO_CONFIG` and then `python scripts/id_cards/pipeline.py train --config PATH_TO_CONFIG`. Training uses the original validation set for checkpoint selection. The separate rotated validation dataset contains two rotated copies per validation scan and is never used to train. Use `python scripts/id_cards/pipeline.py validate-rotated --config PATH_TO_CONFIG --weights PATH_TO_BEST_PT` to measure sideways detection. The run reports mAP, polygon IoU, and pose errors separately from normal `test` results. Rotated variants and their source IDs are recorded in `quarter_turn_variants.json`.
+
+The copies are not independent scans. Test images are not rotated or copied into training. This augmentation does not correct OCR text orientation.

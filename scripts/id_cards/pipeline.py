@@ -6,6 +6,7 @@ import csv
 import hashlib
 from importlib.metadata import distributions
 import json
+import random
 from pathlib import Path
 import shutil
 import subprocess
@@ -123,8 +124,8 @@ def manifest(cfg, images, records):
             group_splits[group] = split
             rows.append(row)
     counts = Counter(r['split'] for r in rows)
-    if not 50 <= counts['train'] <= 500 or not 20 <= counts['test'] <= 500 or counts['val'] < 1:
-        raise ValueError(f'Need 50–500 train, 20–500 test, and a separate nonempty validation set; got {dict(counts)}')
+    if not 50 <= counts['train'] <= 1000 or not 20 <= counts['test'] <= 500 or counts['val'] < 1:
+        raise ValueError(f'Need 50–1000 train, 20–500 test, and a separate nonempty validation set; got {dict(counts)}')
     return rows
 
 
@@ -154,9 +155,47 @@ def fields(cfg):
     return definitions
 
 
+def quarter_turn(image, corners, degrees):
+    """Rotate an image and its normalized OBB corners counterclockwise."""
+    x, y = np.asarray(corners).T
+    if degrees == 90:
+        return image.transpose(Image.Transpose.ROTATE_90), np.column_stack((y, 1 - x))
+    if degrees == 270:
+        return image.transpose(Image.Transpose.ROTATE_270), np.column_stack((1 - y, x))
+    raise ValueError('Expected 90 or 270 degrees')
+
+
+def write_quarter_turns(out, row, image, normalized, split):
+    image_id = row['image_id']
+    variants = []
+    images, labels = out/'images'/split, out/'labels'/split
+    images.mkdir(parents=True, exist_ok=True)
+    labels.mkdir(parents=True, exist_ok=True)
+    for degrees in (90, 270):
+        rotated, points = quarter_turn(image, normalized, degrees)
+        variant = f'{image_id}__ccw{degrees}'
+        # Exclusive creation avoids collisions with any existing output.
+        with (images/f'{variant}.jpg').open('xb') as file:
+            rotated.save(file, format='JPEG', quality=95)
+        with (labels/f'{variant}.txt').open('x') as file:
+            file.write('0 ' + ' '.join(f'{x:.8f}' for x in points.ravel()) + '\n')
+        variants.append({'image_id': variant, 'source_image_id': image_id,
+                         'group_id': row['group_id'], 'split': split, 'ccw_degrees': degrees})
+    return variants
+
+
 def prepare(cfg):
     images, records = inventory(cfg)
     rows = manifest(cfg, images, records)
+    fraction = float(cfg.get('quarter_turn_fraction', 0))
+    if not 0 <= fraction <= 1:
+        raise ValueError('quarter_turn_fraction must be between 0 and 1')
+    train_ids = sorted(row['image_id'] for row in rows if row['split'] == 'train')
+    n = max(1, round(len(train_ids) * fraction)) if fraction else 0
+    rotated_train = set(random.Random(cfg['train'].get('seed', 42)).sample(train_ids, n))
+    rotations = []
+    if fraction and any(row['image_id'].endswith(('__ccw90', '__ccw270')) for row in rows):
+        raise ValueError('Image IDs must not use reserved __ccw90 or __ccw270 suffixes')
     out = resolve(cfg['output'])
     if out.exists():
         raise FileExistsError(f'Refusing to overwrite {out}; choose a new output path')
@@ -177,6 +216,10 @@ def prepare(cfg):
         im.save(image_path, quality=95)
         normalized = original / np.array(size)
         label_path.write_text('0 ' + ' '.join(f'{x:.8f}' for x in normalized.ravel()) + '\n')
+        if image_id in rotated_train:
+            rotations.extend(write_quarter_turns(out, row, im, normalized, 'train'))
+        if fraction and split == 'val':
+            rotations.extend(write_quarter_turns(out, row, im, normalized, 'val_rotated'))
         annotated = im.copy()
         draw = ImageDraw.Draw(annotated)
         draw.line([tuple(p) for p in pts] + [tuple(pts[0])], fill='red', width=4)
@@ -190,6 +233,12 @@ def prepare(cfg):
     data = {'path': str(out), 'train': 'images/train', 'val': 'images/val',
             'test': 'images/test', 'names': {0: 'id_card'}, 'nc': 1}
     (out / 'dataset.yaml').write_text(yaml.safe_dump(data, sort_keys=False))
+    if fraction:
+        rotated_data = dict(data, val='images/val_rotated')
+        (out/'dataset_rotated_val.yaml').write_text(yaml.safe_dump(rotated_data, sort_keys=False))
+        dump(out/'quarter_turn_variants.json', rotations)
+        counts = Counter(row['split'] for row in rotations)
+        print(f"Quarter-turn copies: {counts['train']} training, {counts['val_rotated']} rotated validation")
     (out / 'config.yaml').write_text(yaml.safe_dump(cfg, sort_keys=False))
     shutil.copyfile(resolve(cfg['manifest']), out / 'splits.csv')
     dump(out / 'records.json', records)
@@ -210,6 +259,8 @@ def prepared(cfg):
     for key in ('images', 'annotations', 'manifest', 'card_size', 'scan_max_side'):
         if saved[key] != cfg[key]:
             raise ValueError(f'Preparation setting changed ({key}); prepare a new output')
+    if saved.get('quarter_turn_fraction', 0) != cfg.get('quarter_turn_fraction', 0):
+        raise ValueError('Preparation setting changed (quarter_turn_fraction); prepare a new output')
     return out
 
 
@@ -231,21 +282,71 @@ def polygon_iou(first, second):
     return float(np.clip(intersection / union, 0, 1)) if union > 0 else 0.0
 
 
-def test_iou(model, out, options, save_dir, confidence=0.25):
+def obb_pose(points):
+    """Return the box center and the long-edge angle, clockwise from image +x."""
+    points = np.asarray(points, dtype=float)
+    edges = np.roll(points, -1, axis=0) - points
+    dx, dy = edges[np.argmax(np.sum(edges**2, axis=1))]
+    return points.mean(axis=0), float(np.degrees(np.arctan2(dy, dx)) % 180)
+
+
+def obb_pose_errors(predicted, expected, image_size):
+    pred_center, pred_angle = obb_pose(predicted)
+    ref_center, ref_angle = obb_pose(expected)
+    dx, dy = pred_center - ref_center
+    distance = float(np.hypot(dx, dy))
+    return {
+        'predicted_angle_deg': pred_angle,
+        'reference_angle_deg': ref_angle,
+        'rotation_error_deg': abs((pred_angle - ref_angle + 90) % 180 - 90),
+        'center_dx_px': float(dx),
+        'center_dy_px': float(dy),
+        'translation_error_px': distance,
+        'translation_error_image_diagonal_pct': 100 * distance / float(np.linalg.norm(image_size)),
+    }
+
+
+def save_pose_metrics(rows, save_dir, confidence):
+    """Summarize pose only where a box was predicted; keep misses visible."""
+    detected = [row for row in rows if row['detected']]
+    summary = {'images': len(rows), 'scored_cards': len(detected),
+               'missed_cards': len(rows) - len(detected), 'confidence_threshold': confidence,
+               'selection': 'highest-confidence OBB per image; misses excluded from pose summaries',
+               'angle_convention': 'long edge clockwise from image +x modulo 180 degrees'}
+    for key in ('rotation_error_deg', 'translation_error_px', 'translation_error_image_diagonal_pct'):
+        values = [row[key] for row in detected]
+        summary[key] = {'min': min(values) if values else None,
+                        'max': max(values) if values else None,
+                        'mean': float(np.mean(values)) if values else None}
+    dump(save_dir/'pose_metrics.json', summary)
+    dump(save_dir/'pose_per_image.json', rows)
+    if detected:
+        print(f"OBB pose errors ({len(detected)}/{len(rows)} scored): "
+              f"mean angle={summary['rotation_error_deg']['mean']:.3f} deg, "
+              f"mean center offset={summary['translation_error_px']['mean']:.3f} px")
+    else:
+        print('OBB pose errors: no cards detected; summaries are null')
+
+
+def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test'):
     """One card per image: score the highest-confidence detection; misses score 0.
 
     These polygon IoUs are separate from Ultralytics OBB validation metrics.
     Confidence is fixed for this report, independent of OCR configuration.
     """
-    rows = []
-    with (out/'splits.csv').open(newline='') as handle:
-        samples = [row for row in csv.DictReader(handle) if row['split'] == 'test']
+    rows, pose_rows = [], []
+    if split == 'val_rotated':
+        samples = [row for row in json.loads((out/'quarter_turn_variants.json').read_text())
+                   if row['split'] == split]
+    else:
+        with (out/'splits.csv').open(newline='') as handle:
+            samples = [row for row in csv.DictReader(handle) if row['split'] == split]
     if not samples:
-        raise ValueError('No test samples for IoU evaluation')
+        raise ValueError(f'No {split} samples for IoU evaluation')
     for row in samples:
         image_id = row['image_id']
-        path = out/'images/test'/f'{image_id}.jpg'
-        label = (out/'labels/test'/f'{image_id}.txt').read_text().splitlines()
+        path = out/'images'/split/f'{image_id}.jpg'
+        label = (out/'labels'/split/f'{image_id}.txt').read_text().splitlines()
         if len(label) != 1:
             raise ValueError(f'Expected one card label for {image_id}')
         values = label[0].split()
@@ -260,11 +361,16 @@ def test_iou(model, out, options, save_dir, confidence=0.25):
         boxes = result.obb
         detected = boxes is not None and len(boxes) > 0
         value, selected_confidence, count = 0.0, None, 0
+        pose = None
         if detected:
             count = len(boxes)
             index = int(boxes.conf.argmax().item())
             selected_confidence = float(boxes.conf[index].item())
-            value = polygon_iou(boxes.xyxyxyxy[index].cpu().numpy(), expected)
+            predicted = boxes.xyxyxyxy[index].cpu().numpy()
+            value = polygon_iou(predicted, expected)
+            pose = obb_pose_errors(predicted, expected, size)
+        pose_row = {'image_id': image_id, 'detected': detected, 'confidence': selected_confidence}
+        pose_rows.append(dict(pose_row, **(pose or {})))
         rows.append({'image_id': image_id, 'iou': value, 'detected': detected,
                      'confidence': selected_confidence, 'detections': count})
     values = [row['iou'] for row in rows]
@@ -276,6 +382,7 @@ def test_iou(model, out, options, save_dir, confidence=0.25):
                'extra_detections': sum(max(0, row['detections'] - 1) for row in rows)}
     dump(save_dir/'iou_metrics.json', metrics)
     dump(save_dir/'iou_per_image.json', rows)
+    save_pose_metrics(pose_rows, save_dir, confidence)
     print(f"Polygon IoU (misses=0, conf={confidence}): "
           f"min={metrics['min_iou']:.6f}, max={metrics['max_iou']:.6f}, "
           f"mean={metrics['mean_iou']:.6f}; missed={metrics['missed_cards']}/{len(rows)}")
@@ -288,17 +395,22 @@ def model_action(args, cfg):
         raise RuntimeError('GPU unavailable; use an allocated GPU session')
     options = dict(cfg['train'])
     model_name = options.pop('model')
-    if args.command == 'test':
+    if args.command in ('test', 'validate-rotated'):
+        rotated = args.command == 'validate-rotated'
+        dataset = out/('dataset_rotated_val.yaml' if rotated else 'dataset.yaml')
+        if rotated and not dataset.is_file():
+            raise ValueError('Prepare a dataset with quarter_turn_fraction enabled first')
         if not args.weights or not resolve(args.weights).is_file():
-            raise ValueError('test requires --weights pointing to an existing best.pt')
+            raise ValueError(f'{args.command} requires --weights pointing to an existing best.pt')
         model = YOLO(str(resolve(args.weights)), task='obb')
         if model.task != 'obb' or model.names != {0: 'id_card'}:
             raise ValueError('Expected a trained one-class id_card OBB checkpoint')
-        results = model.val(data=str(out/'dataset.yaml'), split='test', device=options['device'],
+        results = model.val(data=str(dataset), split='val' if rotated else 'test', device=options['device'],
                             imgsz=options['imgsz'], batch=options['batch'], workers=options.get('workers', 4),
-                            project=str(out/'runs'), name='yolo_test', plots=True)
+                            project=str(out/'runs'), name='yolo_val_rotated' if rotated else 'yolo_test', plots=True)
         dump(Path(results.save_dir)/'metrics.json', results.results_dict)
-        test_iou(model, out, options, Path(results.save_dir))
+        test_iou(model, out, options, Path(results.save_dir),
+                 **({'split': 'val_rotated'} if rotated else {}))
         return
     options.update(data=str(out/'dataset.yaml'), project=str(out/'runs'),
                    name=args.command, exist_ok=False)
@@ -500,7 +612,7 @@ def retire():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command', choices=['check','prepare','smoke','train','test','baseline','field-evaluate','retire-tps'])
+    p.add_argument('command', choices=['check','prepare','smoke','train','test','validate-rotated','baseline','field-evaluate','retire-tps'])
     p.add_argument('--config', default='configs/id_card_pipeline.yaml')
     p.add_argument('--weights')
     p.add_argument('--resume')

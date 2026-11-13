@@ -56,6 +56,35 @@ class CardPipelineTests(unittest.TestCase):
             w=csv.DictWriter(f,fieldnames=['image_id','group_id','split','rotation_quarters'])
             w.writeheader();w.writerows(self.rows)
 
+    def test_quarter_turn_rotates_image_and_box_together(self):
+        image = Image.fromarray(np.array([[1,2,3],[4,5,6]], dtype=np.uint8))
+        box = np.array([[0,0],[1/3,0],[1/3,.5],[0,.5]])
+        rotated, points = p.quarter_turn(image, box, 90)
+        np.testing.assert_array_equal(np.asarray(rotated), [[3,6],[2,5],[1,4]])
+        np.testing.assert_allclose(points, [[0,1],[0,2/3],[.5,2/3],[.5,1]])
+        restored, restored_points = p.quarter_turn(rotated, points, 270)
+        np.testing.assert_array_equal(np.asarray(restored), np.asarray(image))
+        np.testing.assert_allclose(restored_points, box)
+
+    def test_prepare_quarter_turns_keep_splits_separate(self):
+        self.cfg['quarter_turn_fraction'] = .25
+        p.prepare(self.cfg)
+        out = p.resolve(self.cfg['output'])
+        variants = json.loads((out/'quarter_turn_variants.json').read_text())
+        original = {row['image_id']: row for row in self.rows}
+        self.assertEqual(len(list((out/'images/train').glob('*.jpg'))), 90)
+        self.assertEqual(len(list((out/'images/val').glob('*.jpg'))), 10)
+        self.assertEqual(len(list((out/'images/test').glob('*.jpg'))), 20)
+        self.assertEqual(len(list((out/'images/val_rotated').glob('*.jpg'))), 20)
+        for row in variants:
+            source = original[row['source_image_id']]
+            self.assertEqual(row['group_id'], source['group_id'])
+            self.assertEqual(source['split'], 'train' if row['split'] == 'train' else 'val')
+            self.assertTrue((out/'labels'/row['split']/f"{row['image_id']}.txt").is_file())
+        self.assertEqual((out/'splits.csv').read_bytes(), self.manifest.read_bytes())
+        self.assertEqual(yaml.safe_load((out/'dataset.yaml').read_text())['val'], 'images/val')
+        self.assertEqual(yaml.safe_load((out/'dataset_rotated_val.yaml').read_text())['val'], 'images/val_rotated')
+
     def test_polygon_iou_geometry(self):
         a = np.array([[0,0],[2,0],[2,2],[0,2]], dtype=float)
         self.assertAlmostEqual(p.polygon_iou(a, a), 1)
@@ -64,6 +93,20 @@ class CardPipelineTests(unittest.TestCase):
         # A diamond inscribed in the square has half its area.
         diamond = np.array([[1,0],[2,1],[1,2],[0,1]], dtype=float)
         self.assertAlmostEqual(p.polygon_iou(a, diamond), .5)
+
+    def test_obb_pose_errors_wrap_and_translate(self):
+        box = np.array([[-4,-1],[4,-1],[4,1],[-4,1]], dtype=float)
+        def rotated(degrees):
+            angle = np.radians(degrees)
+            c, s = np.cos(angle), np.sin(angle)
+            return box @ np.array([[c,s],[-s,c]])
+        pred = np.roll(rotated(5)[::-1], 2, axis=0) + [3,4]
+        result = p.obb_pose_errors(pred, rotated(175), [30,40])
+        self.assertAlmostEqual(result['predicted_angle_deg'], 5)
+        self.assertAlmostEqual(result['reference_angle_deg'], 175)
+        self.assertAlmostEqual(result['rotation_error_deg'], 10)
+        self.assertAlmostEqual(result['translation_error_px'], 5)
+        self.assertAlmostEqual(result['translation_error_image_diagonal_pct'], 10)
 
     def test_test_iou_counts_misses_and_uses_confidence(self):
         p.prepare(self.cfg)
@@ -99,6 +142,14 @@ class CardPipelineTests(unittest.TestCase):
         self.assertEqual(metrics['min_iou'], 0)
         self.assertAlmostEqual(metrics['max_iou'], 1, places=6)
         self.assertEqual(len(json.loads((out/'iou_per_image.json').read_text())), 20)
+        pose = json.loads((out/'pose_metrics.json').read_text())
+        self.assertEqual(pose['scored_cards'], 2)
+        self.assertEqual(pose['missed_cards'], 18)
+        self.assertAlmostEqual(pose['translation_error_px']['mean'], 100, places=5)
+        self.assertAlmostEqual(pose['rotation_error_deg']['max'], 0)
+        rows = json.loads((out/'pose_per_image.json').read_text())
+        self.assertFalse(rows[2]['detected'])
+        self.assertNotIn('rotation_error_deg', rows[2])
 
     def test_inverse_transform_and_invalid_geometry(self):
         np.testing.assert_allclose(p.corners(self.record,(200,300)),self.original)
@@ -117,7 +168,7 @@ class CardPipelineTests(unittest.TestCase):
         self.rows[60]['group_id']='animal60'
         for row in self.rows[:20]:row['split']='val'
         self.write_manifest()
-        with self.assertRaisesRegex(ValueError,'50–100'):p.manifest(self.cfg,images,records)
+        with self.assertRaisesRegex(ValueError,'50–1000'):p.manifest(self.cfg,images,records)
 
     def test_missing_images_fail_without_substituting_tps_scans(self):
         (self.images/'0000.jpg').unlink()
