@@ -1,0 +1,11 @@
+{
+  "images": 130,
+  "missed_cards": 0,
+  "min_iou": 0.9087878513962235,
+  "max_iou": 0.9833975428627866,
+  "mean_iou": 0.9603359442167907,
+  "confidence_threshold": 0.25,
+  "selection": "highest-confidence prediction per image; misses count as IoU 0",
+  "geometry": "convex polygon intersection over union",
+  "extra_detections": 1
+}

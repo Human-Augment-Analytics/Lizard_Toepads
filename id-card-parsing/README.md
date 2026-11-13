@@ -282,3 +282,105 @@ Paddle or rewriting saved predictions. The next successful OCR run saves the
 new structured JSON and CSV. Rule changes do not require rebuilding crops.
 
 Cold imports and native-library startup can take longer than subsequent runs.
+
+## Field template builder
+
+`template_builder` turns one blank card image into a reusable **field template**:
+a single JSON describing where every field lives on a normalized card and what
+kind of value each holds. A later pipeline consumes this template to auto-crop
+fields and route each crop to PaddleOCR with a per-field dictionary.
+
+Launch from the `id-card-parsing/` directory (Tkinter must be available, same as
+the annotator):
+
+```bash
+python -m template_builder
+```
+
+Workflow:
+
+1. **Open image** and drag to draw an oriented box around the card; the angle
+   slider rotates it. This hand-crops the card out of its background.
+2. **Normalize** rectifies the card upright and resize-pads it onto a square
+   canvas (default 512x512, configurable on the fields screen). Padding uses a
+   solid fill (white by default) so non-square cards keep their aspect ratio.
+3. On the normalized card, use the **Tool** control to switch between two modes:
+   - **Draw** (default): each click-and-drag spawns a new field box. Existing
+     boxes are never affected, so drawing a second box keeps the first. After a
+     box is drawn the tool drops into Select so you can label it right away.
+   - **Select**: click a box to select it, drag its interior to move it, drag a
+     corner handle to resize it, and press **Delete** (or the Delete field
+     button) to remove the selected box.
+
+   For each box set its **name** and **crop type** in the side panel:
+   - **Field (OCR)** (default): text is recognized, so set a **datatype**
+     (`text`, `integer`, `number`, `time`) and an optional recognition
+     **dictionary**. Rendered in blue.
+   - **Checkbox**: a non-OCR crop (checkbox / pixel-intensity readout). Datatype
+     and dictionary are disabled since they do not apply. Rendered in green with
+     a checkbox marker. The metadata applies to the currently selected box.
+
+   Re-opening a card that already has a saved template auto-restores its card
+   crop and all field boxes after you press Normalize, so you can edit an
+   existing template rather than redraw it. Templates saved before crop types
+   existed load with every box treated as a `field`.
+4. **Save template** writes `template/field_template.json` (configurable). Saving
+   is blocked until every box has a unique, valid name (`[a-z][a-z0-9_]*`).
+
+The field `box` uses the same `[left, top, right, bottom]` fraction convention as
+`card_ocr`'s layout, and the datatypes match the extraction engine, so
+`template_builder.export_layout.to_fields_layout` emits a `fields.json` that
+`card_ocr.fields.load_layout` accepts directly. Checkbox crops are routed
+separately: `to_checkboxes_layout` emits a `checkboxes` section accepted by
+`card_ocr.fields.load_checkboxes`, and both `to_fields_layout` and `to_ocr_rules`
+exclude checkbox boxes. The per-field `dictionary` is stored verbatim for the OCR
+stage to resolve; this tool does not load or validate dictionary contents.
+
+The backend (`config`, `normalize`, `template_record`, `export_layout`,
+`backend`) has no Tkinter dependency and is unit tested headlessly under
+`tests/` (`test_config`, `test_normalize`, `test_template_record`,
+`test_export_layout`, `test_template_backend`, `test_template_ui_smoke`).
+
+## End-to-end OCR pipeline
+
+`card_pipeline` reads scans with a field template from `template_builder`:
+
+1. **Detect:** a trained YOLO-OBB model finds the card on a letterboxed preview
+   (`--detect-size`, default 1280, matching the model's training size).
+2. **Canonicalize:** corners are reordered to TL, TR, BR, BL using the template
+   card's aspect ratio, so a portrait card stays portrait.
+3. **Normalize:** the card is rectified from a bounded high-resolution decode
+   and resize-padded to a square canvas.
+4. **Align:** the card is registered to the blank `template/template.jpg` (SIFT
+   + homography). This corrects cards scanned upside down and tightens the fit
+   beyond the detector box. Cards that cannot be registered are reported as
+   `alignment_failed` instead of producing misplaced crops.
+5. **Crop and read:** each `field` box is cropped and read with PaddleOCR, then
+   filtered by its dictionary. Checkbox boxes are cropped and recorded as
+   `deferred`; they are not inspected yet.
+
+Run it from `id-card-parsing/`:
+
+```bash
+python -m card_pipeline run --weights models/yolo11m_obb/best.pt --canvas-size 1024
+```
+
+Useful options: `--ids 2 3` (numeric IDs accept omitted leading zeros),
+`--confidence 0.25`, `--rules template/ocr_rules.json` for typed values,
+`--output results/pipeline/run1`, and `--replace` to overwrite earlier
+predictions. Template boxes are fractions, so `--canvas-size` can exceed the
+template's canvas to give handwriting more pixels; 1024 is a good default.
+
+Dictionaries: a field's `dictionary` is `numeric`, `alphanumeric`, `alpha`,
+`all`, or a literal allow-list such as `0123456789.`. Empty or `all` means no
+filter. Each field keeps the unfiltered `raw_text` beside the filtered `text`.
+
+Outputs in the run directory: `predictions.json` (per-scan detection,
+alignment, and per-field results with statuses), `predictions.csv` (one row
+per scan, one column per field), and `scans/<id>/` with `card.png`,
+`overlay.png`, `card_unaligned.png`, and `crops/<field>.png`. One failing scan
+or field never stops the run; the command exits with status 1 if any failed.
+
+PaddleOCR must be installed in the environment you run from
+(`requirements.txt`); without it the command stops before processing with an
+install hint.

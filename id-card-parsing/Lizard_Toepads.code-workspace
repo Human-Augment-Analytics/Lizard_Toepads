@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../HRNetBaseline/HRNet-Facial-Landmark-Detection"
+		},
+		{
+			"path": "../../LDEQ/LDEQ_RwR"
+		},
+		{
+			"path": "../../PIPNet"
+		}
+	],
+	"settings": {}
+}

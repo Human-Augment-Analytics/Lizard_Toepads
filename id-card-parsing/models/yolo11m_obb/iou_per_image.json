@@ -1,0 +1,912 @@
+[
+  {
+    "image_id": "0067",
+    "iou": 0.9613160131852684,
+    "detected": true,
+    "confidence": 0.9601977467536926,
+    "detections": 1
+  },
+  {
+    "image_id": "0031",
+    "iou": 0.9587251396853712,
+    "detected": true,
+    "confidence": 0.9580159783363342,
+    "detections": 1
+  },
+  {
+    "image_id": "0029",
+    "iou": 0.9618025779147373,
+    "detected": true,
+    "confidence": 0.9584826827049255,
+    "detections": 1
+  },
+  {
+    "image_id": "0091",
+    "iou": 0.9647036750476824,
+    "detected": true,
+    "confidence": 0.958267092704773,
+    "detections": 1
+  },
+  {
+    "image_id": "0100",
+    "iou": 0.9623139417939829,
+    "detected": true,
+    "confidence": 0.9611464142799377,
+    "detections": 1
+  },
+  {
+    "image_id": "0005",
+    "iou": 0.9752401943321097,
+    "detected": true,
+    "confidence": 0.9536560773849487,
+    "detections": 1
+  },
+  {
+    "image_id": "0057",
+    "iou": 0.9687177166117453,
+    "detected": true,
+    "confidence": 0.956903338432312,
+    "detections": 1
+  },
+  {
+    "image_id": "0078",
+    "iou": 0.9732246531926627,
+    "detected": true,
+    "confidence": 0.9570510387420654,
+    "detections": 1
+  },
+  {
+    "image_id": "0012",
+    "iou": 0.9332522060051247,
+    "detected": true,
+    "confidence": 0.9595865607261658,
+    "detections": 1
+  },
+  {
+    "image_id": "0072",
+    "iou": 0.9733340674818892,
+    "detected": true,
+    "confidence": 0.9576366543769836,
+    "detections": 1
+  },
+  {
+    "image_id": "0089",
+    "iou": 0.9508249164650091,
+    "detected": true,
+    "confidence": 0.9641169309616089,
+    "detections": 1
+  },
+  {
+    "image_id": "0014",
+    "iou": 0.9665267832992746,
+    "detected": true,
+    "confidence": 0.9603171944618225,
+    "detections": 1
+  },
+  {
+    "image_id": "0018",
+    "iou": 0.9627680323671458,
+    "detected": true,
+    "confidence": 0.9610873460769653,
+    "detections": 1
+  },
+  {
+    "image_id": "0030",
+    "iou": 0.9779812155062766,
+    "detected": true,
+    "confidence": 0.9573813676834106,
+    "detections": 1
+  },
+  {
+    "image_id": "0033",
+    "iou": 0.9618113201878727,
+    "detected": true,
+    "confidence": 0.9617190361022949,
+    "detections": 1
+  },
+  {
+    "image_id": "0037",
+    "iou": 0.9625924803876701,
+    "detected": true,
+    "confidence": 0.9528261423110962,
+    "detections": 1
+  },
+  {
+    "image_id": "0097",
+    "iou": 0.9617526659357268,
+    "detected": true,
+    "confidence": 0.9591936469078064,
+    "detections": 1
+  },
+  {
+    "image_id": "0004",
+    "iou": 0.96173498915495,
+    "detected": true,
+    "confidence": 0.9609628319740295,
+    "detections": 1
+  },
+  {
+    "image_id": "0015",
+    "iou": 0.9181193905927534,
+    "detected": true,
+    "confidence": 0.9532521963119507,
+    "detections": 1
+  },
+  {
+    "image_id": "0084",
+    "iou": 0.9610399484027541,
+    "detected": true,
+    "confidence": 0.9634859561920166,
+    "detections": 1
+  },
+  {
+    "image_id": "0133",
+    "iou": 0.9290421942190049,
+    "detected": true,
+    "confidence": 0.9592950940132141,
+    "detections": 1
+  },
+  {
+    "image_id": "0124",
+    "iou": 0.9567557549820882,
+    "detected": true,
+    "confidence": 0.9607201814651489,
+    "detections": 1
+  },
+  {
+    "image_id": "0135",
+    "iou": 0.9513766461540704,
+    "detected": true,
+    "confidence": 0.9644481539726257,
+    "detections": 1
+  },
+  {
+    "image_id": "0199",
+    "iou": 0.9688592032978742,
+    "detected": true,
+    "confidence": 0.9582154154777527,
+    "detections": 1
+  },
+  {
+    "image_id": "0183",
+    "iou": 0.9373780388041273,
+    "detected": true,
+    "confidence": 0.9542052149772644,
+    "detections": 1
+  },
+  {
+    "image_id": "0152",
+    "iou": 0.9575778865032956,
+    "detected": true,
+    "confidence": 0.9591656923294067,
+    "detections": 1
+  },
+  {
+    "image_id": "0186",
+    "iou": 0.9706348648867605,
+    "detected": true,
+    "confidence": 0.9581818580627441,
+    "detections": 1
+  },
+  {
+    "image_id": "0129",
+    "iou": 0.9685943983051479,
+    "detected": true,
+    "confidence": 0.9582101106643677,
+    "detections": 1
+  },
+  {
+    "image_id": "0190",
+    "iou": 0.9601182023181639,
+    "detected": true,
+    "confidence": 0.9591547250747681,
+    "detections": 1
+  },
+  {
+    "image_id": "0136",
+    "iou": 0.9793870395268374,
+    "detected": true,
+    "confidence": 0.9568760395050049,
+    "detections": 1
+  },
+  {
+    "image_id": "0111",
+    "iou": 0.9686544014445266,
+    "detected": true,
+    "confidence": 0.9567713737487793,
+    "detections": 1
+  },
+  {
+    "image_id": "0150",
+    "iou": 0.9623485314327245,
+    "detected": true,
+    "confidence": 0.9526966214179993,
+    "detections": 1
+  },
+  {
+    "image_id": "0162",
+    "iou": 0.9669242696481097,
+    "detected": true,
+    "confidence": 0.9578094482421875,
+    "detections": 1
+  },
+  {
+    "image_id": "0166",
+    "iou": 0.9728647212761478,
+    "detected": true,
+    "confidence": 0.9587656855583191,
+    "detections": 1
+  },
+  {
+    "image_id": "0177",
+    "iou": 0.940663436214991,
+    "detected": true,
+    "confidence": 0.9552426934242249,
+    "detections": 1
+  },
+  {
+    "image_id": "0147",
+    "iou": 0.9712594737956913,
+    "detected": true,
+    "confidence": 0.9579923152923584,
+    "detections": 1
+  },
+  {
+    "image_id": "0201",
+    "iou": 0.9616399978051112,
+    "detected": true,
+    "confidence": 0.9582919478416443,
+    "detections": 1
+  },
+  {
+    "image_id": "0155",
+    "iou": 0.9530939244475312,
+    "detected": true,
+    "confidence": 0.9611665606498718,
+    "detections": 1
+  },
+  {
+    "image_id": "0188",
+    "iou": 0.950861903037009,
+    "detected": true,
+    "confidence": 0.9594563245773315,
+    "detections": 1
+  },
+  {
+    "image_id": "0115",
+    "iou": 0.974507316260119,
+    "detected": true,
+    "confidence": 0.9562199711799622,
+    "detections": 1
+  },
+  {
+    "image_id": "0139",
+    "iou": 0.9229440277412508,
+    "detected": true,
+    "confidence": 0.9532428979873657,
+    "detections": 1
+  },
+  {
+    "image_id": "0126",
+    "iou": 0.9624289229117964,
+    "detected": true,
+    "confidence": 0.9606555104255676,
+    "detections": 1
+  },
+  {
+    "image_id": "0142",
+    "iou": 0.9353167670281761,
+    "detected": true,
+    "confidence": 0.9613493084907532,
+    "detections": 1
+  },
+  {
+    "image_id": "0143",
+    "iou": 0.9506842911626291,
+    "detected": true,
+    "confidence": 0.9549258351325989,
+    "detections": 1
+  },
+  {
+    "image_id": "0121",
+    "iou": 0.977020758639896,
+    "detected": true,
+    "confidence": 0.9571902751922607,
+    "detections": 1
+  },
+  {
+    "image_id": "0169",
+    "iou": 0.9242071171697833,
+    "detected": true,
+    "confidence": 0.9604781866073608,
+    "detections": 1
+  },
+  {
+    "image_id": "0164",
+    "iou": 0.978085492076724,
+    "detected": true,
+    "confidence": 0.9574517011642456,
+    "detections": 1
+  },
+  {
+    "image_id": "0163",
+    "iou": 0.9206094325666849,
+    "detected": true,
+    "confidence": 0.9633449912071228,
+    "detections": 1
+  },
+  {
+    "image_id": "0110",
+    "iou": 0.9391176244076519,
+    "detected": true,
+    "confidence": 0.961904764175415,
+    "detections": 1
+  },
+  {
+    "image_id": "0137",
+    "iou": 0.9752546787520752,
+    "detected": true,
+    "confidence": 0.9572917819023132,
+    "detections": 1
+  },
+  {
+    "image_id": "0202",
+    "iou": 0.932987890735778,
+    "detected": true,
+    "confidence": 0.9520533680915833,
+    "detections": 1
+  },
+  {
+    "image_id": "0149",
+    "iou": 0.9752474880000276,
+    "detected": true,
+    "confidence": 0.9574726223945618,
+    "detections": 1
+  },
+  {
+    "image_id": "0105",
+    "iou": 0.9444374746351234,
+    "detected": true,
+    "confidence": 0.9609445929527283,
+    "detections": 1
+  },
+  {
+    "image_id": "0154",
+    "iou": 0.9687299986908356,
+    "detected": true,
+    "confidence": 0.9560248851776123,
+    "detections": 1
+  },
+  {
+    "image_id": "0119",
+    "iou": 0.9550435660859742,
+    "detected": true,
+    "confidence": 0.959135115146637,
+    "detections": 1
+  },
+  {
+    "image_id": "0141",
+    "iou": 0.9087878513962235,
+    "detected": true,
+    "confidence": 0.9518011212348938,
+    "detections": 1
+  },
+  {
+    "image_id": "0161",
+    "iou": 0.9683702929540559,
+    "detected": true,
+    "confidence": 0.9574291110038757,
+    "detections": 1
+  },
+  {
+    "image_id": "0171",
+    "iou": 0.9457990279563401,
+    "detected": true,
+    "confidence": 0.9620255827903748,
+    "detections": 1
+  },
+  {
+    "image_id": "0125",
+    "iou": 0.9565389577510114,
+    "detected": true,
+    "confidence": 0.9634804725646973,
+    "detections": 1
+  },
+  {
+    "image_id": "0165",
+    "iou": 0.9656975545811691,
+    "detected": true,
+    "confidence": 0.9577031135559082,
+    "detections": 1
+  },
+  {
+    "image_id": "0127",
+    "iou": 0.9563765593331979,
+    "detected": true,
+    "confidence": 0.9610762596130371,
+    "detections": 1
+  },
+  {
+    "image_id": "0108",
+    "iou": 0.9567267478681923,
+    "detected": true,
+    "confidence": 0.9608316421508789,
+    "detections": 1
+  },
+  {
+    "image_id": "0109",
+    "iou": 0.9524961895614518,
+    "detected": true,
+    "confidence": 0.9590206146240234,
+    "detections": 1
+  },
+  {
+    "image_id": "0170",
+    "iou": 0.953146735224031,
+    "detected": true,
+    "confidence": 0.9624212384223938,
+    "detections": 1
+  },
+  {
+    "image_id": "0185",
+    "iou": 0.9475295022685024,
+    "detected": true,
+    "confidence": 0.9627338647842407,
+    "detections": 1
+  },
+  {
+    "image_id": "0122",
+    "iou": 0.9766540243087426,
+    "detected": true,
+    "confidence": 0.9580228328704834,
+    "detections": 1
+  },
+  {
+    "image_id": "0182",
+    "iou": 0.9499643463792306,
+    "detected": true,
+    "confidence": 0.9613792896270752,
+    "detections": 1
+  },
+  {
+    "image_id": "0146",
+    "iou": 0.9751944059263631,
+    "detected": true,
+    "confidence": 0.9572687149047852,
+    "detections": 1
+  },
+  {
+    "image_id": "0193",
+    "iou": 0.9775539486378517,
+    "detected": true,
+    "confidence": 0.9558454751968384,
+    "detections": 1
+  },
+  {
+    "image_id": "0123",
+    "iou": 0.9737500347808292,
+    "detected": true,
+    "confidence": 0.9573083519935608,
+    "detections": 1
+  },
+  {
+    "image_id": "0103",
+    "iou": 0.9227452333490078,
+    "detected": true,
+    "confidence": 0.9665711522102356,
+    "detections": 1
+  },
+  {
+    "image_id": "0198",
+    "iou": 0.9672862507834362,
+    "detected": true,
+    "confidence": 0.958014726638794,
+    "detections": 1
+  },
+  {
+    "image_id": "0160",
+    "iou": 0.973086166080757,
+    "detected": true,
+    "confidence": 0.9572736620903015,
+    "detections": 1
+  },
+  {
+    "image_id": "0196",
+    "iou": 0.9642599799135168,
+    "detected": true,
+    "confidence": 0.9564152359962463,
+    "detections": 1
+  },
+  {
+    "image_id": "0156",
+    "iou": 0.9614009517637806,
+    "detected": true,
+    "confidence": 0.9576286673545837,
+    "detections": 1
+  },
+  {
+    "image_id": "0192",
+    "iou": 0.9568725462845648,
+    "detected": true,
+    "confidence": 0.96071457862854,
+    "detections": 1
+  },
+  {
+    "image_id": "0128",
+    "iou": 0.9782204230250165,
+    "detected": true,
+    "confidence": 0.9578068852424622,
+    "detections": 1
+  },
+  {
+    "image_id": "0174",
+    "iou": 0.9383021224552404,
+    "detected": true,
+    "confidence": 0.9629809856414795,
+    "detections": 1
+  },
+  {
+    "image_id": "0187",
+    "iou": 0.9642150967031236,
+    "detected": true,
+    "confidence": 0.9577992558479309,
+    "detections": 1
+  },
+  {
+    "image_id": "0180",
+    "iou": 0.9780219893432774,
+    "detected": true,
+    "confidence": 0.9577963948249817,
+    "detections": 1
+  },
+  {
+    "image_id": "0167",
+    "iou": 0.9531388240260406,
+    "detected": true,
+    "confidence": 0.961391806602478,
+    "detections": 1
+  },
+  {
+    "image_id": "0132",
+    "iou": 0.9719591764103986,
+    "detected": true,
+    "confidence": 0.9580683708190918,
+    "detections": 1
+  },
+  {
+    "image_id": "0130",
+    "iou": 0.9716324229812695,
+    "detected": true,
+    "confidence": 0.957355797290802,
+    "detections": 1
+  },
+  {
+    "image_id": "0191",
+    "iou": 0.9737670377721402,
+    "detected": true,
+    "confidence": 0.9570792317390442,
+    "detections": 1
+  },
+  {
+    "image_id": "0200",
+    "iou": 0.9641017015899528,
+    "detected": true,
+    "confidence": 0.9570801854133606,
+    "detections": 1
+  },
+  {
+    "image_id": "0107",
+    "iou": 0.9833975428627866,
+    "detected": true,
+    "confidence": 0.9569240808486938,
+    "detections": 1
+  },
+  {
+    "image_id": "0157",
+    "iou": 0.9675697464145384,
+    "detected": true,
+    "confidence": 0.9576363563537598,
+    "detections": 1
+  },
+  {
+    "image_id": "0178",
+    "iou": 0.9597229982257977,
+    "detected": true,
+    "confidence": 0.958828866481781,
+    "detections": 2
+  },
+  {
+    "image_id": "0114",
+    "iou": 0.9516063199709797,
+    "detected": true,
+    "confidence": 0.9616444110870361,
+    "detections": 1
+  },
+  {
+    "image_id": "0172",
+    "iou": 0.9561814765999813,
+    "detected": true,
+    "confidence": 0.9623804092407227,
+    "detections": 1
+  },
+  {
+    "image_id": "0189",
+    "iou": 0.9627069555311719,
+    "detected": true,
+    "confidence": 0.9571178555488586,
+    "detections": 1
+  },
+  {
+    "image_id": "0116",
+    "iou": 0.9669357067023738,
+    "detected": true,
+    "confidence": 0.9566173553466797,
+    "detections": 1
+  },
+  {
+    "image_id": "0120",
+    "iou": 0.9673871495983923,
+    "detected": true,
+    "confidence": 0.9614294171333313,
+    "detections": 1
+  },
+  {
+    "image_id": "0131",
+    "iou": 0.9742817908158672,
+    "detected": true,
+    "confidence": 0.958045482635498,
+    "detections": 1
+  },
+  {
+    "image_id": "0134",
+    "iou": 0.9709293441908438,
+    "detected": true,
+    "confidence": 0.9570788741111755,
+    "detections": 1
+  },
+  {
+    "image_id": "0138",
+    "iou": 0.9251386465457535,
+    "detected": true,
+    "confidence": 0.959618091583252,
+    "detections": 1
+  },
+  {
+    "image_id": "0197",
+    "iou": 0.9745642418896282,
+    "detected": true,
+    "confidence": 0.9574629664421082,
+    "detections": 1
+  },
+  {
+    "image_id": "0106",
+    "iou": 0.9399479477231475,
+    "detected": true,
+    "confidence": 0.9611993432044983,
+    "detections": 1
+  },
+  {
+    "image_id": "0117",
+    "iou": 0.9648108477725731,
+    "detected": true,
+    "confidence": 0.9584842324256897,
+    "detections": 1
+  },
+  {
+    "image_id": "0184",
+    "iou": 0.9577887074868848,
+    "detected": true,
+    "confidence": 0.9639368057250977,
+    "detections": 1
+  },
+  {
+    "image_id": "0221",
+    "iou": 0.9541489002308764,
+    "detected": true,
+    "confidence": 0.9585995674133301,
+    "detections": 1
+  },
+  {
+    "image_id": "0369",
+    "iou": 0.9659962491137504,
+    "detected": true,
+    "confidence": 0.9578807353973389,
+    "detections": 1
+  },
+  {
+    "image_id": "0478",
+    "iou": 0.9647302027786625,
+    "detected": true,
+    "confidence": 0.9636464715003967,
+    "detections": 1
+  },
+  {
+    "image_id": "0383",
+    "iou": 0.9685761127554969,
+    "detected": true,
+    "confidence": 0.9571847319602966,
+    "detections": 1
+  },
+  {
+    "image_id": "0272",
+    "iou": 0.968621001450014,
+    "detected": true,
+    "confidence": 0.9599634408950806,
+    "detections": 1
+  },
+  {
+    "image_id": "0375",
+    "iou": 0.9250689806070587,
+    "detected": true,
+    "confidence": 0.9497320652008057,
+    "detections": 1
+  },
+  {
+    "image_id": "0256",
+    "iou": 0.9710692499780951,
+    "detected": true,
+    "confidence": 0.9584411978721619,
+    "detections": 1
+  },
+  {
+    "image_id": "0294",
+    "iou": 0.97248926616131,
+    "detected": true,
+    "confidence": 0.9572654366493225,
+    "detections": 1
+  },
+  {
+    "image_id": "0298",
+    "iou": 0.9763770537837476,
+    "detected": true,
+    "confidence": 0.9566552042961121,
+    "detections": 1
+  },
+  {
+    "image_id": "0244",
+    "iou": 0.9709028398034875,
+    "detected": true,
+    "confidence": 0.9586568474769592,
+    "detections": 1
+  },
+  {
+    "image_id": "0297",
+    "iou": 0.9648189559133383,
+    "detected": true,
+    "confidence": 0.9617352485656738,
+    "detections": 1
+  },
+  {
+    "image_id": "0417",
+    "iou": 0.9580605382870008,
+    "detected": true,
+    "confidence": 0.958869457244873,
+    "detections": 1
+  },
+  {
+    "image_id": "0366",
+    "iou": 0.973436798376858,
+    "detected": true,
+    "confidence": 0.9565009474754333,
+    "detections": 1
+  },
+  {
+    "image_id": "0320",
+    "iou": 0.9630476115942607,
+    "detected": true,
+    "confidence": 0.9530470967292786,
+    "detections": 1
+  },
+  {
+    "image_id": "0500",
+    "iou": 0.958091961837494,
+    "detected": true,
+    "confidence": 0.9626115560531616,
+    "detections": 1
+  },
+  {
+    "image_id": "0301",
+    "iou": 0.9792026229368085,
+    "detected": true,
+    "confidence": 0.957510769367218,
+    "detections": 1
+  },
+  {
+    "image_id": "0228",
+    "iou": 0.9226014613042107,
+    "detected": true,
+    "confidence": 0.9584872126579285,
+    "detections": 1
+  },
+  {
+    "image_id": "0425",
+    "iou": 0.9693806733162953,
+    "detected": true,
+    "confidence": 0.958258330821991,
+    "detections": 1
+  },
+  {
+    "image_id": "0262",
+    "iou": 0.9744800342246859,
+    "detected": true,
+    "confidence": 0.957602858543396,
+    "detections": 1
+  },
+  {
+    "image_id": "0422",
+    "iou": 0.9684840050115344,
+    "detected": true,
+    "confidence": 0.9578060507774353,
+    "detections": 1
+  },
+  {
+    "image_id": "0223",
+    "iou": 0.9711169953493909,
+    "detected": true,
+    "confidence": 0.9568260908126831,
+    "detections": 1
+  },
+  {
+    "image_id": "0278",
+    "iou": 0.9708981440653444,
+    "detected": true,
+    "confidence": 0.9580888152122498,
+    "detections": 1
+  },
+  {
+    "image_id": "0401",
+    "iou": 0.9629851199200629,
+    "detected": true,
+    "confidence": 0.9544019103050232,
+    "detections": 1
+  },
+  {
+    "image_id": "0261",
+    "iou": 0.9714781626820604,
+    "detected": true,
+    "confidence": 0.9592230319976807,
+    "detections": 1
+  },
+  {
+    "image_id": "0373",
+    "iou": 0.9687615577833757,
+    "detected": true,
+    "confidence": 0.9584103226661682,
+    "detections": 1
+  },
+  {
+    "image_id": "0214",
+    "iou": 0.9553683184137152,
+    "detected": true,
+    "confidence": 0.9590260982513428,
+    "detections": 1
+  },
+  {
+    "image_id": "0220",
+    "iou": 0.9618062515864562,
+    "detected": true,
+    "confidence": 0.961151123046875,
+    "detections": 1
+  },
+  {
+    "image_id": "0384",
+    "iou": 0.9706278098242153,
+    "detected": true,
+    "confidence": 0.9572283029556274,
+    "detections": 1
+  },
+  {
+    "image_id": "0470",
+    "iou": 0.9626796940341795,
+    "detected": true,
+    "confidence": 0.9640759229660034,
+    "detections": 1
+  },
+  {
+    "image_id": "0351",
+    "iou": 0.9693609888058307,
+    "detected": true,
+    "confidence": 0.9587207436561584,
+    "detections": 1
+  }
+]
