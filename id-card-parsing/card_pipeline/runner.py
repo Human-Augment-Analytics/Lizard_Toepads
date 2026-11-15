@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from annotator.image_loader import ImageLoadError
+from card_ocr.checkboxes import inspect_checkbox
 from card_ocr.extraction import extract_records, load_rules
 from card_ocr.fields import Field
 from card_ocr.images import select_images
@@ -22,7 +23,7 @@ import numpy as np
 from .align import CardAligner
 from .config import PipelineConfig
 from .corners import canonicalize_corners
-from .cropper import crop_template
+from .cropper import crop_region, crop_template
 from .detector import Detector, YoloObbDetector, select_best
 from .dictionary import apply_dictionary
 from .output import ensure_writable
@@ -62,8 +63,8 @@ def _error_text(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _process_fields(scan_id, normalized, record, recognizer, scan_dir, output_dir):
-    """Crop every template region, then recognize field crops or defer checkboxes."""
+def _process_fields(normalized, record, recognizer, scan_dir, output_dir, reference):
+    """Crop every template region, then read text or inspect checkbox ink."""
     crops_dir = scan_dir / "crops"
     crops_dir.mkdir(parents=True, exist_ok=True)
     fields = []
@@ -76,7 +77,13 @@ def _process_fields(scan_id, normalized, record, recognizer, scan_dir, output_di
         if crop_error is not None:
             entry.update(status="error", error=f"crop: {crop_error}")
         elif spec.is_checkbox:
-            entry["status"] = "deferred"       # v1: cropped and saved, not inspected
+            if reference is None:
+                entry.update(status="deferred", checked=None)
+            else:
+                try:
+                    entry.update(inspect_checkbox(crop, crop_region(reference, spec.box)))
+                except Exception as exc:
+                    entry.update(status="error", error=_error_text(exc))
         else:
             entry.update(datatype=spec.datatype, dictionary=spec.dictionary)
             try:
@@ -93,7 +100,7 @@ def _typed_values(scan_id, fields, rules):
     """Apply card_ocr extraction rules to recognized text, if rules were given."""
     rows = [dict(image_id=scan_id, field=f["name"], text=f.get("text"),
                  status="ok" if f["status"] == "ok" else "error")
-            for f in fields if f["status"] != "deferred"]
+            for f in fields if f["crop_type"] == "field"]
     if not rows:
         return None
     record = extract_records(rows, rules)[0]
@@ -131,6 +138,7 @@ def _process_scan(scan_id, path, config, record, size, detector, recognizer, ali
     scan_dir = output_dir / "scans" / scan_id
     scan_dir.mkdir(parents=True, exist_ok=True)
     card = normalized.image
+    reference = None
     if aligner is not None:
         card.save(scan_dir / "card_unaligned.png")
         try:
@@ -138,6 +146,7 @@ def _process_scan(scan_id, path, config, record, size, detector, recognizer, ali
         except ValueError as exc:
             return {**scan, "status": "alignment_failed", "error": str(exc)}
         card = aligned.image
+        reference = getattr(aligner, "reference", None)
         scan["alignment"] = {
             "rotation_degrees": round(aligned.rotation_degrees, 2),
             "inliers": aligned.diagnostics.get("inliers"),
@@ -146,7 +155,7 @@ def _process_scan(scan_id, path, config, record, size, detector, recognizer, ali
     card.save(scan_dir / "card.png")
     draw_fields(card, [Field(spec.name, spec.box) for spec in record.fields]
                 ).save(scan_dir / "overlay.png")
-    scan["fields"] = _process_fields(scan_id, card, record, recognizer, scan_dir, output_dir)
+    scan["fields"] = _process_fields(card, record, recognizer, scan_dir, output_dir, reference)
     if rules is not None:
         scan["values"] = _typed_values(scan_id, scan["fields"], rules)
     return scan
@@ -154,7 +163,7 @@ def _process_scan(scan_id, path, config, record, size, detector, recognizer, ali
 
 def _summary(scans: list[dict]) -> dict:
     statuses = [s["status"] for s in scans]
-    field_statuses = [f["status"] for s in scans for f in s["fields"]]
+    fields = [f for s in scans for f in s["fields"]]
     counted = {"ok", "no_card", "degenerate_obb", "unreadable_scan", "alignment_failed"}
     return {
         "scans": len(scans),
@@ -165,9 +174,12 @@ def _summary(scans: list[dict]) -> dict:
         "alignment_failed": statuses.count("alignment_failed"),
         # detector_error, rectify_failed, and anything else not counted above.
         "other_scan_failures": sum(status not in counted for status in statuses),
-        "fields_recognized": sum(s == "ok" for s in field_statuses),
-        "fields_deferred": field_statuses.count("deferred"),
-        "field_failures": field_statuses.count("error"),
+        "fields_recognized": sum(f["crop_type"] == "field" and f["status"] == "ok" for f in fields),
+        "checkboxes_checked": sum(f.get("checked") is True for f in fields),
+        "checkboxes_unchecked": sum(f.get("checked") is False for f in fields),
+        "checkboxes_uncertain": sum(f.get("state") == "uncertain" for f in fields),
+        "fields_deferred": sum(f["status"] == "deferred" for f in fields),
+        "field_failures": sum(f["status"] == "error" for f in fields),
     }
 
 

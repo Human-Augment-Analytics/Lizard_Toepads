@@ -57,6 +57,17 @@ def test_text_used_when_no_typed_value(tmp_path):
         assert next(csv.DictReader(handle))["day"] == "I3"
 
 
+@pytest.mark.parametrize(("checked", "expected"), [(True, "true"), (False, "false"),
+                                                    (None, "uncertain")])
+def test_csv_checkbox_values(tmp_path, checked, expected):
+    payload = _payload()
+    payload["scans"][0]["fields"][2].update(
+        crop_type="checkbox", status="ok", checked=checked)
+    save_predictions(payload, tmp_path)
+    with (tmp_path / PREDICTIONS_CSV).open(encoding="utf-8", newline="") as handle:
+        assert next(csv.DictReader(handle))["alive"] == expected
+
+
 def test_refuses_to_clobber_without_replace(tmp_path):
     save_predictions(_payload(), tmp_path)
     with pytest.raises(FileExistsError):

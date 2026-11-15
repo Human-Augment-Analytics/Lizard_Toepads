@@ -52,8 +52,9 @@ class CardAligner:
             raise ValueError("reference must be a square normalized card")
         self.size = reference.width
         self.fill = tuple(fill)
+        self.reference = reference.convert("RGB")
         self._scale = _WORK_SIZE / self.size
-        self._aligner = FormAligner(reference.convert("RGB").resize(
+        self._aligner = FormAligner(self.reference.resize(
             (_WORK_SIZE, _WORK_SIZE), Image.Resampling.LANCZOS))
 
     @classmethod

@@ -356,8 +356,9 @@ The backend (`config`, `normalize`, `template_record`, `export_layout`,
    beyond the detector box. Cards that cannot be registered are reported as
    `alignment_failed` instead of producing misplaced crops.
 5. **Crop and read:** each `field` box is cropped and read with PaddleOCR, then
-   filtered by its dictionary. Checkbox boxes are cropped and recorded as
-   `deferred`; they are not inspected yet.
+   filtered by its dictionary. Checkbox crops are compared with the aligned
+   blank card. The comparison ignores printed brackets and looks for connected
+   strokes that are darker than or differ in color from the surrounding paper.
 
 Run it from `id-card-parsing/`:
 
@@ -380,6 +381,11 @@ alignment, and per-field results with statuses), `predictions.csv` (one row
 per scan, one column per field), and `scans/<id>/` with `card.png`,
 `overlay.png`, `card_unaligned.png`, and `crops/<field>.png`. One failing scan
 or field never stops the run; the command exits with status 1 if any failed.
+
+For checkboxes, JSON reports `checked: true` for a mark, `false` for an empty
+box, and `null` for uncertain readings. The CSV uses `true`, `false`, and
+`uncertain`. When using `--no-align`, checkbox results are `deferred` in JSON
+and blank in CSV because the comparison requires an aligned form.
 
 PaddleOCR must be installed in the environment you run from
 (`requirements.txt`); without it the command stops before processing with an

@@ -275,7 +275,7 @@
       ],
       "datatype": "text",
       "dictionary": null,
-      "crop_type": "field"
+      "crop_type": "checkbox"
     },
     {
       "name": "cb_f",

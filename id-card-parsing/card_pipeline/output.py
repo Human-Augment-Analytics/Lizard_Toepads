@@ -21,12 +21,15 @@ def ensure_writable(output_dir: Path, *, replace: bool) -> None:
 
 
 def _cell(scan: dict, name: str):
-    """Typed value when extraction ran, else the filtered text; blank on failure."""
+    """Return a typed value, filtered text, or a checkbox result for the CSV."""
     values = scan.get("values") or {}
     if name in values:
         return values[name]
     for field in scan.get("fields", []):
         if field["name"] == name and field.get("status") == "ok":
+            if field.get("crop_type") == "checkbox":
+                checked = field.get("checked")
+                return "uncertain" if checked is None else str(checked).lower()
             return field.get("text")
     return None
 

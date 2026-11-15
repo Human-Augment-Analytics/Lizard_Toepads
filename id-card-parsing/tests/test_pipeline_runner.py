@@ -167,6 +167,33 @@ def test_field_order_follows_the_template(workspace):
     assert payload["fields"] == ["day", "perch", "alive"]
 
 
+def test_aligned_checkbox_is_classified_without_ocr_or_extraction(workspace):
+    from card_pipeline.align import AlignResult
+
+    class Aligner:
+        reference = Image.new("RGB", (512, 512), "white")
+
+        def align(self, _card):
+            card = self.reference.copy()
+            ImageDraw.Draw(card).line([(235, 225), (255, 275), (275, 225)],
+                                      fill=(245, 220, 30), width=4)
+            return AlignResult(card, 0, {})
+
+    rules = workspace / "rules.json"
+    rules.write_text(json.dumps({"fields": {"day": {"type": "integer", "pattern": "[0-9]+"}}}),
+                     encoding="utf-8")
+    recognizer = FakeRecognizer(["13", "tree"])
+    payload = _run(workspace, _good_detector(workspace), recognizer,
+                   aligner=Aligner(), align=True, template_image=workspace / "unused.jpg",
+                   rules_path=rules, template_path=_template(workspace, day_dictionary=None))
+    scan = payload["scans"][0]
+    checkbox = scan["fields"][-1]
+    assert checkbox["status"] == "ok" and checkbox["checked"] is True
+    assert scan["values"] == {"day": 13, "perch": "tree"}
+    assert recognizer.calls == payload["summary"]["fields_recognized"] == 2
+    assert payload["summary"]["checkboxes_checked"] == 1
+
+
 def test_artifacts_are_saved(workspace):
     _run(workspace, _good_detector(workspace))
     scan_dir = workspace / "out" / "scans" / "0001"

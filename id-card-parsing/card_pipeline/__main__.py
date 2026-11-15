@@ -31,8 +31,11 @@ def run_command(args: argparse.Namespace, *, detector=None, recognizer=None) -> 
           f"{summary['unreadable_scan']} unreadable, {summary['alignment_failed']} unaligned, "
           f"{summary['other_scan_failures']} other failures.")
     print(f"Fields: {summary['fields_recognized']} recognized, "
-          f"{summary['fields_deferred']} checkbox regions deferred, "
           f"{summary['field_failures']} failed.")
+    print(f"Checkboxes: {summary['checkboxes_checked']} checked, "
+          f"{summary['checkboxes_unchecked']} unchecked, "
+          f"{summary['checkboxes_uncertain']} uncertain, "
+          f"{summary['fields_deferred']} deferred.")
     print(f"Saved predictions: {config.output_dir}")
     failed = (summary["normalized"] != summary["scans"] or summary["field_failures"])
     return 1 if failed else 0
