@@ -1,0 +1,39 @@
+images: ~/scratch/id_cards/v4_trial_inputs/images
+annotations: id-card-parsing/annotations
+manifest: id-card-parsing/splits_v4_proposed.csv
+output: ~/scratch/id_cards/v4_affine15
+template: configs/id_card_fields.json
+card_size:
+- 800
+- 1200
+scan_max_side: 2048
+train:
+  model: yolo11m-obb.pt
+  epochs: 200
+  batch: 4
+  imgsz: 1280
+  workers: 4
+  device: 0
+  patience: 40
+  seed: 42
+  cache: false
+  amp: true
+  degrees: 15.0
+  translate: 0.1
+  scale: 0.25
+  fliplr: 0.0
+  flipud: 0.0
+  mosaic: 0.0
+  hsv_h: 0.0
+  hsv_s: 0.0
+  hsv_v: 0.0
+  augmentations: []
+  close_mosaic: 0
+  save_period: 5
+ocr:
+  executable: tesseract
+  language: eng
+  psm: 7
+  truth: null
+  detection_conf: 0.25
+quarter_turn_fraction: 0.0
