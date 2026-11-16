@@ -21,6 +21,15 @@ import torch
 from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[2]
+TEST_CONFIDENCE = 0.25
+TEST_ROTATION_DEGREES = (-15, -10, -5, 5, 10, 15)
+ROTATION_BORDER_BGR = (114, 114, 114)
+PREVIEW_MAX_SIZE = (800, 600)
+PREVIEW_GAP = 8
+PREVIEW_HEADER = 28
+PREVIEW_LINE_WIDTH = 3
+PREVIEW_JPEG_QUALITY = 88
+
 Image.MAX_IMAGE_PIXELS = None  # Known, very large research scans; decode with draft.
 
 
@@ -336,17 +345,11 @@ def rotate_eval_image(image, points, degrees):
     canvas = np.array([w, h])
     size = np.ceil(np.abs(matrix[:, :2]) @ canvas).astype(int)
     matrix[:, 2] += (size - canvas) / 2
-    pixels = cv2.warpAffine(image, matrix, tuple(map(int, size)), borderValue=(114, 114, 114))
+    pixels = cv2.warpAffine(image, matrix, tuple(map(int, size)), borderValue=ROTATION_BORDER_BGR)
     return pixels, points @ matrix[:, :2].T + matrix[:, 2], size
 
 
-def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test', rotation=0):
-    """One card per image: score the highest-confidence detection; misses score 0.
-
-    These polygon IoUs are separate from Ultralytics OBB validation metrics.
-    Confidence is fixed for this report, independent of OCR configuration.
-    """
-    rows, pose_rows = [], []
+def evaluation_samples(out, split):
     if split == 'val_rotated':
         samples = [row for row in json.loads((out/'quarter_turn_variants.json').read_text())
                    if row['split'] == split]
@@ -355,37 +358,86 @@ def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test', ro
             samples = [row for row in csv.DictReader(handle) if row['split'] == split]
     if not samples:
         raise ValueError(f'No {split} samples for IoU evaluation')
+    return samples
+
+
+def load_evaluation_sample(out, split, image_id, rotation):
+    path = out/'images'/split/f'{image_id}.jpg'
+    label = (out/'labels'/split/f'{image_id}.txt').read_text().splitlines()
+    if len(label) != 1:
+        raise ValueError(f'Expected one card label for {image_id}')
+    values = label[0].split()
+    if len(values) != 9 or values[0] != '0':
+        raise ValueError(f'Invalid one-class OBB label for {image_id}')
+    with Image.open(path) as image:
+        size = np.array(image.size)
+    expected = np.array(values[1:], dtype=float).reshape(4, 2) * size
+    source = str(path)
+    if rotation:
+        with Image.open(path) as image:
+            pixels = cv2.cvtColor(np.asarray(image.convert('RGB')), cv2.COLOR_RGB2BGR)
+        source, expected, size = rotate_eval_image(pixels, expected, rotation)
+    return path, source, expected, size
+
+
+def score_card_prediction(boxes, expected, size):
+    detected = boxes is not None and len(boxes) > 0
+    value, selected_confidence, count = 0.0, None, 0
+    pose = predicted = None
+    if detected:
+        count = len(boxes)
+        index = int(boxes.conf.argmax().item())
+        selected_confidence = float(boxes.conf[index].item())
+        predicted = boxes.xyxyxyxy[index].cpu().numpy()
+        value = polygon_iou(predicted, expected)
+        pose = obb_pose_errors(predicted, expected, size)
+    return detected, value, selected_confidence, count, predicted, pose
+
+
+def save_comparison(path, source, size, expected, predicted, value, rotation, destination):
+    if rotation:
+        preview = Image.fromarray(cv2.cvtColor(source, cv2.COLOR_BGR2RGB))
+    else:
+        with Image.open(path) as image:
+            preview = image.convert('RGB')
+    preview.thumbnail(PREVIEW_MAX_SIZE)
+    factor = np.array(preview.size) / size
+    panel = Image.new('RGB', (2 * preview.width + PREVIEW_GAP, preview.height + PREVIEW_HEADER), 'white')
+    for x, points, title, color in (
+        (0, expected, 'Reference annotation', 'lime'),
+        (preview.width + PREVIEW_GAP, predicted,
+         f'Prediction | IoU {value:.3f}' if predicted is not None else 'No detection', 'red'),
+    ):
+        pane = preview.copy()
+        if points is not None:
+            polygon = [tuple(pt) for pt in points * factor]
+            ImageDraw.Draw(pane).line(polygon + polygon[:1], fill=color, width=PREVIEW_LINE_WIDTH)
+        panel.paste(pane, (x, PREVIEW_HEADER))
+        ImageDraw.Draw(panel).text((x + 4, 6), title, fill='black')
+    panel.save(destination, quality=PREVIEW_JPEG_QUALITY)
+
+
+def test_iou(model, out, options, save_dir, confidence=TEST_CONFIDENCE, *, split='test', rotation=0):
+    """One card per image: score the highest-confidence detection; misses score 0.
+
+    These polygon IoUs are separate from Ultralytics OBB validation metrics.
+    Confidence is fixed for this report, independent of OCR configuration.
+    """
+    comparisons = save_dir / "comparisons"
+    comparisons.mkdir(exist_ok=True)
+    rows, pose_rows = [], []
+    samples = evaluation_samples(out, split)
     for row in samples:
         image_id = row['image_id']
-        path = out/'images'/split/f'{image_id}.jpg'
-        label = (out/'labels'/split/f'{image_id}.txt').read_text().splitlines()
-        if len(label) != 1:
-            raise ValueError(f'Expected one card label for {image_id}')
-        values = label[0].split()
-        if len(values) != 9 or values[0] != '0':
-            raise ValueError(f'Invalid one-class OBB label for {image_id}')
-        with Image.open(path) as image:
-            size = np.array(image.size)
-        expected = np.array(values[1:], dtype=float).reshape(4, 2) * size
-        source = str(path)
-        if rotation:
-            with Image.open(path) as image:
-                pixels = cv2.cvtColor(np.asarray(image.convert('RGB')), cv2.COLOR_RGB2BGR)
-            source, expected, size = rotate_eval_image(pixels, expected, rotation)
+        path, source, expected, size = load_evaluation_sample(out, split, image_id, rotation)
         result = model.predict(source=source, conf=confidence,
                                device=options['device'], imgsz=options['imgsz'],
                                verbose=False)[0]
-        boxes = result.obb
-        detected = boxes is not None and len(boxes) > 0
-        value, selected_confidence, count = 0.0, None, 0
-        pose = None
-        if detected:
-            count = len(boxes)
-            index = int(boxes.conf.argmax().item())
-            selected_confidence = float(boxes.conf[index].item())
-            predicted = boxes.xyxyxyxy[index].cpu().numpy()
-            value = polygon_iou(predicted, expected)
-            pose = obb_pose_errors(predicted, expected, size)
+        detected, value, selected_confidence, count, predicted, pose = score_card_prediction(
+            result.obb, expected, size
+        )
+        save_comparison(path, source, size, expected, predicted, value, rotation,
+                        comparisons / f'{image_id}.jpg')
         pose_row = {'image_id': image_id, 'detected': detected, 'confidence': selected_confidence}
         pose_rows.append(dict(pose_row, **(pose or {})))
         rows.append({'image_id': image_id, 'iou': value, 'detected': detected,
@@ -426,7 +478,8 @@ def model_action(args, cfg):
             runs = out/'runs'
             runs.mkdir(exist_ok=True)
             run = Path(tempfile.mkdtemp(prefix='test_rotated15_', dir=runs))
-            for angle, name in ((-15, 'minus15'), (15, 'plus15')):
+            for angle in TEST_ROTATION_DEGREES:
+                name = f'{"minus" if angle < 0 else "plus"}{abs(angle)}'
                 dest = run/name
                 dest.mkdir()
                 print(f'Test rotation: {angle:+} degrees')
