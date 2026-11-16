@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import unicodedata
 import cv2
 import numpy as np
@@ -328,7 +329,18 @@ def save_pose_metrics(rows, save_dir, confidence):
         print('OBB pose errors: no cards detected; summaries are null')
 
 
-def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test'):
+def rotate_eval_image(image, points, degrees):
+    """Rotate BGR pixels and card corners onto an expanded canvas."""
+    h, w = image.shape[:2]
+    matrix = cv2.getRotationMatrix2D((w / 2, h / 2), degrees, 1)
+    canvas = np.array([w, h])
+    size = np.ceil(np.abs(matrix[:, :2]) @ canvas).astype(int)
+    matrix[:, 2] += (size - canvas) / 2
+    pixels = cv2.warpAffine(image, matrix, tuple(map(int, size)), borderValue=(114, 114, 114))
+    return pixels, points @ matrix[:, :2].T + matrix[:, 2], size
+
+
+def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test', rotation=0):
     """One card per image: score the highest-confidence detection; misses score 0.
 
     These polygon IoUs are separate from Ultralytics OBB validation metrics.
@@ -355,7 +367,12 @@ def test_iou(model, out, options, save_dir, confidence=0.25, *, split='test'):
         with Image.open(path) as image:
             size = np.array(image.size)
         expected = np.array(values[1:], dtype=float).reshape(4, 2) * size
-        result = model.predict(source=str(path), conf=confidence,
+        source = str(path)
+        if rotation:
+            with Image.open(path) as image:
+                pixels = cv2.cvtColor(np.asarray(image.convert('RGB')), cv2.COLOR_RGB2BGR)
+            source, expected, size = rotate_eval_image(pixels, expected, rotation)
+        result = model.predict(source=source, conf=confidence,
                                device=options['device'], imgsz=options['imgsz'],
                                verbose=False)[0]
         boxes = result.obb
@@ -395,7 +412,7 @@ def model_action(args, cfg):
         raise RuntimeError('GPU unavailable; use an allocated GPU session')
     options = dict(cfg['train'])
     model_name = options.pop('model')
-    if args.command in ('test', 'validate-rotated'):
+    if args.command in ('test', 'validate-rotated', 'test-rotated'):
         rotated = args.command == 'validate-rotated'
         dataset = out/('dataset_rotated_val.yaml' if rotated else 'dataset.yaml')
         if rotated and not dataset.is_file():
@@ -405,6 +422,17 @@ def model_action(args, cfg):
         model = YOLO(str(resolve(args.weights)), task='obb')
         if model.task != 'obb' or model.names != {0: 'id_card'}:
             raise ValueError('Expected a trained one-class id_card OBB checkpoint')
+        if args.command == 'test-rotated':
+            runs = out/'runs'
+            runs.mkdir(exist_ok=True)
+            run = Path(tempfile.mkdtemp(prefix='test_rotated15_', dir=runs))
+            for angle, name in ((-15, 'minus15'), (15, 'plus15')):
+                dest = run/name
+                dest.mkdir()
+                print(f'Test rotation: {angle:+} degrees')
+                test_iou(model, out, options, dest, rotation=angle)
+            print(f'Rotated test results saved to {run}')
+            return
         results = model.val(data=str(dataset), split='val' if rotated else 'test', device=options['device'],
                             imgsz=options['imgsz'], batch=options['batch'], workers=options.get('workers', 4),
                             project=str(out/'runs'), name='yolo_val_rotated' if rotated else 'yolo_test', plots=True)
@@ -612,7 +640,7 @@ def retire():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command', choices=['check','prepare','smoke','train','test','validate-rotated','baseline','field-evaluate','retire-tps'])
+    p.add_argument('command', choices=['check','prepare','smoke','train','test','test-rotated','validate-rotated','baseline','field-evaluate','retire-tps'])
     p.add_argument('--config', default='configs/id_card_pipeline.yaml')
     p.add_argument('--weights')
     p.add_argument('--resume')
