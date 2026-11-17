@@ -1,0 +1,78 @@
+name: Release model to web
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft tag, model/toepad-web/vMAJOR.MINOR.PATCH
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: model-web-release
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      # Trusted workflow/default-branch code validates the candidate; never
+      # execute scripts from the model release's arbitrary target commit.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate tag and require a draft
+        run: |
+          python scripts/deployment/web_release.py --validate-tag "$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName,assets > release-before.json
+          python - <<'PY'
+          import json, os
+          release = json.load(open('release-before.json'))
+          assert release['isDraft'] is True and release['isPrerelease'] is False
+          assert release['tagName'] == os.environ['RELEASE_TAG']
+          expected = {'bundle.zip', 'web-release.json', 'evaluation.json'}
+          assert {a['name'] for a in release['assets']} == expected
+          PY
+      - name: Download exact assets and validate release contract
+        run: |
+          mkdir candidate
+          gh release download "$RELEASE_TAG" --dir candidate --pattern bundle.zip --pattern web-release.json --pattern evaluation.json
+          python scripts/deployment/web_release.py --directory candidate --expected-tag "$RELEASE_TAG"
+      - name: Confirm candidate assets did not change during validation
+        run: |
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName,assets > release-after.json
+          python - <<'PY'
+          import json
+          before = json.load(open('release-before.json'))
+          after = json.load(open('release-after.json'))
+          def identity(release):
+              return {
+                  'isDraft': release['isDraft'],
+                  'isPrerelease': release['isPrerelease'],
+                  'tagName': release['tagName'],
+                  # Our downloads change downloadCount. Compare only asset
+                  # identity/content metadata, not that activity counter.
+                  'assets': sorted([
+                      {key: asset.get(key) for key in ('id', 'name', 'size', 'updatedAt', 'digest')}
+                      for asset in release['assets']
+                  ], key=lambda asset: asset['name']),
+              }
+          assert identity(before) == identity(after), 'Draft changed during validation; rerun on a stable candidate'
+          PY
+      - name: Publish approved model release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest=false
+      - name: Explain deployment status
+        run: |
+          printf '%s\n' 'Model release published. Haag must independently validate, smoke-test, and activate it.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' 'Publication does not move MLflow web-production or claim a successful deployment.' >> "$GITHUB_STEP_SUMMARY"
