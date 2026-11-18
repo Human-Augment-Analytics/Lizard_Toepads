@@ -17,7 +17,7 @@ from annotator.template_matcher import CardTemplateMatcher
 from .fields import Field
 from .preprocessing import FormAligner, clean_printed_form, crop_warnings
 from .recipe import preparation_recipe
-from .checkboxes import inspect_checkbox
+from .checkboxes import checkbox_pixel_box, inspect_checkbox
 
 
 def project(points, matrix) -> np.ndarray:
@@ -43,12 +43,13 @@ def rectify_card(image: Image.Image, corners: np.ndarray, size: tuple[int, int])
     return Image.fromarray(warped), np.linalg.inv(matrix)
 
 
-def draw_fields(image: Image.Image, fields: list[Field]) -> Image.Image:
+def draw_fields(image: Image.Image, fields: list[Field], *, checkboxes: bool = False) -> Image.Image:
     """Render labeled expected writing regions for crop review."""
     overlay = image.copy()
     draw = ImageDraw.Draw(overlay)
     for field in fields:
-        left, top, right, bottom = field.pixel_box(image.size)
+        left, top, right, bottom = (checkbox_pixel_box(field.box, image.size) if checkboxes
+                                    else field.pixel_box(image.size))
         draw.rectangle((left, top, right-1, bottom-1), outline="#0078ff", width=2)
         draw.text((left, max(0, top-13)), field.name, fill="#0044aa")
     return overlay
@@ -178,9 +179,9 @@ def _prepare_run(data_dir: Path, annotations_dir: Path, template: Path,
             cleaned.save(image_output / "card_clean.png")
             removed.save(image_output / "print_removed.png")
             draw_fields(card, fields).save(image_output / "fields.png")
-            draw_fields(card, checkboxes).save(image_output / 'checkboxes.png')
+            draw_fields(card, checkboxes, checkboxes=True).save(image_output / 'checkboxes.png')
             for box in checkboxes:
-                region = box.pixel_box(card_size)
+                region = checkbox_pixel_box(box.box, card_size)
                 checkbox_crop = card.crop(region)
                 checkbox_path = image_output / f'checkbox_{box.name}.png'
                 checkbox_crop.save(checkbox_path)

@@ -4,24 +4,25 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .fields import Field
+
+def checkbox_pixel_box(box, size: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Return the saved checkbox rectangle in aligned-card pixels."""
+    return Field("checkbox", tuple(box)).pixel_box(size)
+
 
 def inspect_checkbox(observed: Image.Image, template: Image.Image) -> dict:
-    """Report added ink as marked, empty, or uncertain."""
+    """Inspect the entire supplied crop and report marked, empty, or uncertain."""
     if observed.size != template.size or min(observed.size) < 1:
         raise ValueError('Checkbox images must have matching, nonempty sizes')
     printed = _ink_mask(template)
     observed_ink = _ink_mask(observed)
     # Allow for small registration errors around the printed brackets.
-    border = round(min(observed.size) * .06)
-    tolerance = max(1, border)
+    tolerance = max(1, round(min(observed.size) * .06))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * tolerance + 1,) * 2)
     support = cv2.dilate(printed.astype(np.uint8), kernel) > 0
     ink = np.uint8(observed_ink & ~support)
 
-    # Ignore clipped fragments from neighboring labels at the crop edge. An
-    # X, check, or fill can extend outside the brackets but crosses the interior.
-    if border:
-        ink = ink[border:-border, border:-border].copy()
     _, _, stats, _ = cv2.connectedComponentsWithStats(ink)
     area = ink.size
     fraction = float(ink.sum() / area)

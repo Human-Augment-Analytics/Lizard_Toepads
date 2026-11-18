@@ -66,6 +66,19 @@ def test_crop_template_preserves_order_and_includes_checkboxes():
     assert all(crop is not None and err is None for _s, crop, err in results)
 
 
+def test_checkbox_and_text_crops_use_saved_rectangles():
+    card = _card()
+    record = _record(
+        FieldSpec("checkbox", (.25, .25, .5, .5), crop_type="checkbox"),
+        FieldSpec("edge", (0, 0, .25, .25), crop_type="checkbox"),
+        FieldSpec("text", (.25, .25, .5, .5)),
+    )
+    crops = [crop for _spec, crop, error in crop_template(card, record) if error is None]
+    assert len(crops) == 3
+    for crop, region in zip(crops, [(50, 50, 100, 100), (0, 0, 50, 50), (50, 50, 100, 100)]):
+        np.testing.assert_array_equal(np.asarray(crop), np.asarray(card.crop(region)))
+
+
 def test_crop_template_isolates_a_bad_region(monkeypatch):
     import card_pipeline.cropper as cropper
 

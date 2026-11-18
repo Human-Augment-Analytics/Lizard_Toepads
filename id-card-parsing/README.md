@@ -387,6 +387,11 @@ box, and `null` for uncertain readings. The CSV uses `true`, `false`, and
 `uncertain`. When using `--no-align`, checkbox results are `deferred` in JSON
 and blank in CSV because the comparison requires an aligned form.
 
+Checkbox detection covers the full saved template rectangle in the aligned card.
+The saved checkbox crops and overlays show this complete detection area. The
+`card_ocr` preparation path also uses each checkbox's saved `box` from
+`fields.json` as its detection boundary.
+
 PaddleOCR must be installed in the environment you run from
 (`requirements.txt`); without it the command stops before processing with an
 install hint.

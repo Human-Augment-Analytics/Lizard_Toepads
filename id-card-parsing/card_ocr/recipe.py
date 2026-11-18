@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 # Bump when alignment or cleanup behavior changes without a layout change.
-PIPELINE_VERSION = 'registered-form-print-mask-v4'
+PIPELINE_VERSION = 'registered-form-print-mask-v6'
 
 
 def preparation_recipe(template: Path, fields, *, card_width=1000, decode_size=4096,

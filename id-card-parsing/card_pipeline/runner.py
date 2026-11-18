@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from annotator.image_loader import ImageLoadError
-from card_ocr.checkboxes import inspect_checkbox
+from card_ocr.checkboxes import checkbox_pixel_box, inspect_checkbox
 from card_ocr.extraction import extract_records, load_rules
 from card_ocr.fields import Field
 from card_ocr.images import select_images
@@ -23,7 +23,7 @@ import numpy as np
 from .align import CardAligner
 from .config import PipelineConfig
 from .corners import canonicalize_corners
-from .cropper import crop_region, crop_template
+from .cropper import crop_template
 from .detector import Detector, YoloObbDetector, select_best
 from .dictionary import apply_dictionary
 from .output import ensure_writable
@@ -77,11 +77,13 @@ def _process_fields(normalized, record, recognizer, scan_dir, output_dir, refere
         if crop_error is not None:
             entry.update(status="error", error=f"crop: {crop_error}")
         elif spec.is_checkbox:
+            region = checkbox_pixel_box(spec.box, normalized.size)
+            entry["card_box"] = list(region)
             if reference is None:
                 entry.update(status="deferred", checked=None)
             else:
                 try:
-                    entry.update(inspect_checkbox(crop, crop_region(reference, spec.box)))
+                    entry.update(inspect_checkbox(crop, reference.crop(region)))
                 except Exception as exc:
                     entry.update(status="error", error=_error_text(exc))
         else:
@@ -153,8 +155,9 @@ def _process_scan(scan_id, path, config, record, size, detector, recognizer, ali
             "median_error_px": aligned.diagnostics.get("median_error_px"),
         }
     card.save(scan_dir / "card.png")
-    draw_fields(card, [Field(spec.name, spec.box) for spec in record.fields]
-                ).save(scan_dir / "overlay.png")
+    overlay = draw_fields(card, [Field(spec.name, spec.box) for spec in record.fields if spec.is_field])
+    draw_fields(overlay, [Field(spec.name, spec.box) for spec in record.fields if spec.is_checkbox],
+                checkboxes=True).save(scan_dir / "overlay.png")
     scan["fields"] = _process_fields(card, record, recognizer, scan_dir, output_dir, reference)
     if rules is not None:
         scan["values"] = _typed_values(scan_id, scan["fields"], rules)

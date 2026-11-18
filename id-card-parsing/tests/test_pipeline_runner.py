@@ -202,6 +202,36 @@ def test_artifacts_are_saved(workspace):
     assert (scan_dir / "crops" / "day.png").is_file()
 
 
+@pytest.mark.parametrize("side", ["left", "right", "top", "bottom"])
+@pytest.mark.parametrize("distance", [0, 1])
+def test_checkbox_detects_ink_only_inside_saved_rectangle(tmp_path, side, distance):
+    from card_pipeline.runner import _process_fields
+
+    reference = Image.new("RGB", (100, 100), "white")
+    card = reference.copy()
+    # The template rectangle occupies [30, 70) on both axes. A line in the
+    # outermost pixel inside each edge is included; the next pixel is excluded.
+    low, high = 30 - distance, 69 + distance
+    lines = {
+        "left": [(low, 30), (low, 69)],
+        "right": [(high, 30), (high, 69)],
+        "top": [(30, low), (69, low)],
+        "bottom": [(30, high), (69, high)],
+    }
+    ImageDraw.Draw(card).line(lines[side], fill="black")
+    record = TemplateRecord(
+        canvas_size=100, pad_mode="solid", fill=(255, 255, 255),
+        card_obb_corners=CARD.tolist(),
+        fields=[FieldSpec("alive", (.3, .3, .7, .7), crop_type="checkbox")])
+    recognizer = FakeRecognizer()
+    result = _process_fields(card, record, recognizer, tmp_path / "scan", tmp_path, reference)[0]
+    assert result["checked"] is (distance == 0)
+    assert result["card_box"] == [30, 30, 70, 70]
+    assert recognizer.calls == 0
+    with Image.open(tmp_path / result["crop"]) as saved:
+        assert saved.size == (40, 40)
+
+
 # --- dictionary -------------------------------------------------------------
 
 def test_dictionary_filters_text_and_keeps_raw(workspace):

@@ -11,6 +11,7 @@ import math
 
 from PIL import Image
 
+from card_ocr.checkboxes import checkbox_pixel_box
 from template_builder.template_record import FieldSpec, TemplateRecord
 
 
@@ -39,12 +40,17 @@ def crop_template(card: Image.Image, record: TemplateRecord
 
     Each entry is ``(spec, crop, error)``: exactly one of crop/error is set, so
     one bad region never aborts the others. Field and checkbox regions are both
-    cropped; routing is the caller's job.
+    cropped; routing is the caller's job. Checkbox crops use the saved template
+    rectangle.
     """
     results = []
     for spec in record.fields:
         try:
-            results.append((spec, crop_region(card, spec.box), None))
+            if spec.is_checkbox:
+                crop = card.crop(checkbox_pixel_box(spec.box, card.size))
+            else:
+                crop = crop_region(card, spec.box)
+            results.append((spec, crop, None))
         except ValueError as exc:
             results.append((spec, None, str(exc)))
     return results
