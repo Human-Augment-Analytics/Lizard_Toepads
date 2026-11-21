@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from .config import PipelineConfig
 from .detector import WeightsLoadError
+from .evaluation import evaluate_command
 from .output import save_predictions
 from .recognizer import RecognizerUnavailable
 from .runner import run_pipeline
@@ -16,15 +19,39 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def run_command(args: argparse.Namespace, *, detector=None, recognizer=None) -> int:
-    """Run the pipeline, save predictions, and return 1 if anything failed."""
+    """Build a complete run, then replace the previous output directory."""
     config = PipelineConfig(
         weights=args.weights, template_path=args.template, data_dir=args.data_dir,
         output_dir=args.output, confidence=args.confidence, canvas_size=args.canvas_size,
         detect_size=args.detect_size, decode_size=args.decode_size,
         template_image=args.template_image, align=not args.no_align,
-        rules_path=args.rules, replace=args.replace)
-    payload = run_pipeline(config, detector=detector, recognizer=recognizer, scan_ids=args.ids)
-    save_predictions(payload, config.output_dir, replace=config.replace)
+        device=args.device, ocr_device=args.ocr_device,
+        rules_path=args.rules, replace=False)
+    output_dir = config.output_dir
+    if output_dir == output_dir.parent or output_dir.is_symlink():
+        raise ValueError(f"Output path must be a run directory: {output_dir}")
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError(f"Output path is not a directory: {output_dir}")
+    if output_dir.exists() and not (output_dir / "predictions.json").is_file():
+        raise FileExistsError(f"Output directory is not a previous pipeline run: {output_dir}")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{output_dir.name}-run-",
+                                     dir=output_dir.parent) as temporary:
+        temporary_dir = Path(temporary)
+        staged_dir = temporary_dir / "new"
+        staged_config = replace(config, output_dir=staged_dir)
+        payload = run_pipeline(staged_config, detector=detector,
+                               recognizer=recognizer, scan_ids=args.ids, limit=args.n)
+        save_predictions(payload, staged_dir)
+        previous_dir = temporary_dir / "previous"
+        if output_dir.exists():
+            output_dir.rename(previous_dir)
+        try:
+            staged_dir.rename(output_dir)
+        except OSError:
+            if previous_dir.exists():
+                previous_dir.rename(output_dir)
+            raise
     summary = payload["summary"]
     print(f"Processed {summary['scans']} scans: {summary['normalized']} normalized, "
           f"{summary['no_card']} without a card, {summary['degenerate_obb']} degenerate, "
@@ -49,8 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--template", type=Path, default=ROOT / "template/field_template.json")
     run.add_argument("--data-dir", type=Path, default=ROOT / "data")
     run.add_argument("--output", type=Path, default=ROOT / "results/pipeline/current")
-    run.add_argument("--ids", nargs="+", help="Scan IDs; numeric IDs accept omitted leading zeros")
+    selection = run.add_mutually_exclusive_group()
+    selection.add_argument("--ids", nargs="+", help="Scan IDs; numeric IDs accept omitted leading zeros")
+    selection.add_argument("--n", type=int, help="Process up to N scans in sorted scan ID order")
     run.add_argument("--confidence", type=float, default=0.25, help="Minimum detection confidence")
+    run.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto",
+                     help="YOLO device (default: auto)")
+    run.add_argument("--ocr-device", choices=("auto", "cpu", "gpu"), default="auto",
+                     help="PaddleOCR device (default: auto)")
     run.add_argument("--canvas-size", type=int, help="Override the template's canvas size, "
                      "e.g. 1024 for more pixels per field; boxes are fractions so they still align")
     run.add_argument("--detect-size", type=int, default=1280, help="Detector preview size")
@@ -60,7 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-align", action="store_true",
                      help="Skip form registration (180-degree flips will not be corrected)")
     run.add_argument("--rules", type=Path, help="Optional card_ocr extraction rules JSON")
-    run.add_argument("--replace", action="store_true", help="Overwrite existing predictions")
+    run.add_argument("--replace", action="store_true",
+                     help="Accepted for compatibility; reruns replace previous output automatically")
+    evaluate = sub.add_parser("evaluate", help="Score saved predictions against verified card labels")
+    evaluate.add_argument("--predictions", type=Path, required=True, help="Pipeline predictions.json")
+    evaluate.add_argument("--labels", type=Path, default=ROOT / "results/verified_labels.json",
+                          help="JSON of verified values by scan ID (default: results/verified_labels.json)")
     return parser
 
 
@@ -72,6 +110,8 @@ def main(argv=None, *, detector=None, recognizer=None) -> int:
     """
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "evaluate":
+            return evaluate_command(args.predictions, args.labels)
         return run_command(args, detector=detector, recognizer=recognizer)
     except (ValueError, OSError, KeyError, TypeError, WeightsLoadError,
             RecognizerUnavailable) as exc:

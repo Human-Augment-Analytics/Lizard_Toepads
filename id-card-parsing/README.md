@@ -366,10 +366,21 @@ Run it from `id-card-parsing/`:
 python -m card_pipeline run --weights models/yolo11m_obb/best.pt --canvas-size 1024
 ```
 
-Useful options: `--ids 2 3` (numeric IDs accept omitted leading zeros),
+The detector automatically uses CUDA, then Apple MPS, then CPU according to
+PyTorch availability. PaddleOCR independently uses a CUDA GPU when its Paddle
+runtime supports one, otherwise CPU. The command prints both selected devices.
+On macOS, PaddleOCR uses CPU. Use `--device cpu` or `--ocr-device cpu` to force
+CPU for either component; `--device cuda` / `--device mps` and
+`--ocr-device gpu` require the corresponding runtime to be available.
+
+Use `--n 10` to process up to the first 10 scans in sorted ID order, or
+`--ids 2 3` to choose specific scans (numeric IDs accept omitted leading zeros).
+Other options include
 `--confidence 0.25`, `--rules template/ocr_rules.json` for typed values,
-`--output results/pipeline/run1`, and `--replace` to overwrite earlier
-predictions. Template boxes are fractions, so `--canvas-size` can exceed the
+`--output results/pipeline/run1`. Rerunning into an existing pipeline output
+directory automatically replaces its predictions and scan crops after the new
+run has been saved; a setup failure leaves the previous run intact. Template
+boxes are fractions, so `--canvas-size` can exceed the
 template's canvas to give handwriting more pixels; 1024 is a good default.
 
 Dictionaries: a field's `dictionary` is `numeric`, `alphanumeric`, `alpha`,
@@ -395,3 +406,36 @@ The saved checkbox crops and overlays show this complete detection area. The
 PaddleOCR must be installed in the environment you run from
 (`requirements.txt`); without it the command stops before processing with an
 install hint.
+
+### Evaluate extracted fields
+
+Keep one `results/verified_labels.json` file with values you verified against
+the original scans. Add each reviewed card under its exact scan ID and use the
+field names from the run. These values are examples:
+
+```json
+{
+  "0001": {"day": "12", "cb_f": true, "cb_m": false, "time": null}
+}
+```
+
+Use strings for OCR text, including `""` for a confirmed blank. Use JSON
+booleans for checkboxes. Omit unreviewed fields or set them to `null` to skip
+them. With `--rules`, a numeric output can match an equivalent string label
+such as `"12"`. An explicit `null` output from the rules matches a confirmed
+blank when the field was processed successfully.
+
+```bash
+python -m card_pipeline evaluate \
+  --predictions results/pipeline/current/predictions.json > results/evaluation.json
+```
+
+Use `--labels PATH` to read a different labels file.
+
+The report gives match accuracy overall for text and checkboxes and for
+each field, checkbox confusion counts, and a list of mismatches and unavailable
+results. Failed and missing scans and uncertain checkboxes count against
+accuracy for every affected labeled value. Uncertain checkboxes are reported
+separately from the confusion counts for definite decisions. Accuracy is a
+fraction from 0 to 1, or `null` when there are no labels for that group. A card
+counts as correct when all its verified fields match.
