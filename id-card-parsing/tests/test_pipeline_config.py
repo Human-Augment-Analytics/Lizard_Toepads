@@ -16,7 +16,8 @@ def test_defaults_and_path_coercion():
     config = _config()
     assert config.confidence == 0.25
     assert config.canvas_size is None
-    assert config.device == "cpu"
+    assert config.device == "auto"
+    assert config.ocr_device == "auto"
     assert config.replace is False
     assert isinstance(config.weights, Path)
     assert isinstance(config.output_dir, Path)
@@ -28,9 +29,21 @@ def test_confidence_must_be_in_unit_interval(value):
         _config(confidence=value)
 
 
-def test_device_must_be_cpu():
+@pytest.mark.parametrize("device", ["auto", "cpu", "cuda", "mps"])
+def test_detector_device_choices(device):
+    assert _config(device=device).device == device
+
+
+@pytest.mark.parametrize("device", ["auto", "cpu", "gpu"])
+def test_ocr_device_choices(device):
+    assert _config(ocr_device=device).ocr_device == device
+
+
+def test_bad_device_choices_rejected():
     with pytest.raises(ValueError):
-        _config(device="cuda")
+        _config(device="gpu")
+    with pytest.raises(ValueError):
+        _config(ocr_device="mps")
 
 
 @pytest.mark.parametrize("value", [0, 1, -5])

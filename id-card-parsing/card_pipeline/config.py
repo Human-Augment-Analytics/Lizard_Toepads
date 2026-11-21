@@ -24,7 +24,8 @@ class PipelineConfig:
     decode_size: int = 4096
     template_image: Path | None = None   # blank card crop used to register scans
     align: bool = True                   # resolve 180-degree flips and fine-align
-    device: str = "cpu"
+    device: str = "auto"          # YOLO: CUDA, MPS, then CPU
+    ocr_device: str = "auto"      # PaddleOCR: CUDA, then CPU
     rules_path: Path | None = None
     replace: bool = False
 
@@ -39,8 +40,10 @@ class PipelineConfig:
                              "pass one or disable alignment")
         if not 0 <= self.confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
-        if self.device != "cpu":
-            raise ValueError("this pipeline runs on CPU; choose cpu")
+        if self.device not in {"auto", "cpu", "cuda", "mps"}:
+            raise ValueError("detector device must be auto, cpu, cuda, or mps")
+        if self.ocr_device not in {"auto", "cpu", "gpu"}:
+            raise ValueError("OCR device must be auto, cpu, or gpu")
         if self.canvas_size is not None and (
                 not isinstance(self.canvas_size, int) or self.canvas_size < 2):
             raise ValueError("canvas_size must be an integer >= 2 or None")

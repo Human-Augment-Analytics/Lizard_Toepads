@@ -20,6 +20,23 @@ class WeightsLoadError(RuntimeError):
     """Raised when detector weights are missing or cannot be loaded."""
 
 
+def resolve_detector_device(requested: str = "auto") -> str:
+    """Use CUDA or Apple MPS when PyTorch can use it, otherwise CPU."""
+    if requested == "cpu":
+        return "cpu"
+    import torch
+
+    cuda_available = torch.cuda.is_available()
+    mps_available = torch.backends.mps.is_available()
+    if requested == "auto":
+        return "cuda:0" if cuda_available else "mps" if mps_available else "cpu"
+    if requested == "cuda" and cuda_available:
+        return "cuda:0"
+    if requested == "mps" and mps_available:
+        return "mps"
+    raise ValueError(f"Requested detector device {requested!r} is not available")
+
+
 @dataclass(frozen=True)
 class Detection:
     """One card detection: raw-order corners in scan pixels, score, and area."""
@@ -64,9 +81,9 @@ def select_best(detections: list[Detection], confidence: float) -> Detection | N
 
 
 class YoloObbDetector:
-    """Run a trained Ultralytics YOLO-OBB model on CPU."""
+    """Run a trained Ultralytics YOLO-OBB model on the selected device."""
 
-    def __init__(self, weights: Path, *, device: str = "cpu", imgsz: int | None = None,
+    def __init__(self, weights: Path, *, device: str = "auto", imgsz: int | None = None,
                  confidence: float = 0.05):
         weights = Path(weights)
         if not weights.is_file():
@@ -76,7 +93,7 @@ class YoloObbDetector:
             self._model = YOLO(str(weights))
         except Exception as exc:
             raise WeightsLoadError(f"Could not load detector weights {weights}: {exc}") from exc
-        self.device, self.imgsz, self._floor = device, imgsz, confidence
+        self.device, self.imgsz, self._floor = resolve_detector_device(device), imgsz, confidence
 
     def detect(self, image: Image.Image) -> list[Detection]:
         """Return every detection above a low floor; callers apply their threshold."""

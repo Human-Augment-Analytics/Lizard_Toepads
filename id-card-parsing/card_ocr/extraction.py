@@ -22,11 +22,16 @@ def load_rules(path: Path = DEFAULT_RULES) -> dict:
     for field, rule in fields.items():
         if not re.fullmatch(r"[a-z][a-z0-9_]*", field) or not isinstance(rule, dict):
             raise ValueError(f"Invalid extraction field: {field}")
-        if set(rule) - {"type", "pattern", "min", "max", "case", "input_formats", "format", "remove_characters", "retry_decimal_aliases"}:
+        if set(rule) - {"type", "pattern", "min", "max", "case", "input_formats", "format",
+                        "remove_characters", "retry_decimal_aliases", "leading_o_as_zero"}:
             raise ValueError(f"Unknown extraction setting for {field}")
         if (not isinstance(rule.get("type"), str)
                 or rule["type"] not in {"integer", "number", "time", "text"}):
             raise ValueError(f"Unknown extraction type for {field}")
+        if "leading_o_as_zero" in rule and (
+            type(rule["leading_o_as_zero"]) is not bool or rule["type"] != "integer"
+        ):
+            raise ValueError(f"leading_o_as_zero must be a boolean on an integer field: {field}")
         if not isinstance(rule.get("pattern"), str) or not rule["pattern"]:
             raise ValueError(f"A nonempty pattern is required for {field}")
         try:
@@ -78,6 +83,8 @@ def extract_value(text: str, rule: dict | None):
         return None
     if rule is None:
         return text
+    if rule.get("leading_o_as_zero") and re.fullmatch(r"[Oo][0-9]", text):
+        text = "0" + text[1:]
     matches = list(re.finditer(rule["pattern"], text, re.DOTALL))
     if len(matches) != 1:
         return None

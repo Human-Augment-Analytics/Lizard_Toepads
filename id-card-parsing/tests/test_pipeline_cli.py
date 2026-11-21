@@ -38,6 +38,8 @@ def test_run_writes_predictions_and_reports_summary(tmp_path, capsys):
         row = next(csv.DictReader(handle))
     assert row["scan_id"] == "0001" and row["day"] == "red"
     output = capsys.readouterr().out
+    assert output.splitlines()[0].startswith("Devices: YOLO")
+    assert output.splitlines()[1].startswith("[1/1]")
     assert "1 scans" in output and "Saved predictions" in output
 
 
@@ -60,6 +62,15 @@ def test_canvas_size_and_ids_flags_are_honored(tmp_path):
     assert [s["scan_id"] for s in payload["scans"]] == ["0001"]     # "1" zero-filled
 
 
+def test_n_limits_run_to_first_sorted_scan(tmp_path):
+    data, _template_path, detection = _setup(tmp_path)
+    _write_scan(data / "0002.jpg")
+    assert main(_argv(tmp_path, "--n", "1"), detector=FakeDetector([detection]),
+                recognizer=FakeRecognizer()) == 0
+    payload = json.loads((tmp_path / "out" / "predictions.json").read_text("utf-8"))
+    assert [scan["scan_id"] for scan in payload["scans"]] == ["0001"]
+
+
 def test_setup_errors_exit_one_with_message(tmp_path, capsys):
     _setup(tmp_path)
     code = main(_argv(tmp_path), recognizer=FakeRecognizer())     # weights file absent
@@ -67,11 +78,22 @@ def test_setup_errors_exit_one_with_message(tmp_path, capsys):
     assert "Error:" in capsys.readouterr().err
 
 
-def test_existing_predictions_require_replace(tmp_path, capsys):
+def test_rerun_replaces_old_outputs_without_flag(tmp_path):
     _data, _t, detection = _setup(tmp_path)
     assert main(_argv(tmp_path), detector=FakeDetector([detection]),
                 recognizer=FakeRecognizer()) == 0
-    again = main(_argv(tmp_path), detector=FakeDetector([detection]), recognizer=FakeRecognizer())
-    assert again == 1 and "--replace" in capsys.readouterr().err
-    assert main(_argv(tmp_path, "--replace"), detector=FakeDetector([detection]),
+    old_crop = tmp_path / "out" / "scans" / "0001" / "crops" / "stale.png"
+    old_crop.write_bytes(b"old")
+    assert main(_argv(tmp_path), detector=FakeDetector([detection]),
                 recognizer=FakeRecognizer()) == 0
+    assert not old_crop.exists()
+    assert (tmp_path / "out" / "predictions.json").is_file()
+
+
+def test_setup_failure_preserves_previous_run(tmp_path):
+    _data, _t, detection = _setup(tmp_path)
+    assert main(_argv(tmp_path), detector=FakeDetector([detection]),
+                recognizer=FakeRecognizer()) == 0
+    previous = (tmp_path / "out" / "predictions.json").read_bytes()
+    assert main(_argv(tmp_path), recognizer=FakeRecognizer()) == 1
+    assert (tmp_path / "out" / "predictions.json").read_bytes() == previous

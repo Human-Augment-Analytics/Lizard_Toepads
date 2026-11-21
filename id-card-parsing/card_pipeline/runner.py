@@ -189,6 +189,7 @@ def _summary(scans: list[dict]) -> dict:
 def run_pipeline(config: PipelineConfig, *, detector: Detector | None = None,
                  recognizer: FieldRecognizer | None = None, aligner=None,
                  scan_ids: list[str] | None = None,
+                 limit: int | None = None,
                  log=lambda message: print(message, flush=True)) -> dict:
     """Process scans and return the predictions payload (see ``output.save_predictions``).
 
@@ -201,7 +202,10 @@ def run_pipeline(config: PipelineConfig, *, detector: Detector | None = None,
     rules = load_rules(config.rules_path) if config.rules_path else None
     output_dir = config.output_dir
     ensure_writable(output_dir, replace=config.replace)
-    ids = select_images(config.data_dir, ids=scan_ids, count=10**9, require_count=False)
+    if scan_ids is not None and limit is not None:
+        raise ValueError("Choose either explicit scan IDs or a scan limit")
+    count = limit if limit is not None else 10**9
+    ids = select_images(config.data_dir, ids=scan_ids, count=count, require_count=False)
     paths = _scan_paths(config.data_dir)
     size = config.canvas_size or record.canvas_size
     if not config.align:
@@ -213,7 +217,10 @@ def run_pipeline(config: PipelineConfig, *, detector: Detector | None = None,
     if detector is None:
         detector = YoloObbDetector(config.weights, device=config.device)
     if recognizer is None:
-        recognizer = PaddleFieldRecognizer()
+        recognizer = PaddleFieldRecognizer(device=config.ocr_device)
+    detector_device = getattr(detector, "device", "injected")
+    ocr_device = getattr(recognizer, "device", "injected")
+    log(f"Devices: YOLO {detector_device}, PaddleOCR {ocr_device}")
 
     scans = []
     for index, scan_id in enumerate(ids, 1):
@@ -231,6 +238,8 @@ def run_pipeline(config: PipelineConfig, *, detector: Detector | None = None,
         "canvas_size": size,
         "aligned": aligner is not None,
         "model_id": getattr(recognizer, "model_id", None),
+        "detector_device": detector_device,
+        "ocr_device": ocr_device,
         "confidence": config.confidence,
         "fields": [spec.name for spec in record.fields],
         "extra_columns": extra,

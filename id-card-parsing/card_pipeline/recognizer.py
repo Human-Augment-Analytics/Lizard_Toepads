@@ -1,4 +1,4 @@
-"""Single-crop text recognition over the existing CPU PaddleOCR wrapper."""
+"""Single-crop text recognition over the PaddleOCR wrapper."""
 
 from __future__ import annotations
 
@@ -26,17 +26,22 @@ class PaddleFieldRecognizer:
     this); otherwise the real PaddleOCR recognizer is created lazily.
     """
 
-    def __init__(self, *, adapter=None, cache: Path | None = None, model_id: str | None = None):
+    def __init__(self, *, adapter=None, cache: Path | None = None,
+                 model_id: str | None = None, device: str = "auto"):
         if adapter is None:
             from card_ocr.models import DEFAULT_CACHE, create_model
             try:
                 adapter = create_model("paddle", cache=cache or DEFAULT_CACHE,
-                                       device="cpu", model_id=model_id)
+                                       device=device, model_id=model_id)
             except ImportError as exc:
                 raise RecognizerUnavailable(
                     f"PaddleOCR is not installed in this environment ({exc}); install "
                     "id-card-parsing/requirements.txt into the environment you run from") from exc
         self._adapter = adapter
+
+    @property
+    def device(self) -> str | None:
+        return getattr(self._adapter, "device", None)
 
     @property
     def model_id(self) -> str | None:

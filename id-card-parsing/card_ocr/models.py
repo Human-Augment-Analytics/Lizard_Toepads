@@ -1,4 +1,4 @@
-"""Recognize aligned handwriting crops with PaddleOCR on CPU."""
+"""Recognize aligned handwriting crops with PaddleOCR."""
 from __future__ import annotations
 
 import os
@@ -19,20 +19,34 @@ class Prediction:
     text: str
 
 
+def resolve_ocr_device(requested: str = 'auto') -> str:
+    """Use a CUDA GPU when the installed Paddle runtime supports one."""
+    if requested == 'cpu':
+        return 'cpu'
+    import paddle
+
+    gpu_available = (paddle.is_compiled_with_cuda()
+                     and paddle.device.cuda.device_count() > 0)
+    if requested == 'auto':
+        return 'gpu:0' if gpu_available else 'cpu'
+    if requested == 'gpu' and gpu_available:
+        return 'gpu:0'
+    raise ValueError(f'Requested OCR device {requested!r} is not available')
+
+
 class Paddle:
-    """Run the English PP-OCRv5 recognizer on known field crops using CPU."""
+    """Run the English PP-OCRv5 recognizer on known field crops."""
 
     def __init__(self, cache: Path, *, model_id=None, device='cpu'):
-        """Load a CPU recognizer with checkpoint files stored in the supplied cache."""
-        if device != 'cpu':
-            raise ValueError('PaddleOCR in this workflow uses CPU; choose cpu')
+        """Load a recognizer with checkpoint files stored in the supplied cache."""
+        self.device = resolve_ocr_device(device)
         cache = Path(cache)
         cache.mkdir(parents=True, exist_ok=True)
         os.environ['PADDLE_PDX_CACHE_HOME'] = str(cache / 'paddlex')
         os.environ.setdefault('PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK', 'True')
         from paddleocr import TextRecognition
         self.model_id = model_id or MODEL_ID
-        self.model = TextRecognition(model_name=self.model_id, device='cpu')
+        self.model = TextRecognition(model_name=self.model_id, device=self.device)
 
     def recognize_batch(self, images: list[Image.Image]) -> list[Prediction]:
         """Convert RGB crops to Paddle's BGR input and return unchanged text."""
